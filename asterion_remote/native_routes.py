@@ -83,3 +83,16 @@ def phone_continuation_queue(data:ContinuationRequest):
 @router.post('/phone/continuation/dispatch')
 def phone_continuation_dispatch():
     return request('/continuation/dispatch','POST',{},timeout=15.0).json()
+
+@router.get('/phone/observation/status')
+def phone_observation_status():
+    return request('/observation/status').json()
+
+@router.get('/phone/observation/events')
+def phone_observation_events():
+    return request('/observation/events').json()
+
+@router.get('/phone/observation/frame')
+def phone_observation_frame():
+    return Response(request('/observation/frame').content,media_type='image/jpeg',
+                    headers={'Cache-Control':'no-store'})
