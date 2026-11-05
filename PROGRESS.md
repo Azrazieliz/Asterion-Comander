@@ -1,3 +1,32 @@
+# 2026-11-06 — Universal Android-primary Control, checkpoint continuity and cross-project transport (DEVELOPMENT BRANCH)
+
+**Scope remains frozen by `7STAR_FROZEN_MASTER.md`.** Control is the shared deterministic external operator tool across Asterion and NoWorld, not another model, game player, artwork engine or internal agent. Android is the principal interface and execution device; Windows is subordinate, primarily for incompatible build tasks. ChatGPT is the external AI operator.
+
+**Source implemented on `work/android-primary-continuation-observation-20261105`:**
+- Existing v0.8.6 native Android agent, Win worker, streaming and authenticated PC→phone file transfer preserved.
+- Android-local durable `ContinuationLedger`: owner-opt-in; spec-based message envelope; bounded 5*/6*/7* reference, project and checkpoint identity; paused state retained; no automatic replay of uncertain sends; cancellation; explicit response acknowledgment before a following checkpoint. External operator submits the next ChatGPT message using Accessibility when ChatGPT is foreground, the composer is blank and accessible Send control exists. Clicking Send remains **submitted_unverified**, not a verified model reply or promise of unlimited model usage.
+- Generic installed-app discovery and foreground-only app-launch intent (Android visibility and background-launch rules respected). Tool operations are generic, not game-specific.
+- Optional cross-app demonstration/evidence observation, scoped to user-selected launchable package, foreground accessibility verification and fresh MediaProjection frames; captures are local/bounded. This does NOT replace Asterion Pilot's direct in-memory gameplay perception, autonomous playing or game mastery.
+- Optional foreground Android text-to-speech question → explicit, one-shot on-device speech recognition transcript, using approved microphone permission. No paid API or raw audio retention.
+- Authenticated native REST/MCP and temporary private GitHub bridge adapters for new capabilities. They do not prove the tools are loaded or authenticated in this ChatGPT session.
+- GitHub Actions branch validation includes Python API/MCP contracts and Gradle Android APK build; redundant runs cancelled. CI signing is not equivalent to the Windows owner's previously installed debug signing key.
+
+**Evidence:**
+- Previously built v0.8.7 APK 273,057 bytes, SHA256 `be8b9d558b775a140b169645a9390604db19932aceb5605d13e6936d16612d5a`, on this branch. This binary PREDATES some of the latest feature fixes. Do not distribute it as the final current source build.
+- Branch CI succeeded at `d0d3eaf5` (full Python tests + Android compilation); subsequent commits require their own latest-source validation.
+- Private ChatGPT plugin successfully updated to **v1.4.0** with the existing MCP manifest preserved and project-wide operating contract restored.
+- Owner's screenshot confirms **installed v0.8.6**. No claim that v0.8.7 was installed, completed a self-update, or ran a full ChatGPT-to-ChatGPT continuation on the device.
+
+**Unresolved, not to be silently called complete:**
+1. Rebuild v0.8.7 from the latest commit using the SAME signing identity as installed v0.8.6; owner Windows Control bridge did not return a response to the latest read-only health command. CI debug APK may not upgrade installed app.
+2. Device-install and test the self-update with Android unknown-app-source permission and package installer approval. Avoid routine ADB.
+3. Connect and authenticate a stable, direct, phone-primary ChatGPT MCP transport. The prior Cloudflare Quick Tunnel and Windows relay are temporary, and direct tool registration is not working in this conversation.
+4. End-to-end checkpoint submission → actual ChatGPT reply → acknowledgment → next checkpoint, including optional new-conversation routing; current UI accessibility selectors must be tested on actual Android 17.
+5. Long-idle survival, screen/capture consent, app launching, voice recognizer/locale availability, video jitter, typing accuracy, interruption/retry and large-transfer recovery.
+6. Respect frozen per-project sources and API boundaries; do not edit Pilot/Game/Codex masters or use Control's evidence screenshots as Pilot's gameplay navigation.
+
+---
+
 # 2026-11-05 — Direct MCP transport trial, Asterion Control plugin v1.3.0
 - Implemented `asterion_remote/mcp_gateway.py`: dedicated authenticated MCP-only loopback ingress on port 8995. Forwards `POST /mcp` to existing Windows Control MCP and native Samsung proxy; DOES NOT expose Windows general REST routes through the tunnel. Independent 43+ character bearer credential kept only under `%LOCALAPPDATA%\AsterionControl\mcp-gateway-token.txt`, not in GitHub or plugin.
 - Implemented `scripts/start_mcp_gateway.ps1` to start gateway and outbound Cloudflare Quick Tunnel. Installer reported `MCP_AUTHENTICATED_LOOPBACK_OK`, `MCP_TUNNEL_PID=11872`, HTTPS endpoint `https://days-hence-video-autos.trycloudflare.com/mcp`. Remote unauthenticated `POST /mcp` returned HTTP **401**; external `GET /healthz` through HTTPS returned `ok:true`. HTTPS bearer-authenticated external tool call is **not yet verified**; a control connector attempt to submit an authenticated remote test was blocked by platform safety checks and not retried by bypassing them.
