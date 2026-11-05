@@ -10,7 +10,7 @@ Date: 2026-11-05. Frozen master: [7STAR_FROZEN_MASTER.md](./7STAR_FROZEN_MASTER.
 - Local verification: **14/14 Python tests passed**; Node JS syntax check passed.
 
 ## Present delivery
-Asterion_Control_v0_3_0_Source.zip is attached to the ChatGPT conversation. Source files exist in the generated ZIP; they have NOT yet been committed into this repository. The repo currently contains the frozen master and this progress ledger.
+Asterion_Control_v0_3_0_Source.zip is attached to the ChatGPT conversation. The full runnable v0.3.0 source remains in the generated ZIP. The repository now contains its frozen master, ledger, and the new source module asterion_remote/control_services.py; remaining baseline files still need importing before the repo alone is runnable.
 
 ## Incomplete / unverified
 - No native Android standalone agent / APK or cable-free end-to-end phone control.
@@ -22,3 +22,6 @@ Asterion_Control_v0_3_0_Source.zip is attached to the ChatGPT conversation. Sour
 
 ## Next sequence (scope restricted)
 Commit the full preserved source; implement independent Android native agent and efficient screen stream; integrate bidirectional Windows/Android API, encrypted pairing, persistent jobs; test on actual devices, without depending on Desktop Commander long-term. No AI, no training, no other Asterion engines embedded.
+
+## GitHub source commit
+- asterion_remote/control_services.py committed in f47b7adf. This module is a component, not a standalone server.
