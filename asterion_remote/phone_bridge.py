@@ -54,7 +54,7 @@ def load() -> dict | None:
         except (ValueError, OSError, KeyError, HTTPException): return None
 
 def request(path: str, method: str='GET', payload: dict | None=None, timeout: float=5.0) -> httpx.Response:
-    if path not in {'/health', '/ui', '/input', '/screen', '/continuation/status', '/continuation/queue', '/continuation/dispatch', '/observation/status', '/observation/events', '/observation/frame'}:
+    if path not in {'/health', '/ui', '/input', '/screen', '/continuation/status', '/continuation/queue', '/continuation/dispatch', '/observation/status', '/observation/events', '/observation/frame', '/voice/status', '/voice/question'}:
         raise HTTPException(400, 'Unsupported phone API call')
     p=load()
     if not p: raise HTTPException(503, 'Phone agent not registered')
