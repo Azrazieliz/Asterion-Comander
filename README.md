@@ -1,98 +1,48 @@
-# Asterion Control 0.3.0 (baseline retained from Remote v0.2.0)
+# ASTERION CONTROL · Android-first remote control
 
-**Standalone, self-hosted desktop and Android remote control.** No Desktop Commander package, account, server, or subscription is involved. The source is included; the frontend is an installable web app. The Windows computer runs the agent, and phones can operate it from a private network connection. Android device commands are sent over an *authorized* local or wireless ADB connection.
+**Build:** v0.8.1 native Android beta + Windows companion. **Project scope:** [7* frozen master](7STAR_FROZEN_MASTER.md).
 
-## Windows — fastest startup
+Android is the primary user interface. Windows executes desktop jobs and supplies the remote screen, file, process and health APIs. Control contains **no AI**. Script execution, terminal and logcat are hidden internal tools for ChatGPT, not normal end-user navigation.
 
-1. Extract the ZIP on the Windows computer.
-2. Install [Python 3.11+](https://www.python.org/) with PATH enabled if needed, then double-click `START_ASTERION_CONTROL.bat`.
-3. The launcher installs Python packages, creates a strong random API token in your Windows user profile (once), prints it in the terminal, and starts the API at `http://127.0.0.1:8911/`.
-4. Open the URL, paste the token, click **Connect**. The server is deliberately bound to the PC's loopback interface by default.
+## Installable downloads
 
-If you use a virtual environment manually:
+- **Android:** [Asterion-Control-v0.8.1-debug.apk](dist/Asterion-Control-v0.8.1-debug.apk) — native Samsung Android APK; compiled on the development PC. See [SHA-256](dist/SHA256SUMS-v0.8.1.txt).
+- **Windows:** [Asterion-Control-Windows-v0.8.1.zip](dist/Asterion-Control-Windows-v0.8.1.zip) — Windows API, service launcher, autostart installation and firewall setup.
+- **Evidence:** [PROGRESS.md](PROGRESS.md). Compilation and backend tests **do not** constitute independent remote-control acceptance.
 
-```powershell
-py -3 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-$env:ASTERION_API_TOKEN = (& .\.venv\Scripts\python.exe -c 'import secrets; print(secrets.token_urlsafe(40))')
-$env:ASTERION_REMOTE_ROOT = $HOME
-$env:ASTERION_ALLOW_SHELL = '1'
-$env:ASTERION_ALLOW_ANDROID_SHELL = '1'
-.\.venv\Scripts\python.exe -m uvicorn asterion_remote.app:app --host 127.0.0.1 --port 8911
-```
+## Initial connection (no ADB)
 
-**Files:** `ASTERION_REMOTE_ROOT` defines the default file-tree root. For additional authorized drives use `ASTERION_ALLOWED_ROOTS` separated by your OS path separator (for example `D:\;E:\` on Windows). Shell commands can access whatever the PC user account is permitted to access. To browse an entire drive, set `ASTERION_REMOTE_ROOT` to its root (for example `C:\`). Do not run the server as administrator unless a specific task requires elevated access.
+1. On Windows, extract the Windows ZIP and run **INSTALL_ASTERION_CONTROL.bat**; approve the Windows private-network firewall dialog once. The Windows agent runs under your login and is configured to restart at next Windows login.
+2. On Android, install the APK (existing older debug-signed builds signed by the same Windows key should update normally), launch Control, and tap **Find my Windows computer**. Both devices must initially be on the same Wi-Fi or a trusted private VPN. If UDP discovery is blocked, Control scans its local subnet for the Control TCP endpoint; no IP entry is normally necessary.
+3. Enter the **8-digit one-time pairing code** shown by the Windows agent. The code expires after ten minutes. Control retains its device-specific key internally for reconnections. Never paste permanent access tokens into the UI.
+4. To enable independent Android control, use **Enable phone access** and grant Accessibility, notification, and MediaProjection screen-sharing permissions when Android requests them. Screen sharing is an ongoing approved session; the OS may require renewed approval after service restart.
+5. Open **Screen** to operate the Windows desktop. Health reports OS-exposed sensors. Advanced remote commands, logcat and saved scripts remain available only through authorized internal APIs.
 
-## Android control
+**The Android build does not require USB or ADB for runtime communication.** You cannot silently install an APK or approve sensitive Android permissions remotely until that device has an already authorized, working control channel. The app does not override Android's secure-window rules.
 
-1. Install the official [Android SDK Platform-Tools](https://developer.android.com/tools/releases/platform-tools) on your PC so `adb` is available in PATH. Set `ASTERION_ADB` to the full path of `adb.exe` if needed.
-2. On your own phone, enable **Developer options → Wireless debugging**, use **Pair device with pairing code**, and enter the IP:pairing-port and code using **Pair Wi-Fi** in the Android tab. Connect to the *separate* IP:debugging-port with **Connect Wi-Fi**. Alternatively, connect via USB and authorize the PC's ADB key on the phone.
-3. Press **Find devices**, select the authorized phone. Screen capture, tapping, swiping, back/home/recent apps, launching packages, UI hierarchy, file transfer and ADB shell are now available. The **Android shell** toggle uses `ASTERION_ALLOW_ANDROID_SHELL=1`.
+## Host API and operational limits
 
-No root or paid Android mirroring subscription is required. Android input text through ADB currently supports ASCII; extended Unicode input needs an IME or clipboard bridge. DRM-protected or system-secure windows may show as blank in screenshots. Wireless ADB depends on Android's debugging pairing and can disconnect when its settings change.
+The Windows agent exposes authenticated HTTP REST and MCP endpoints on TCP port 8911; LAN discovery uses UDP 8912 with TCP discovery fallback. These are for an authorized **private** network only. **Do not port-forward HTTP 8911 onto the public internet.** Use a VPN or a protected HTTPS tunnel for cross-network access. Persistent end-to-end internet relay and automatic VPN enrollment have not yet been implemented.
 
-## Control from phone and other computers
+Native Android support: a foreground phone agent with token authorization, Accessibility-driven input/gesture dispatch, MediaProjection snapshots and continuous session capture, and device health.
 
-The server starts on `127.0.0.1` to avoid accidentally exposing complete control of your devices. To use the web UI remotely, connect the PC and phone through an encrypted VPN/tunnel such as a self-hosted WireGuard server or a private Tailscale network, and publish the localhost service through that secure tunnel with HTTPS. **Do not port-forward HTTP port 8911 publicly.** Once reached over HTTPS, use the browser's **Add to Home Screen / Install App** option on Android.
+Native PC support: image/video frame delivery, UI input, file operations, process/command operations, parameterized saved scripts, and resource monitoring.
 
-**Important:** the current Android-control implementation requires the Windows agent to be running, paired with the phone over ADB, and reachable from your client. It is not yet an independent, native Android background service. Desktop and phone screens are captured as periodic images, not as low-latency video streams.
+The Android app is the user-facing head; the Windows agent is a remote executor. No other Asterion application engine has been copied into Control.
 
-## Use from ChatGPT / other MCP clients
+## ChatGPT connection
 
-Authenticated MCP-compatible Streamable HTTP is available on the same service:
+Control exposes an MCP server and native-phone tools, but **an MCP endpoint does not automatically register a ChatGPT plugin**. The account/workspace must support creation of custom MCP connections, and a publicly reachable HTTPS or Secure MCP Tunnel endpoint must be authorized through ChatGPT Plugins. A local 192.168.x.x URL is not directly reachable by ChatGPT cloud tools.
 
-`https://your-secure-endpoint.example/mcp`
+Current OpenAI documentation limits full custom MCP write access primarily to ChatGPT Business and Enterprise/Edu customers. On other plans, use the phone's own interface and a separately supported external workflow; **do not mistake the existing GitHub or Desktop Commander connector for a Control connection**.
 
-The MCP endpoint requires the same `Authorization: Bearer <API token>` as REST, plus `Accept: application/json, text/event-stream`. The connection must be explicitly added to a compatible client; **making the endpoint does not automatically give this chat access to it.** ChatGPT availability for custom MCP connections and full read/write tool support depends on your ChatGPT account/workspace. You can also use a **Secure MCP Tunnel** where supported instead of exposing a public endpoint. See [OpenAI custom MCP setup](https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt).
+## Acceptance contract
 
-Local MCP stdio also works without any cloud or MCP SDK dependencies:
+Only report **operational** when, with USB unplugged and Desktop Commander unavailable, the same authorized Control channel is demonstrated to:
+- view and send mouse/keyboard actions to the Windows desktop;
+- view and send accessibility gestures to the Samsung device;
+- retrieve PC/phone health and job status;
+- reconnect after Wi-Fi disruption; and
+- allow ChatGPT to invoke the Control API through an actually connected tool, not through a simulated test.
 
-```powershell
-# Start the MCP stdio bridge from the project root with ASTERION_API_TOKEN configured
-.\.venv\Scripts\python.exe -m asterion_remote.mcp_protocol
-```
-
-The bridge exposes desktop screenshots, input, terminal, files, system and process lists, Android screenshots, input, ADB shell, packages and Wi-Fi pairing. Tools that modify the PC or Android device require the agent to permit the operation. Access must be limited to devices you own or are authorized to manage.
-
-## REST endpoints (selected)
-
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/api/v1/health` | Host and capabilities |
-| GET | `/api/v1/system`, `/api/v1/processes` | Host diagnostics and processes |
-| GET | `/api/v1/monitors`, `/api/v1/screen` | Monitor layout and PC screenshot |
-| POST | `/api/v1/input` | PC mouse, keyboard, drag, scroll |
-| GET/PUT/POST/DELETE | `/api/v1/files` and `/api/v1/files/*` | List, read, write, search, upload, download, move, delete |
-| POST/GET | `/api/v1/commands`, `/api/v1/commands/{id}` | PC terminal jobs and output |
-| GET | `/api/v1/android/devices` | Paired ADB devices |
-| POST | `/api/v1/android/pair`, `/api/v1/android/connect` | Pair and connect wireless debugging |
-| GET | `/api/v1/android/{serial}/screen` | Android screenshot |
-| POST | `/api/v1/android/{serial}/input` | Android tap, swipe, key, type |
-| GET | `/api/v1/android/{serial}/ui` | Android UI hierarchy |
-| POST | `/api/v1/android/{serial}/shell` | Authorized Android shell |
-| POST | `/api/v1/android/{serial}/push`, `/pull`, `/install` | Android file transfer and APK install |
-| POST | `/mcp` | Authenticated MCP JSON-RPC |
-
-Swagger REST reference is at `/docs`.
-
-## Security defaults
-
-- API and MCP commands require a 32+ character bearer token and run **only** with the permissions of the logged-in OS user.
-- Origin headers for MCP are rejected unless explicitly listed in `ASTERION_ALLOWED_ORIGINS` (comma-separated HTTPS origins); clients without an Origin header may connect if authenticated.
-- Only paths inside `ASTERION_REMOTE_ROOT` or the explicitly listed `ASTERION_ALLOWED_ROOTS` are available through the file API. Remote terminal commands are disabled unless `ASTERION_ALLOW_SHELL=1`, and Android shell is disabled unless `ASTERION_ALLOW_ANDROID_SHELL=1`.
-- Files transferred by upload stream directly to disk; use `ASTERION_UPLOAD_LIMIT_BYTES` to enforce an optional cap (0 = unrestricted).
-- The browser retains the token only in the current page's memory. Closing or refreshing it disconnects the UI; the launcher keeps the secret privately in the Windows user profile.
-- Windows lock screen, secure attention (Ctrl+Alt+Del), UAC prompts on the secure desktop, Android secure windows, and device permission prompts cannot be bypassed by ordinary desktop input/ADB.
-
-## Verification performed
-
-- FastAPI test suite: authentication, file CRUD, upload, restricted path resolution, MCP method handling, system/process APIs, mocked Android ADB commands and text validation.
-- JavaScript syntax checked; responsive desktop/mobile layout loaded in headless Chromium with no runtime errors or horizontal overflow.
-- **Not tested on your actual Windows PC or Android phone:** the remote Windows device was offline when this version was created; no native Windows or Android binaries were compiled in the current build environment.
-
-## Current limitations / roadmap
-
-This is a **working source-level beta**, not a fully installed system. It does not yet have a native Windows installer, standalone Android Accessibility/MediaProjection agent, full-motion low-latency remote video, automatic HTTPS provisioning, unattended background service, complete PDF/document support, or end-to-end device testing. Those tasks require the authorized target devices and their native build environments. ADB-based phone control works through the Windows PC, including wireless ADB pairing.
-
-
-> v0.3 changes are documented in [README_CONTROL_ADDENDUM.md](README_CONTROL_ADDENDUM.md), with honest status in [PROGRESS.md](PROGRESS.md). The earlier baseline descriptions remain as evidence of inherited limitations.
+**Currently:** Backend and Android compilation tests are verified; independent end-to-end device acceptance is still pending. See [PROGRESS.md](PROGRESS.md).
