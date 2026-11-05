@@ -96,3 +96,15 @@ def phone_observation_events():
 def phone_observation_frame():
     return Response(request('/observation/frame').content,media_type='image/jpeg',
                     headers={'Cache-Control':'no-store'})
+
+class VoiceQuestion(BaseModel):
+    text: str = Field(min_length=1,max_length=700)
+    locale: str = Field(default='en-US',pattern=r'^[a-z]{2}(-[A-Z]{2})?$')
+
+@router.get('/phone/voice/status')
+def phone_voice_status():
+    return request('/voice/status').json()
+
+@router.post('/phone/voice/question')
+def phone_voice_question(data:VoiceQuestion):
+    return request('/voice/question','POST',data.model_dump(),timeout=10.0).json()
