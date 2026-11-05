@@ -6,8 +6,8 @@ android {
     applicationId 'com.asterion.control'
     minSdk 29
     targetSdk 35
-    versionCode 801
-    versionName '0.8.1'
+    versionCode 802
+    versionName '0.8.2'
   }
   buildTypes { release { minifyEnabled false } }
   compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
