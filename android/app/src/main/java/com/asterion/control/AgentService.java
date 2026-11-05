@@ -1,0 +1,141 @@
+package com.asterion.control;
+
+import android.app.ActivityManager;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.Service;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.SharedPreferences;
+import android.content.pm.ServiceInfo;
+import android.os.BatteryManager;
+import android.os.Build;
+import android.os.IBinder;
+import android.os.PowerManager;
+import android.os.StatFs;
+import android.util.DisplayMetrics;
+import android.view.WindowManager;
+import org.json.JSONObject;
+import org.json.JSONArray;
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
+import java.util.Base64;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+/** User-started LAN agent: bounded HTTP, bearer authentication, explicit foreground status. */
+public final class AgentService extends Service {
+  public static final int PORT = 8973;
+  public static volatile boolean running = false;
+  private volatile boolean alive = false;
+  private ServerSocket server;
+  private Thread acceptThread;
+  private final ExecutorService clients=Executors.newFixedThreadPool(6);
+  public static String token(Context c){
+    SharedPreferences p=c.getSharedPreferences("agent",MODE_PRIVATE);
+    String saved=p.getString("token",null);
+    if(saved!=null && saved.length()>32)return saved;
+    byte[] random=new byte[32];new SecureRandom().nextBytes(random);
+    saved=Base64.getUrlEncoder().withoutPadding().encodeToString(random);
+    p.edit().putString("token",saved).apply();return saved;
+  }
+  private Notification notification(){
+    getSystemService(NotificationManager.class).createNotificationChannel(new NotificationChannel("asterion_agent","Asterion remote control",NotificationManager.IMPORTANCE_LOW));
+    return new Notification.Builder(this,"asterion_agent").setSmallIcon(android.R.drawable.ic_menu_manage)
+      .setContentTitle("Asterion Control agent").setContentText("Remote access enabled — tap the app to stop it")
+      .setOngoing(true).build();
+  }
+  @Override public int onStartCommand(Intent i,int f,int id){
+    if(i!=null&&"STOP".equals(i.getAction())){stopSelf();return START_NOT_STICKY;}
+    startForeground(2101,notification(),ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
+    if(!alive){alive=true;acceptThread=new Thread(this::serve,"asterion-agent");acceptThread.start();}
+    running=true;return START_STICKY;
+  }
+  private void serve(){try(ServerSocket s=new ServerSocket(PORT)){server=s;
+    s.setReuseAddress(true);while(alive){Socket c=s.accept();c.setSoTimeout(8500);clients.execute(()->handle(c));}
+    }catch(Exception e){android.util.Log.e("AsterionAgent","Listener stopped",e);}finally{running=false;}}
+  private String line(InputStream in)throws Exception{
+    ByteArrayOutputStream b=new ByteArrayOutputStream();int c;
+    while((c=in.read())!=-1){if(c==10)break;if(c!=13)b.write(c);if(b.size()>8192)throw new IllegalArgumentException("Header too long");}
+    return b.toString("UTF-8");
+  }
+  private void write(OutputStream o,int status,String kind,byte[] body)throws Exception{
+    String label=status==200?"OK":status==401?"Unauthorized":status==403?"Forbidden":status==404?"Not Found":status==503?"Unavailable":"Bad Request";
+    String head="HTTP/1.1 "+status+" "+label+"\r\nContent-Type: "+kind+"\r\nContent-Length: "+body.length+"\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n";
+    o.write(head.getBytes(StandardCharsets.UTF_8));o.write(body);o.flush();
+  }
+  private void json(OutputStream o,int status,JSONObject body)throws Exception {write(o,status,"application/json; charset=utf-8",body.toString().getBytes(StandardCharsets.UTF_8));}
+  private JSONObject error(String detail)throws Exception{return new JSONObject().put("error",detail);}
+  private void handle(Socket socket){try(Socket s=socket){
+    InputStream in=new BufferedInputStream(s.getInputStream());OutputStream out=new BufferedOutputStream(s.getOutputStream());
+    String first=line(in);String[] request=first.split(" ");if(request.length<2){json(out,400,error("Malformed request"));return;}
+    String method=request[0],path=request[1].split("\\?")[0];
+    String auth="";int len=0;
+    for(int i=0;i<64;i++){String h=line(in);if(h.isEmpty())break;int at=h.indexOf(':');if(at<0)continue;
+      String key=h.substring(0,at).trim().toLowerCase(),val=h.substring(at+1).trim();
+      if(key.equals("authorization"))auth=val;
+      if(key.equals("content-length"))len=Integer.parseInt(val);
+    }
+    if(!auth.equals("Bearer "+token(this))){json(out,401,error("Unauthorized"));return;}
+    if(len<0||len>65536){json(out,400,error("Body too large"));return;}
+    byte[] data=in.readNBytes(len);JSONObject body=len>0?new JSONObject(new String(data,StandardCharsets.UTF_8)):new JSONObject();
+    if(method.equals("GET")&&path.equals("/health")){json(out,200,health());return;}
+    if(method.equals("GET")&&path.equals("/ui")){
+      ControlAccessibilityService a=ControlAccessibilityService.active;
+      json(out,a==null?503:200,a==null?error("Accessibility not enabled"):a.dump());return;
+    }
+    if(method.equals("POST")&&path.equals("/input")){
+      ControlAccessibilityService a=ControlAccessibilityService.active;
+      if(a==null){json(out,503,error("Enable Asterion accessibility service"));return;}
+      boolean ok=a.action(body);json(out,ok?200:400,new JSONObject().put("ok",ok));return;
+    }
+    if(method.equals("GET")&&path.equals("/screen")){
+      byte[] b=CaptureService.latest;
+      if(b==null){json(out,503,error("Start screen sharing on the phone"));return;}
+      write(out,200,"image/jpeg",b);return;
+    }
+    if(method.equals("GET")&&path.equals("/stream")){
+      out.write("HTTP/1.1 200 OK\r\nContent-Type: multipart/x-mixed-replace; boundary=asterionframe\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n".getBytes(StandardCharsets.UTF_8));out.flush();
+      while(alive&&!s.isClosed()){
+        byte[] b=CaptureService.latest;
+        if(b!=null){String h="--asterionframe\r\nContent-Type: image/jpeg\r\nContent-Length: "+b.length+"\r\n\r\n";
+          out.write(h.getBytes(StandardCharsets.UTF_8));out.write(b);out.write("\r\n".getBytes(StandardCharsets.UTF_8));out.flush();}
+        Thread.sleep(125);
+      }return;
+    }
+    json(out,404,error("Unknown endpoint"));
+  }catch(Exception e){android.util.Log.w("AsterionAgent","Client closed: "+e.getClass().getSimpleName());}}
+  private JSONObject health()throws Exception {
+    DisplayMetrics m=new DisplayMetrics();((WindowManager)getSystemService(WINDOW_SERVICE)).getDefaultDisplay().getRealMetrics(m);
+    ActivityManager.MemoryInfo mem=new ActivityManager.MemoryInfo();((ActivityManager)getSystemService(ACTIVITY_SERVICE)).getMemoryInfo(mem);
+    Intent battery=registerReceiver(null,new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+    JSONObject b=new JSONObject();if(battery!=null){int level=battery.getIntExtra(BatteryManager.EXTRA_LEVEL,-1),scale=battery.getIntExtra(BatteryManager.EXTRA_SCALE,-1);
+      b.put("percent",level>=0&&scale>0?level*100.0/scale:JSONObject.NULL);
+      int temp=battery.getIntExtra(BatteryManager.EXTRA_TEMPERATURE,-1);
+      b.put("temperature_c",temp>=0?temp/10.0:JSONObject.NULL);
+      b.put("charging",battery.getIntExtra(BatteryManager.EXTRA_PLUGGED,0)!=0);}
+    PowerManager pm=(PowerManager)getSystemService(POWER_SERVICE);
+    JSONObject thermals=new JSONObject().put("status",pm.getCurrentThermalStatus());
+    if(Build.VERSION.SDK_INT>=30){float headroom=pm.getThermalHeadroom(10);thermals.put("headroom",Float.isNaN(headroom)?JSONObject.NULL:headroom);}
+    StatFs disk=new StatFs(getFilesDir().getPath());
+    return new JSONObject().put("ok",true).put("device",Build.MODEL).put("android",Build.VERSION.RELEASE)
+      .put("accessible",ControlAccessibilityService.active!=null).put("capture",CaptureService.active)
+      .put("screen_width",m.widthPixels).put("screen_height",m.heightPixels)
+      .put("frame_width",CaptureService.width).put("frame_height",CaptureService.height)
+      .put("battery",b).put("memory_available",mem.availMem).put("memory_total",mem.totalMem)
+      .put("storage_available",disk.getAvailableBytes()).put("storage_total",disk.getTotalBytes())
+      .put("thermals",thermals);
+  }
+  @Override public void onDestroy(){alive=false;running=false;try{if(server!=null)server.close();}catch(Exception ignored){}
+    clients.shutdownNow();super.onDestroy();}
+  @Override public IBinder onBind(Intent i){return null;}
+}
