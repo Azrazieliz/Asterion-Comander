@@ -43,7 +43,9 @@ public final class AgentService extends Service {
   private final ExecutorService clients=Executors.newFixedThreadPool(6);
   private TransferStore transfers;
   private ContinuationLedger continuation;
-  @Override public void onCreate(){super.onCreate();transfers=new TransferStore(this);continuation=ContinuationLedger.get(this);try{continuation.recover();}catch(Exception ignored){}}
+  private final java.util.concurrent.ScheduledExecutorService observer =
+      java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
+  @Override public void onCreate(){super.onCreate();transfers=new TransferStore(this);continuation=ContinuationLedger.get(this);try{continuation.recover();}catch(Exception ignored){} observer.scheduleWithFixedDelay(()->{try{AppObservation.sample(this);}catch(Exception ignored){}},3,3,java.util.concurrent.TimeUnit.SECONDS);}
   public static final String PREF_REMOTE_ENABLED="remote_enabled";
   public static String token(Context c){
     SharedPreferences p=c.getSharedPreferences("agent",MODE_PRIVATE);
@@ -147,6 +149,20 @@ public final class AgentService extends Service {
     JSONObject body=len>0?new JSONObject(new String(data,StandardCharsets.UTF_8)):new JSONObject();
     // Phone-resident checkpoint state. Owner must first opt in using Control's
     // native UI; HTTP bearer possession alone cannot enable self-continuation.
+    // User-enabled Asterion app recording; only native MediaProjection frames.
+    if(method.equals("GET")&&path.equals("/observation/status")){
+      try{json(out,200,AppObservation.status(this));}
+      catch(Exception e){json(out,400,error("Observation status unavailable"));}return;
+    }
+    if(method.equals("GET")&&path.equals("/observation/events")){
+      try{json(out,200,AppObservation.recentEvents(this,80));}
+      catch(Exception e){json(out,400,error("Observation events unavailable"));}return;
+    }
+    if(method.equals("GET")&&path.equals("/observation/frame")){
+      byte[] jpeg=AppObservation.latestRecordedFrame(this);
+      if(jpeg==null){json(out,503,error("No recorded frame available"));return;}
+      write(out,200,"image/jpeg",jpeg);return;
+    }
     if(method.equals("GET")&&path.equals("/continuation/status")){
       try { JSONObject state=continuation.status();state.remove("pending");json(out,200,state); }
       catch(Exception e){json(out,400,error("Continuation status unavailable"));}return;
@@ -219,6 +235,6 @@ public final class AgentService extends Service {
       .put("thermals",thermals);
   }
   @Override public void onDestroy(){alive=false;running=false;try{if(server!=null)server.close();}catch(Exception ignored){}
-    clients.shutdownNow();super.onDestroy();}
+    clients.shutdownNow();observer.shutdownNow();super.onDestroy();}
   @Override public IBinder onBind(Intent i){return null;}
 }
