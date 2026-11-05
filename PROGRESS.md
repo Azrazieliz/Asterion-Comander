@@ -1,3 +1,14 @@
+# 2026-11-06 — Android-native MCP endpoint + verified universal tool CI
+
+- Implemented `AndroidMcp.java` on the Samsung agent: native stateless bearer-authenticated `POST /mcp`, `initialize`, `tools/list`, `tools/call` and direct phone-only tools. No Windows-based phone MCP proxy needed inside the Android device. Private Wi-Fi/VPN/loopback peers only. The private HTTP listener **must not be published on public internet**.
+- Updated `mcp_gateway.py` (the temporary Windows-hosted public HTTPS ingress) to merge Samsung native and optional Windows tool catalogues, prefer Android-native phone tools, route PC-only calls to Windows, and allow phone-only logical operation when Windows MCP is not reachable. A stable phone-hosted HTTPS ingress and a connected ChatGPT authenticated plugin are **still missing**; phone-native service does NOT mean ChatGPT's cloud can connect directly yet.
+- Owner's universal Control operating contract also documented in `docs/CONTROL_CROSS_APP_API_V1.md`.
+- **Branch CI 42132064603 PASS at source commit `33e8a9d6`: 34 Python tests passed (7 warnings), real Gradle `BUILD SUCCESSFUL in 43s`, and a CI Android APK artifact uploaded.** Post-CI branch changes were documentation only (`docs/CONTROL_CROSS_APP_API_V1.md`), not code.
+- CI APK is signed using CI's debug identity. There is no evidence this signer matches installed Android v0.8.6. Do not overwrite the owner's application or call the CI build install-ready without signer continuity; rebuild with the original Windows debug keystore if needed.
+- Android Control v0.8.6 remains the only **owner-confirmed installed** version. Autonomous future-chat chaining, new-chat routing, voice availability, native self-update, 30+ minute idle recovery and stable HTTPS authentication remain **unverified**. The Windows fallback bridge did not produce a result to the most recent health command, so there is no verified active Control worker in this session.
+
+---
+
 # 2026-11-06 — Universal Android-primary Control, checkpoint continuity and cross-project transport (DEVELOPMENT BRANCH)
 
 **Scope remains frozen by `7STAR_FROZEN_MASTER.md`.** Control is the shared deterministic external operator tool across Asterion and NoWorld, not another model, game player, artwork engine or internal agent. Android is the principal interface and execution device; Windows is subordinate, primarily for incompatible build tasks. ChatGPT is the external AI operator.
