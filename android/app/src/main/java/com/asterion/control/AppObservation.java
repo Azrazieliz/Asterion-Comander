@@ -57,7 +57,7 @@ final class AppObservation {
   }
   private static void append(File file,JSONObject item) {
     try (FileOutputStream stream=new FileOutputStream(file,true)) {
-      stream.write((item.toString()+"\\n").getBytes(StandardCharsets.UTF_8));
+      stream.write((item.toString()+"\n").getBytes(StandardCharsets.UTF_8));
     }catch(Exception ignored){}
   }
   static void event(Context c,AccessibilityEvent e) {
@@ -102,6 +102,32 @@ final class AppObservation {
         trim(dir);
       }catch(Exception ignored){}
     });
+  }
+  static JSONObject recentEvents(Context c,int limit)throws Exception {
+    limit=Math.max(1,Math.min(limit,80));
+    File log=new File(folder(c),"events.jsonl");
+    org.json.JSONArray items=new org.json.JSONArray();
+    if(!log.isFile())return new JSONObject().put("events",items);
+    java.util.ArrayDeque<String> ring=new java.util.ArrayDeque<>();
+    try(java.io.BufferedReader reader=new java.io.BufferedReader(new java.io.InputStreamReader(
+        new java.io.FileInputStream(log),StandardCharsets.UTF_8))){
+      String line;
+      while((line=reader.readLine())!=null){
+        if(ring.size()==limit)ring.removeFirst();
+        ring.addLast(line);
+      }
+    }
+    for(String line:ring)try{items.put(new JSONObject(line));}catch(Exception ignored){}
+    return new JSONObject().put("events",items).put("target",target(c));
+  }
+  static byte[] latestRecordedFrame(Context c)throws Exception {
+    String name=latestFrame;
+    if(name.isEmpty()||!name.matches("frame-[0-9]{10,15}\\.jpg"))return null;
+    File file=new File(folder(c),name);
+    if(!file.isFile()||file.length()>1500000)return null;
+    try(java.io.FileInputStream stream=new java.io.FileInputStream(file)){
+      return stream.readAllBytes();
+    }
   }
   private static void trim(File dir) {
     File[] frames=dir.listFiles((d,name)->name.startsWith("frame-")&&name.endsWith(".jpg"));
