@@ -20,7 +20,7 @@ class PairPhone(BaseModel):
     token: str = Field(min_length=32, max_length=512)
 
 class PhoneInput(BaseModel):
-    action: str = Field(pattern='^(tap|swipe|back|home|recents|notifications|type|click_text)$')
+    action: str = Field(pattern='^(tap|swipe|long_press|back|home|recents|notifications|type|click_text)$')
     x: float | None = None
     y: float | None = None
     x2: float | None = None
