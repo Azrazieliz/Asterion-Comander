@@ -18,9 +18,107 @@ public final class ControlAccessibilityService extends AccessibilityService {
   public static volatile ControlAccessibilityService active;
   private final Handler main = new Handler(Looper.getMainLooper());
   @Override protected void onServiceConnected() { super.onServiceConnected(); active = this; }
-  @Override public void onAccessibilityEvent(AccessibilityEvent e) { }
+  private final java.util.concurrent.ExecutorService handoff =
+      java.util.concurrent.Executors.newSingleThreadExecutor();
+  private final java.util.concurrent.atomic.AtomicBoolean resumeScheduled =
+      new java.util.concurrent.atomic.AtomicBoolean(false);
+  private long lastResumeProbe = 0L;
+  @Override public void onAccessibilityEvent(AccessibilityEvent e) {
+    // A queued, owner-enabled checkpoint can resume when ChatGPT becomes visible.
+    // Never inject text into a different application or into an occupied composer.
+    if (e == null || !"com.openai.chatgpt".contentEquals(e.getPackageName() == null
+        ? "" : e.getPackageName())) return;
+    long now = android.os.SystemClock.elapsedRealtime();
+    if (now - lastResumeProbe < 4000L || !resumeScheduled.compareAndSet(false, true)) return;
+    lastResumeProbe = now;
+    handoff.execute(() -> {
+      try {
+        ContinuationLedger ledger = new ContinuationLedger(getApplicationContext());
+        if ("queued".equals(ledger.recover().optString("state"))
+            && ledger.status().optBoolean("enabled")) {
+          // Delay: allow ChatGPT's chat composer and navigation to settle.
+          Thread.sleep(1600);
+          ledger.dispatch();
+        }
+      } catch (Exception ignored) {
+        // Status remains queued or failed for explicit inspection. No retry loop.
+      } finally { resumeScheduled.set(false); }
+    });
+  }
+  private AccessibilityNodeInfo findEditable(AccessibilityNodeInfo node, int depth) {
+    if (node == null || depth > 24) return null;
+    if (node.isEditable() && node.isVisibleToUser() && node.isEnabled()) return node;
+    for (int i = 0; i < node.getChildCount(); i++) {
+      AccessibilityNodeInfo found = findEditable(node.getChild(i), depth + 1);
+      if (found != null) return found;
+    }
+    return null;
+  }
+  private AccessibilityNodeInfo findSend(AccessibilityNodeInfo node, int depth) {
+    if (node == null || depth > 24) return null;
+    CharSequence description = node.getContentDescription(), text = node.getText();
+    String name = description != null ? description.toString().trim().toLowerCase(java.util.Locale.ROOT)
+        : text == null ? "" : text.toString().trim().toLowerCase(java.util.Locale.ROOT);
+    boolean send = name.equals("send") || name.equals("send message")
+        || name.equals("send prompt") || name.equals("send a message")
+        || name.equals("envoyer") || name.equals("envoyer le message");
+    if (send && node.isClickable() && node.isEnabled() && node.isVisibleToUser()) return node;
+    for (int i = 0; i < node.getChildCount(); i++) {
+      AccessibilityNodeInfo result = findSend(node.getChild(i), depth + 1);
+      if (result != null) return result;
+    }
+    return null;
+  }
+  /**
+   * UI-only ChatGPT handoff. This is not a model call; it consumes normal app usage.
+   * A successful Accessibility click is NOT proof that ChatGPT accepted the message.
+   */
+  JSONObject sendChatMessage(String message) {
+    final CountDownLatch done = new CountDownLatch(1);
+    final JSONObject[] output = {new JSONObject()};
+    main.post(() -> {
+      String reason = "ChatGPT composer not ready";
+      try {
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root == null || root.getPackageName() == null
+            || !"com.openai.chatgpt".contentEquals(root.getPackageName())) {
+          reason = "ChatGPT Android app is not foreground";
+        } else {
+          AccessibilityNodeInfo editor = findEditable(root, 0);
+          if (editor == null) reason = "No editable ChatGPT message field";
+          else if (editor.getText() != null && editor.getText().length() != 0) {
+            reason = "ChatGPT composer has user text; refusing to overwrite";
+          } else if (!editor.performAction(AccessibilityNodeInfo.ACTION_FOCUS)) {
+            reason = "ChatGPT composer focus not granted";
+          } else {
+            Bundle args = new Bundle();
+            args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, message);
+            if (!editor.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
+              reason = "ChatGPT composer rejected text";
+            } else {
+              AccessibilityNodeInfo after = getRootInActiveWindow();
+              AccessibilityNodeInfo send = findSend(after, 0);
+              if (send != null && send.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                output[0].put("sent", true);
+                output[0].put("reason", "Send control clicked; response not yet verified");
+                done.countDown(); return;
+              }
+              reason = "No accessible Send control; text prepared but not sent";
+            }
+          }
+        }
+        output[0].put("sent", false).put("reason", reason);
+      } catch (Exception e) {
+        try { output[0].put("sent", false).put("reason", e.getClass().getSimpleName()); }
+        catch (Exception ignored) {}
+      } finally { done.countDown(); }
+    });
+    try { done.await(9, TimeUnit.SECONDS); }
+    catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+    return output[0];
+  }
   @Override public void onInterrupt() { }
-  @Override public void onDestroy() { if(active == this) active = null; super.onDestroy(); }
+  @Override public void onDestroy() { if(active == this) active = null; handoff.shutdownNow(); super.onDestroy(); }
   public boolean action(JSONObject a) {
     final String cmd = a.optString("action", "");
     final CountDownLatch done = new CountDownLatch(1);
