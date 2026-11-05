@@ -46,26 +46,25 @@ function startLive(){
 function screenCoords(img, ev){const r=img.getBoundingClientRect();const width=img.naturalWidth,height=img.naturalHeight;const scale=Math.min(r.width/width,r.height/height);const renderW=width*scale,renderH=height*scale;const offsetX=(r.width-renderW)/2, offsetY=(r.height-renderH)/2;const x=Math.round((ev.clientX-r.left-offsetX)/scale),y=Math.round((ev.clientY-r.top-offsetY)/scale);if(x<0||y<0||x>=width||y>=height)return null;return {x,y};}
 function bindPointer(img,mode){let pressed=null;img.addEventListener('pointerdown',ev=>{pressed={...screenCoords(img,ev),time:Date.now()};if(!Number.isFinite(pressed.x))pressed=null;img.setPointerCapture(ev.pointerId)});img.addEventListener('pointerup',async ev=>{if(!pressed)return;const end=screenCoords(img,ev);if(!end){pressed=null;return;}const begin=pressed;pressed=null;const elapsed=Date.now()-begin.time;const distance=Math.hypot(end.x-begin.x,end.y-begin.y);try{if(mode==='desktop'){if(distance>18){await request('/input',{method:'POST',body:{action:'drag',monitor:Number($('#desktop-monitor').value),x:begin.x,y:begin.y,to_x:end.x,to_y:end.y,seconds:Math.max(.2,Math.min(3,elapsed/1000))}})}else{await request('/input',{method:'POST',body:{action:state.desktopRight?'right_click':'click',monitor:Number($('#desktop-monitor').value),...end}});}}else if(state.device){const action=distance>30?'swipe':elapsed>600?'long_press':'tap';if(state.device==='native'){const inf=state.phoneInfo||{};const sx=(inf.screen_width||img.naturalWidth)/img.naturalWidth,sy=(inf.screen_height||img.naturalHeight)/img.naturalHeight;await androidAction({action,x:Math.round(begin.x*sx),y:Math.round(begin.y*sy),x2:Math.round(end.x*sx),y2:Math.round(end.y*sy),duration_ms:Math.max(200,Math.min(5000,elapsed))});}else await androidAction({action,x:begin.x,y:begin.y,to_x:end.x,to_y:end.y,duration_ms:Math.max(200,Math.min(10000,elapsed))});}if(!live)setTimeout(screen,250);}catch(e){toast(e.message)}});img.addEventListener('contextmenu',e=>e.preventDefault());}
 async function discover(){
- const select=$('#device-select');const old=state.device;select.replaceChildren();
- let native=null;
- try{native=await request('/phone');if(native.paired){const opt=document.createElement('option');opt.value='native';opt.textContent=(native.device||'Android')+(native.reachable?' · Native agent':' · Offline');opt.disabled=!native.reachable;select.append(opt);}}catch{}
- let adbDevices=[];try{const v=await request('/android/devices');adbDevices=v.items.filter(d=>d.state==='device');}catch{}
- for(const d of adbDevices){const opt=document.createElement('option');opt.value=d.serial;opt.textContent=d.serial+' · Legacy ADB';select.append(opt);}
- const choices=[...(native?.paired&&native?.reachable?['native']:[]),...adbDevices.map(d=>d.serial)];
- state.device=choices.includes(old)?old:choices[0]||'';select.value=state.device;
- if(!state.device){$('#android-detail').textContent='Start the native phone agent, register it from the Android app, then grant input/screen permissions.';$('#android-image').classList.remove('shown');$('#android-empty').style.display='block';}
- else if(state.device==='native'){state.phoneInfo=native.info;$('#android-detail').textContent=JSON.stringify(native.info,null,2);}
- startLive();
+ const select=$('#device-select');select.replaceChildren();
+ let native=null;try{native=await request('/phone');}catch(e){toast('Phone agent unavailable: '+e.message);}
+ if(native?.paired&&native?.reachable){
+   const opt=document.createElement('option');opt.value='native';opt.textContent=(native.device||'Android')+' · Native agent';select.append(opt);
+   state.device='native';state.phoneInfo=native.info;
+   $('#android-detail').textContent=JSON.stringify(native.info,null,2);
+ }else{
+   state.device='';state.phoneInfo=null;
+   $('#android-detail').textContent='Enable the native Asterion Control phone agent, authorize screen sharing and accessibility, then link your phone.';
+   $('#android-image').classList.remove('shown');$('#android-empty').style.display='block';
+ }
+ select.value=state.device;startLive();
 }
 async function androidAction(action){
- if(!state.device)throw Error('Select an authorized phone');
- if(state.device==='native'){
-   const a={...action};
-   if(a.action==='key'){const map={KEYCODE_BACK:'back',KEYCODE_HOME:'home',KEYCODE_APP_SWITCH:'recents'};if(!map[a.key])throw Error('This key is unsupported through Accessibility');a.action=map[a.key];delete a.key;}
-   if(a.action==='text'){a.action='type';}
-   if(a.action==='long_press'){a.action='swipe';a.x2=a.x;a.y2=a.y;a.duration_ms=800;}
-   await request('/phone/input',{method:'POST',body:a});
- }else await request('/android/'+encodeURIComponent(state.device)+'/input',{method:'POST',body:action});
+ if(state.device!=='native')throw Error('Android agent not paired');
+ const a={...action};
+ if(a.action==='key'){const map={KEYCODE_BACK:'back',KEYCODE_HOME:'home',KEYCODE_APP_SWITCH:'recents'};if(!map[a.key])throw Error('Unsupported key');a.action=map[a.key];delete a.key;}
+ if(a.action==='text')a.action='type';
+ await request('/phone/input',{method:'POST',body:a});
 }
 function human(n){if(n==null)return '—';const a=['B','KB','MB','GB','TB'];let i=0;while(n>1024&&i<4){n/=1024;i++}return n.toFixed(i?1:0)+' '+a[i]}
 async function files(){const path=$('#path').value.trim()||'.';const data=await request('/files'+qp({path}));const list=$('#file-list');list.replaceChildren();for(const f of data.items){const b=document.createElement('button');b.className='fileitem';const lhs=document.createElement('span');lhs.textContent=(f.directory?'▣ ':'▤ ')+f.name;const rhs=document.createElement('span');rhs.className='muted';rhs.textContent=f.directory?'Folder':human(f.size);b.append(lhs,rhs);b.addEventListener('click',async()=>{if(f.directory){$('#path').value=f.path;await files();}else{state.selectedFile=f.path;$('#file-title').textContent=f.path;try{const data=await request('/files/read'+qp({path:f.path}));$('#file-content').value=data.content;}catch(e){$('#file-content').value='';toast(e.message)}}});list.append(b);}if(!data.items.length)list.textContent='Directory is empty.';}
