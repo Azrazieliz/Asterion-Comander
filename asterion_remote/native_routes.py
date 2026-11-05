@@ -45,3 +45,18 @@ def phone_transfer_status(key: str):
 @router.post('/phone/transfers/{key}/cancel')
 def phone_transfer_cancel(key: str):
     return cancel_transfer(key)
+
+# A session executes explicitly authorized UI steps locally without a ChatGPT turn per gesture.
+from .interaction_sessions import SessionRequest, start as start_session, status as session_status, cancel as cancel_session
+
+@router.post('/sessions')
+def submit_control_session(data: SessionRequest):
+    return start_session(data)
+
+@router.get('/sessions/{key}')
+def get_control_session(key: str):
+    return session_status(key)
+
+@router.post('/sessions/{key}/cancel')
+def stop_control_session(key: str):
+    return cancel_session(key)
