@@ -48,6 +48,13 @@ public final class AgentService extends Service {
     saved=Base64.getUrlEncoder().withoutPadding().encodeToString(random);
     p.edit().putString("token",saved).apply();return saved;
   }
+  /** Revoke leaked/old access keys without displaying the replacement in UI. */
+  public static String rotateToken(Context c){
+    byte[] random=new byte[32];new SecureRandom().nextBytes(random);
+    String value=Base64.getUrlEncoder().withoutPadding().encodeToString(random);
+    c.getSharedPreferences("agent",MODE_PRIVATE).edit().putString("token",value).apply();
+    return value;
+  }
   private Notification notification(){
     getSystemService(NotificationManager.class).createNotificationChannel(new NotificationChannel("asterion_agent","Asterion remote control",NotificationManager.IMPORTANCE_LOW));
     return new Notification.Builder(this,"asterion_agent").setSmallIcon(android.R.drawable.ic_menu_manage)

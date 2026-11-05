@@ -3,8 +3,8 @@ package com.asterion.control;
 import android.Manifest;
 import android.app.Activity;
 import android.app.ActivityManager;
-import android.content.ClipData;
-import android.content.ClipboardManager;
+
+
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
@@ -69,6 +69,9 @@ public final class MainActivity extends Activity {
   private EditText serverUrl,serverToken,localAddress;
   private WebView web;
   private LinearLayout emptyRemote;
+  private boolean advancedSetupVisible=false;
+  private LinearLayout advancedSetup;
+  private TextView privacyStatus;
   private int currentTab=0;
   private boolean webStarted=false,hostRefreshing=false;
   private long lastHostRefresh=0;
@@ -114,6 +117,12 @@ public final class MainActivity extends Activity {
   @Override public void onCreate(Bundle b){super.onCreate(b);
     getWindow().setStatusBarColor(DesignSystem.BG);getWindow().setNavigationBarColor(DesignSystem.BG);
     prefs=getSharedPreferences("control",MODE_PRIVATE);
+    // Existing pre-v0.6 keys may have been exposed on the former connections page.
+    // Migrate once, revoke that key and re-register privately on next pairing.
+    if(!prefs.getBoolean("agent_key_rotated_v06",false)){
+      AgentService.rotateToken(this);
+      prefs.edit().putBoolean("agent_key_rotated_v06",true).apply();
+    }
     root=v();root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,new int[]{0xFF10162A,0xFF090D1C,0xFF070A14}));setContentView(root);
     buildHeader();stage=new FrameLayout(this);root.addView(stage,new LinearLayout.LayoutParams(-1,0,1));
     pages[0]=scrollHome();pages[1]=remotePage();pages[2]=scrollHealth();pages[3]=scrollDevices();
@@ -126,7 +135,7 @@ public final class MainActivity extends Activity {
     TextView name=t("ASTERION",17,DesignSystem.TEXT,true);name.setLetterSpacing(.13f);brand.addView(name);
     TextView sub=t("C O N T R O L",10.2f,DesignSystem.TEAL,true);margin(brand,sub,4);
     header.addView(brand,new LinearLayout.LayoutParams(0,-2,1));
-    headerStatus=DesignSystem.pill(this,"LOCAL",DesignSystem.TEAL);header.addView(headerStatus);wide(root,header);
+    headerStatus=DesignSystem.pill(this,"ON DEVICE",DesignSystem.TEAL);header.addView(headerStatus);wide(root,header);
   }
   private void buildNav(){
     View separator=line();root.addView(separator,new LinearLayout.LayoutParams(-1,dp(1)));
@@ -218,30 +227,63 @@ public final class MainActivity extends Activity {
     return scroll(healthBody);
   }
   private TextView serviceLine(LinearLayout card,String title,String iconName){LinearLayout row=h();row.setPadding(0,dp(11),0,dp(11));row.addView(icon(iconName,DesignSystem.PURPLE,20));TextView titleText=t(title,13,DesignSystem.TEXT,true);titleText.setPadding(dp(14),0,0,0);row.addView(titleText,new LinearLayout.LayoutParams(0,-2,1));TextView value=t("Checking",12,DesignSystem.MUTED,false);row.addView(value);wide(card,row);return value;}
-  private View scrollDevices(){devicesBody=v();wide(devicesBody,eyebrow("CONNECTION SETUP"));sectionTitle(devicesBody,"Link your devices.","A few steps to control your computer from anywhere.");gap(devicesBody,18);
-    LinearLayout intro=card();intro.setBackground(DesignSystem.gradient(this,0xFF202D45,0xFF1A233D,21));
-    rowTitle(intro,"How it works","1 · Connect Windows  →  2 · Enable phone access  →  3 · Open Screen",icon("shield",DesignSystem.TEAL,25));wide(devicesBody,intro);gap(devicesBody,13);
-    LinearLayout pc=card();rowTitle(pc,"1 · Your Windows PC","Enter the local or private VPN address of Control.",icon("monitor",DesignSystem.PURPLE,23));gap(pc,17);
-    labeledInput(pc,"WINDOWS ADDRESS","https://your-pc:8911 or VPN address",false,0);
-    serverUrl=input(prefs.getString("url",""),false,"e.g. http://192.168.1.25:8911");wide(pc,serverUrl);
-    gap(pc,15);wide(pc,eyebrow("ACCESS TOKEN"));gap(pc,7);
-    serverToken=input(prefs.getString("token",""),true,"Windows agent token");wide(pc,serverToken);
-    gap(pc,17);button(pc,"Connect to Windows","arrow",true,()->{save();show(1);connectRemote(true);});wide(devicesBody,pc);
-    gap(devicesBody,12);LinearLayout phone=card();rowTitle(phone,"2 · Enable phone access","Let your authorized controller reach this phone over Wi-Fi.",icon("phone",DesignSystem.TEAL,23));gap(phone,16);
-    phoneAddress=t("Phone address: checking…",12,DesignSystem.MUTED,false);wide(phone,phoneAddress);gap(phone,13);
-    twoActions(phone,"Enable agent","power",this::startAgent,"Disable agent","shield",this::stopAgent);
-    gap(phone,10);button(phone,"Link phone with Windows","arrow",false,this::registerPhone);wide(devicesBody,phone);
-    gap(devicesBody,12);LinearLayout permits=card();rowTitle(permits,"3 · Approve access","Android asks separately for input and screen sharing.",icon("shield",DesignSystem.PURPLE,23));gap(permits,15);
-    button(permits,"Allow remote touch & gestures","phone",false,()->startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
-    gap(permits,9);button(permits,"Start live screen sharing","share",false,this::beginCapture);
-    gap(permits,9);button(permits,"Stop screen sharing","power",false,()->{stopService(new Intent(this,CaptureService.class));updateHealth();});wide(devicesBody,permits);
-    gap(devicesBody,12);LinearLayout advanced=card();rowTitle(advanced,"Local connection details","Only share access credentials with trusted devices.",icon("wifi",DesignSystem.TEAL,23));gap(advanced,15);
-    wide(advanced,eyebrow("PHONE ADDRESS USED FOR REGISTRATION"));gap(advanced,7);
-    localAddress=input(prefs.getString("phoneip",ipAddress()),false,"Phone Wi-Fi / VPN IP");wide(advanced,localAddress);
-    gap(advanced,13);button(advanced,"Copy phone access key","copy",false,()->{
-      ((ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("Asterion private key",AgentService.token(this)));toast("Private access key copied");});
-    gap(advanced,15);TextView warning=t("For access across networks, use an encrypted private VPN. The current phone agent is HTTP and must not be exposed directly to the public internet.",11.5f,DesignSystem.MUTED,false);wide(advanced,warning);wide(devicesBody,advanced);
+  private View scrollDevices(){
+    devicesBody=v();wide(devicesBody,eyebrow("SECURE DEVICE ACCESS"));
+    sectionTitle(devicesBody,"Your connections.","Control your own devices without cables or repeated setup.");gap(devicesBody,18);
+
+    // Clear device status first. No access tokens, IPs, terminals or logs in this primary view.
+    LinearLayout summary=card();summary.setBackground(DesignSystem.gradient(this,0xFF28334B,0xFF182A38,23));
+    rowTitle(summary,"Windows computer","Your remote desktop and device resources",icon("monitor",DesignSystem.PURPLE,25));
+    gap(summary,12);remoteConnection=t("Checking saved connection…",12,DesignSystem.MUTED,false);wide(summary,remoteConnection);
+    gap(summary,16);twoActions(summary,"Open desktop","monitor",()->show(1),"Reconnect","refresh",()->{save();checkHost();});
+    wide(devicesBody,summary);
+
+    gap(devicesBody,12);LinearLayout phone=card();
+    rowTitle(phone,"This Android phone","Optional incoming screen and touch access",icon("phone",DesignSystem.TEAL,23));
+    gap(phone,12);phoneAddress=t("Checking phone access…",12,DesignSystem.MUTED,false);wide(phone,phoneAddress);
+    gap(phone,16);button(phone,"Enable phone remote control","shield",true,this::enablePhoneControl);
+    gap(phone,9);button(phone,"Share screen · Android permission","share",false,this::beginCapture);
+    gap(phone,9);button(phone,"Disable phone access","power",false,()->{stopService(new Intent(this,CaptureService.class));stopAgent();});
+    wide(devicesBody,phone);
+
+    gap(devicesBody,12);LinearLayout security=card();
+    rowTitle(security,"Access & privacy","Only connected devices you authorize can control this phone",icon("shield",DesignSystem.TEAL,24));
+    gap(security,12);privacyStatus=t("Access is off until you enable it. Android may request accessibility and screen-sharing permission.",12,DesignSystem.MUTED,false);
+    wide(security,privacyStatus);wide(devicesBody,security);
+
+    gap(devicesBody,24);LinearLayout advanced=clickableCard(()->toggleAdvancedSetup());
+    rowTitle(advanced,"Pair or change computer","One-time setup · saved for later sessions",icon("settings",DesignSystem.PURPLE,21));
+    wide(devicesBody,advanced);gap(devicesBody,10);
+    advancedSetup=card();advancedSetup.setVisibility(View.GONE);
+    wide(advancedSetup,eyebrow("COMPUTER ADDRESS"));gap(advancedSetup,8);
+    serverUrl=input(prefs.getString("url",""),false,"Windows computer · private network address");wide(advancedSetup,serverUrl);
+    gap(advancedSetup,13);wide(advancedSetup,eyebrow("PRIVATE PAIRING KEY"));gap(advancedSetup,8);
+    serverToken=input(prefs.getString("token",""),true,"Enter pairing key once");wide(advancedSetup,serverToken);
+    gap(advancedSetup,13);button(advancedSetup,"Save and connect","check",true,()->{
+      save();toggleAdvancedSetup();checkHost();show(1);
+    });
+    gap(advancedSetup,13);TextView notice=t("Advanced pairing details stay hidden in everyday use. For connections outside your local network, use your private encrypted VPN; never expose the current HTTP service to the public internet.",11,DesignSystem.MUTED,false);wide(advancedSetup,notice);
+    wide(devicesBody,advancedSetup);
+    // Retained internally for registration; never displayed as a plain-text access credential.
+    localAddress=input(prefs.getString("phoneip",ipAddress()),false,"");
     return scroll(devicesBody);
+  }
+  private void toggleAdvancedSetup(){
+    advancedSetupVisible=!advancedSetupVisible;
+    if(advancedSetup!=null) advancedSetup.setVisibility(advancedSetupVisible?View.VISIBLE:View.GONE);
+  }
+  private void enablePhoneControl(){
+    startAgent();
+    if(ControlAccessibilityService.active==null){
+      toast("Enable Asterion Control under Installed accessibility apps");
+      try{startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));}
+      catch(Exception e){toast("Accessibility settings unavailable");}
+    }else{
+      toast("Phone remote control enabled");
+    }
+    handler.postDelayed(this::updateHealth,550);
+    if(!prefs.getString("url","").isEmpty() && !prefs.getString("token","").isEmpty())
+      handler.postDelayed(()->{if(AgentService.running)registerPhone();},1100);
   }
   private void labeledInput(LinearLayout parent,String label,String hint,boolean secret,int mode){wide(parent,eyebrow(label));gap(parent,7);}
   private EditText input(String value,boolean secret,String hint){EditText field=new EditText(this);field.setSingleLine(true);field.setText(value);field.setHint(hint);field.setTextColor(DesignSystem.TEXT);field.setHintTextColor(DesignSystem.MUTED);field.setTextSize(13);field.setPadding(dp(15),dp(14),dp(13),dp(14));
@@ -289,8 +331,11 @@ public final class MainActivity extends Activity {
     if(agentConnection!=null){agentConnection.setText(AgentService.running?"Enabled":"Off");agentConnection.setTextColor(AgentService.running?DesignSystem.TEAL:DesignSystem.MUTED);}
     if(captureConnection!=null){captureConnection.setText(CaptureService.active?"Streaming":"Off");captureConnection.setTextColor(CaptureService.active?DesignSystem.TEAL:DesignSystem.MUTED);}
     if(accessConnection!=null){accessConnection.setText(ControlAccessibilityService.active!=null?"Authorized":"Not enabled");accessConnection.setTextColor(ControlAccessibilityService.active!=null?DesignSystem.TEAL:DesignSystem.MUTED);}
-    if(phoneAddress!=null)phoneAddress.setText("This phone · "+ipAddress()+" : "+AgentService.PORT+(AgentService.running?"  ·  Online":"  ·  Agent off"));
-    if(headerStatus!=null)headerStatus.setText(AgentService.running?"ACCESS ON":"LOCAL");
+    if(phoneAddress!=null)phoneAddress.setText(AgentService.running?"Remote control enabled":"Remote control disabled");
+    if(privacyStatus!=null)privacyStatus.setText(
+      AgentService.running?"Phone agent active · "+(ControlAccessibilityService.active!=null?"input authorized":"touch permission needed")+" · "+(CaptureService.active?"screen shared":"screen private"):
+      "Remote phone access is disabled. No screen or input is shared.");
+    if(headerStatus!=null)headerStatus.setText(AgentService.running?"SHARING ON":"ON DEVICE");
     if(!hostRefreshing&&(currentTab==0||currentTab==2)&&System.currentTimeMillis()-lastHostRefresh>12000){lastHostRefresh=System.currentTimeMillis();checkHost();}
   }catch(Exception ignored){} }
   private String thermalName(int level){switch(level){case PowerManager.THERMAL_STATUS_NONE:return "Nominal";case PowerManager.THERMAL_STATUS_LIGHT:return "Light";case PowerManager.THERMAL_STATUS_MODERATE:return "Moderate";case PowerManager.THERMAL_STATUS_SEVERE:return "Severe";case PowerManager.THERMAL_STATUS_CRITICAL:return "Critical";case PowerManager.THERMAL_STATUS_EMERGENCY:return "Emergency";case PowerManager.THERMAL_STATUS_SHUTDOWN:return "Shutdown";default:return "Unavailable";}}

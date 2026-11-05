@@ -1,15 +1,11 @@
-name: Asterion Control APK
+name: Android APK
 on:
   push:
     branches: [main]
-    paths:
-      - 'android/**'
-      - '.github/workflows/android.yml'
+    paths: ['android/**', '.github/workflows/android.yml']
   workflow_dispatch:
-permissions:
-  contents: read
 jobs:
-  android-debug:
+  build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -22,13 +18,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Compile installable APK
+      - name: Build APK
         working-directory: android
-        run: gradle --no-daemon assembleDebug --stacktrace
-      - name: Save Android test APK
-        if: success()
-        uses: actions/upload-artifact@v4
+        run: gradle --no-daemon assembleDebug
+      - uses: actions/upload-artifact@v4
         with:
-          name: Asterion-Control-v0.5-premium-debug
+          name: Asterion-Control-Android-debug
           path: android/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
