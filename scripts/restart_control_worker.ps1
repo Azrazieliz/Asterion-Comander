@@ -21,9 +21,7 @@ foreach($p in $old){ Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyC
 Start-Sleep -Milliseconds 900
 $out=Join-Path $state 'control-worker.stdout.log'
 $err=Join-Path $state 'control-worker.stderr.log'
-$server=Start-Process -FilePath $py -ArgumentList '-m','uvicorn','asterion_remote.app:app',
-  '--host','192.168.1.133','--port','8911' -WorkingDirectory $root
-  -WindowStyle Hidden -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+$server=Start-Process -FilePath $py -ArgumentList '-m','uvicorn','asterion_remote.app:app','--host','192.168.1.133','--port','8911' -WorkingDirectory $root -WindowStyle Hidden -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
 $ok=$false
 for($i=0;$i -lt 25;$i++){
   Start-Sleep -Milliseconds 500
