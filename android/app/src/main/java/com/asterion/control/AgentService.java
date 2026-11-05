@@ -42,7 +42,8 @@ public final class AgentService extends Service {
   private Thread acceptThread;
   private final ExecutorService clients=Executors.newFixedThreadPool(6);
   private TransferStore transfers;
-  @Override public void onCreate(){super.onCreate();transfers=new TransferStore(this);}
+  private ContinuationLedger continuation;
+  @Override public void onCreate(){super.onCreate();transfers=new TransferStore(this);continuation=ContinuationLedger.get(this);try{continuation.recover();}catch(Exception ignored){}}
   public static final String PREF_REMOTE_ENABLED="remote_enabled";
   public static String token(Context c){
     SharedPreferences p=c.getSharedPreferences("agent",MODE_PRIVATE);
@@ -144,6 +145,20 @@ public final class AgentService extends Service {
     byte[] data=in.readNBytes(len);
     if(data.length!=len){json(out,400,error("Truncated JSON request"));return;}
     JSONObject body=len>0?new JSONObject(new String(data,StandardCharsets.UTF_8)):new JSONObject();
+    // Phone-resident checkpoint state. Owner must first opt in using Control's
+    // native UI; HTTP bearer possession alone cannot enable self-continuation.
+    if(method.equals("GET")&&path.equals("/continuation/status")){
+      try { JSONObject state=continuation.status();state.remove("pending");json(out,200,state); }
+      catch(Exception e){json(out,400,error("Continuation status unavailable"));}return;
+    }
+    if(method.equals("POST")&&path.equals("/continuation/queue")){
+      try { json(out,200,continuation.queue(body)); }
+      catch(Exception e){json(out,400,error(e.getMessage()));}return;
+    }
+    if(method.equals("POST")&&path.equals("/continuation/dispatch")){
+      try { json(out,200,continuation.dispatch()); }
+      catch(Exception e){json(out,400,error(e.getMessage()));}return;
+    }
     if(method.equals("POST")&&path.equals("/transfer/start")){
       try{json(out,200,transfers.start(body));}catch(Exception e){json(out,400,error(e.getMessage()));}
       return;
