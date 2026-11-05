@@ -88,8 +88,17 @@ final class ContinuationLedger {
     if(!("idle".equals(before)||"acknowledged".equals(before)||
          "cancelled".equals(before)||"failed".equals(before)))
       throw new IllegalStateException("Prior checkpoint has not been acknowledged or cancelled");
+    // Deterministic cross-chat recovery envelope, not a second AI agent.
+    // All identifiers come from the actual authoring operator and are stored
+    // with the message, so context does not depend on this conversation memory.
+    String envelope="ASTERION CONTROL — CONTINUATION CHECKPOINT\\n"
+        +"Project: "+project+"\\nCheckpoint ID: "+checkpoint
+        +"\\nSpecification level: "+tier+"\\nCanonical reference: "+spec
+        +"\\nResume instructions: Inspect the canonical files and latest source/progress in GitHub."
+        +" Distinguish committed, built, installed and device-verified.\\n"
+        +"Next work: "+text;
     JSONObject item = new JSONObject().put("project", project).put("checkpoint_id", checkpoint)
-      .put("priority_tier", tier).put("spec_reference", spec).put("message", text)
+      .put("priority_tier", tier).put("spec_reference", spec).put("message", envelope)
       .put("queued_at_ms", System.currentTimeMillis());
     if(history==null)history=new JSONArray();
     JSONArray kept=new JSONArray();
