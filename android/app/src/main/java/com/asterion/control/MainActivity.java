@@ -68,7 +68,7 @@ import java.util.concurrent.TimeUnit;
 
 /** Asterion Control · native, phone-first command surface. Technical APIs remain hidden. */
 public final class MainActivity extends Activity {
-  private static final int CAPTURE_REQUEST=112,NOTIFICATION_REQUEST=113,INSTALL_PICK_REQUEST=114;
+  private static final int CAPTURE_REQUEST=112,NOTIFICATION_REQUEST=113,INSTALL_PICK_REQUEST=114,MICROPHONE_REQUEST=115;
   private final Handler handler=new Handler(Looper.getMainLooper());
   private final ExecutorService io=Executors.newSingleThreadExecutor();
   private SharedPreferences prefs;
@@ -297,6 +297,17 @@ public final class MainActivity extends Activity {
     gap(observation,9);
     wide(observation,t("Requires Android screen-sharing approval. Records the selected Asterion app only. Evidence stays on this phone until explicitly retrieved.",11,DesignSystem.MUTED,false));
     wide(devicesBody,observation);
+
+    gap(devicesBody,12);LinearLayout voice=card();
+    rowTitle(voice,"Spoken questions during gameplay",
+      "Android speaker → on-device recognition → transcript",icon("activity",DesignSystem.PURPLE,22));
+    gap(voice,12);button(voice,"Enable spoken questions","check",true,this::startVoiceQuestions);
+    gap(voice,9);button(voice,"Stop microphone session","power",false,()->{
+      stopService(new Intent(this,VoiceDialogueService.class));
+      toast("Voice question session stopped");
+    });
+    gap(voice,9);wide(voice,t("The microphone is activated only for a question's answer and requires Android permission. No remote paid speech API or raw audio recording.",11,DesignSystem.MUTED,false));
+    wide(devicesBody,voice);
 
     gap(devicesBody,12);LinearLayout transfer=card();
     rowTitle(transfer,"Direct Wi-Fi file transfer","PC → Phone · Files are saved to Downloads/Asterion Control",icon("download",DesignSystem.TEAL,24));
@@ -738,6 +749,15 @@ public final class MainActivity extends Activity {
       }finally{if(connection!=null)connection.disconnect();}
     });
   }
+  private void startVoiceQuestions(){
+    if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){
+      requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},MICROPHONE_REQUEST);
+      return;
+    }
+    try{startForegroundService(new Intent(this,VoiceDialogueService.class));
+      toast("Voice questions enabled. Microphone listens only after a question");}
+    catch(Exception e){toast("Android could not start the voice session");}
+  }
   private void startAsterionObservation(){
     EditText targetApp=input(getSharedPreferences("asterion_observation",MODE_PRIVATE)
       .getString("target",""),false,"Asterion application package (com.asterion.*)");
@@ -804,6 +824,9 @@ public final class MainActivity extends Activity {
     }
   }
   @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results){super.onRequestPermissionsResult(request,permissions,results);
+    if(request==MICROPHONE_REQUEST&&results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED){
+      startVoiceQuestions();return;
+    }
     if(request==NOTIFICATION_REQUEST&&results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED){
       startAgent();
       if(!prefs.getString("token","").isEmpty())handler.postDelayed(()->{if(AgentService.running)registerPhone();},1400);
