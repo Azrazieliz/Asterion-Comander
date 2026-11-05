@@ -31,6 +31,8 @@ ALLOWED={
  'phone_observation_status':('GET','/api/v1/phone/observation/status'),
  'phone_observation_events':('GET','/api/v1/phone/observation/events'),
  'phone_observation_frame':('GET','/api/v1/phone/observation/frame'),
+ 'phone_voice_status':('GET','/api/v1/phone/voice/status'),
+ 'phone_voice_question':('POST','/api/v1/phone/voice/question'),
 }
 
 def git_token():
