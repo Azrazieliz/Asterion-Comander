@@ -4,6 +4,7 @@ import android.app.ActivityManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
@@ -40,6 +41,7 @@ public final class AgentService extends Service {
   private ServerSocket server;
   private Thread acceptThread;
   private final ExecutorService clients=Executors.newFixedThreadPool(6);
+  public static final String PREF_REMOTE_ENABLED="remote_enabled";
   public static String token(Context c){
     SharedPreferences p=c.getSharedPreferences("agent",MODE_PRIVATE);
     String saved=p.getString("token",null);
@@ -57,19 +59,52 @@ public final class AgentService extends Service {
   }
   private Notification notification(){
     getSystemService(NotificationManager.class).createNotificationChannel(new NotificationChannel("asterion_agent","Asterion remote control",NotificationManager.IMPORTANCE_LOW));
+    Intent open=new Intent(this,MainActivity.class);
+    open.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_SINGLE_TOP);
+    PendingIntent resume=PendingIntent.getActivity(this,2101,open,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
     return new Notification.Builder(this,"asterion_agent").setSmallIcon(android.R.drawable.ic_menu_manage)
-      .setContentTitle("Asterion Control agent").setContentText("Remote access enabled — tap the app to stop it")
+      .setContentTitle("Asterion Control active")
+      .setContentText("Phone control stays active when this app is in the background. Tap to manage.")
+      .setContentIntent(resume).setCategory(Notification.CATEGORY_SERVICE)
       .setOngoing(true).build();
   }
-  @Override public int onStartCommand(Intent i,int f,int id){
-    if(i!=null&&"STOP".equals(i.getAction())){stopSelf();return START_NOT_STICKY;}
+  @Override public synchronized int onStartCommand(Intent i,int f,int id){
+    SharedPreferences remotePrefs=getSharedPreferences("agent",MODE_PRIVATE);
+    if(i!=null&&"STOP".equals(i.getAction())){
+      remotePrefs.edit().putBoolean(PREF_REMOTE_ENABLED,false).apply();
+      stopSelf();return START_NOT_STICKY;
+    }
+    // START_STICKY is only honored for a service deliberately enabled by the owner.
+    if(i==null&&!remotePrefs.getBoolean(PREF_REMOTE_ENABLED,false)){
+      stopSelf();return START_NOT_STICKY;
+    }
+    remotePrefs.edit().putBoolean(PREF_REMOTE_ENABLED,true).apply();
     startForeground(2101,notification(),ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
-    if(!alive){alive=true;acceptThread=new Thread(this::serve,"asterion-agent");acceptThread.start();}
+    if(!alive||acceptThread==null||!acceptThread.isAlive()){
+      alive=true;acceptThread=new Thread(this::serve,"asterion-agent");
+      acceptThread.start();
+    }
     running=true;return START_STICKY;
   }
-  private void serve(){try(ServerSocket s=new ServerSocket(PORT)){server=s;
-    s.setReuseAddress(true);while(alive){Socket c=s.accept();c.setSoTimeout(8500);clients.execute(()->handle(c));}
-    }catch(Exception e){android.util.Log.e("AsterionAgent","Listener stopped",e);}finally{running=false;}}
+  /** Recover from a transient socket failure; do not silently disable the owner's session. */
+  private void serve(){
+    while(alive){
+      try(ServerSocket s=new ServerSocket(PORT)){
+        server=s;s.setReuseAddress(true);
+        while(alive){
+          Socket client=s.accept();
+          client.setSoTimeout(8500);
+          clients.execute(()->handle(client));
+        }
+      }catch(Exception e){
+        if(alive){
+          android.util.Log.w("AsterionAgent","Listener will retry after network failure",e);
+          try{Thread.sleep(1800);}catch(InterruptedException interrupted){Thread.currentThread().interrupt();break;}
+        }
+      }
+    }
+    alive=false;running=false;
+  }
   private String line(InputStream in)throws Exception{
     ByteArrayOutputStream b=new ByteArrayOutputStream();int c;
     while((c=in.read())!=-1){if(c==10)break;if(c!=13)b.write(c);if(b.size()>8192)throw new IllegalArgumentException("Header too long");}
