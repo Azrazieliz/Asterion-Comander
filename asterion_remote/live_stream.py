@@ -7,6 +7,7 @@ import secrets
 import time
 from fastapi import WebSocket, WebSocketDisconnect
 from .security import configured_token
+from .pairing import is_authorized
 from .phone_bridge import request as phone_request
 
 
@@ -23,7 +24,7 @@ def install_stream(app, desktop_capture):
         try:
             first=await asyncio.wait_for(websocket.receive_json(),timeout=5)
             token=first.get('token') if isinstance(first,dict) else ''
-            if not isinstance(token,str) or not secrets.compare_digest(token,configured_token()):
+            if not isinstance(token,str) or not (secrets.compare_digest(token,configured_token()) or is_authorized(token)):
                 await websocket.close(code=1008);return
             monitor=int(first.get('monitor',1));fps=max(1,min(20,int(first.get('fps',12))))
             interval=1/fps
