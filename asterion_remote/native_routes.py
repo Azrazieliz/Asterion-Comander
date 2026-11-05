@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import Response
 from .security import require_token
 from .phone_bridge import PairPhone, PhoneInput, register, request, load
+from .native_transfer import TransferRequest, start_transfer, transfer_status, cancel_transfer
 
 router = APIRouter(prefix='/api/v1', dependencies=[Depends(require_token)])
 
@@ -30,3 +31,17 @@ def phone_input(data:PhoneInput):return request('/input','POST',data.model_dump(
 
 @router.get('/phone/screen')
 def phone_screen():return Response(request('/screen').content,media_type='image/jpeg',headers={'Cache-Control':'no-store'})
+
+# Direct private-Wi-Fi file transfer. Source paths are confined to the authorized PC root.
+@router.post('/phone/transfers')
+def submit_phone_transfer(data: TransferRequest):
+    from .app import safe_path
+    return start_transfer(data,safe_path)
+
+@router.get('/phone/transfers/{key}')
+def phone_transfer_status(key: str):
+    return transfer_status(key)
+
+@router.post('/phone/transfers/{key}/cancel')
+def phone_transfer_cancel(key: str):
+    return cancel_transfer(key)
