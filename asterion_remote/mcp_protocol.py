@@ -81,7 +81,8 @@ def invoke_tool(name: str, args: dict):
     if name == 'remote_stop_command': return remote.stop_command(args['job_id'])
     if name == 'remote_pc_screen': return remote.screenshot(args.get('monitor',1),75)
     if name == 'remote_pc_input': return remote.desktop_input(remote.DesktopInput(**args))
-    if name == 'control_phone_status': from .native_routes import phone_status
+    if name == 'control_phone_status':
+        from .native_routes import phone_status
         return phone_status()
     if name == 'control_phone_health':
         from .native_routes import phone_health
