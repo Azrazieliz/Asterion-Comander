@@ -107,7 +107,8 @@ final class ContinuationLedger {
     kept.put(checkpoint);
     state.put("history",kept);
     state.put("pending", item).put("state", "queued").put("last_checkpoint", checkpoint)
-      .put("sequence", state.optInt("sequence", 0) + 1).put("last_error", "");
+      .put("sequence", state.optInt("sequence", 0) + 1).put("last_error", "")
+      .put("attempt_count",0).put("last_attempt_ms",0);
     persist();
     return new JSONObject().put("ok", true).put("state", "queued").put("checkpoint_id", checkpoint);
   }
@@ -117,11 +118,23 @@ final class ContinuationLedger {
       throw new IllegalStateException("No queued checkpoint");
     if (System.currentTimeMillis() - state.optLong("last_submit_ms", 0) < COOLDOWN_MS)
       throw new IllegalStateException("Continuation cooldown is active");
+    if(System.currentTimeMillis() - state.optLong("last_attempt_ms",0) < 3500L)
+      throw new IllegalStateException("Retry cooldown active");
+    int attempts=state.optInt("attempt_count",0);
+    if(attempts>=4){
+      state.put("state","requires_manual_review")
+        .put("last_error","Four ChatGPT UI submission attempts did not succeed");
+      persist();
+      throw new IllegalStateException("Too many attempts; owner inspection required");
+    }
     ControlAccessibilityService service = ControlAccessibilityService.active;
     if (service == null) throw new IllegalStateException("Android accessibility unavailable");
     String message = state.getJSONObject("pending").getString("message");
     // Save dispatching BEFORE touching another app: a crash cannot cause replay.
-    state.put("state", "dispatching"); persist();
+    state.put("state", "dispatching")
+         .put("attempt_count", attempts+1)
+         .put("last_attempt_ms",System.currentTimeMillis());
+    persist();
     JSONObject outcome = service.sendChatMessage(message);
     if (outcome.optBoolean("sent")) {
       state.put("state", "submitted_unverified")
@@ -131,8 +144,12 @@ final class ContinuationLedger {
       state.put("state","requires_manual_review")
         .put("last_error",outcome.optString("reason","Uncertain ChatGPT send"));
     } else {
-      state.put("state", "failed")
-        .put("last_error", outcome.optString("reason", "UI send was not confirmed"));
+      String reason=outcome.optString("reason","UI send was not confirmed");
+      // Transient composer/UI delays can be retried by a new ChatGPT window
+      // event. A conflicting user draft is never overwritten or retried.
+      boolean conflict=reason.contains("user text")||reason.contains("refusing to overwrite");
+      state.put("state", conflict?"requires_manual_review":"queued")
+        .put("last_error",reason);
     }
     persist();
     return new JSONObject().put("ok", outcome.optBoolean("sent"))
