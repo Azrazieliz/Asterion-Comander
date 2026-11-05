@@ -108,3 +108,28 @@ def phone_voice_status():
 @router.post('/phone/voice/question')
 def phone_voice_question(data:VoiceQuestion):
     return request('/voice/question','POST',data.model_dump(),timeout=10.0).json()
+
+# Generic application transport for authorized Asterion projects.
+# The Android app must be foreground before dispatching launch intents.
+class AppLaunch(BaseModel):
+    package: str = Field(min_length=3,max_length=180,pattern=r'^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*){1,12}$')
+
+@router.get('/phone/apps')
+def phone_apps():
+    return request('/apps').json()
+
+@router.post('/phone/apps/launch')
+def phone_app_launch(data:AppLaunch):
+    return request('/apps/launch','POST',data.model_dump(),timeout=7.0).json()
+
+class CheckpointAcknowledgment(BaseModel):
+    checkpoint_id: str = Field(min_length=3,max_length=100,pattern=r'^[A-Za-z0-9_.-]+$')
+    response_receipt: str = Field(min_length=8,max_length=512)
+
+@router.post('/phone/continuation/ack')
+def phone_continuation_ack(data:CheckpointAcknowledgment):
+    return request('/continuation/ack','POST',data.model_dump(),timeout=6.0).json()
+
+@router.post('/phone/continuation/cancel')
+def phone_continuation_cancel():
+    return request('/continuation/cancel','POST',{},timeout=6.0).json()
