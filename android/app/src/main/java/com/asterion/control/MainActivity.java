@@ -263,10 +263,11 @@ public final class MainActivity extends Activity {
     advancedSetup=card();advancedSetup.setVisibility(View.GONE);
     wide(advancedSetup,eyebrow("COMPUTER ADDRESS"));gap(advancedSetup,8);
     serverUrl=input(prefs.getString("url",""),false,"Windows computer · private network address");wide(advancedSetup,serverUrl);
-    gap(advancedSetup,13);wide(advancedSetup,eyebrow("PRIVATE PAIRING KEY"));gap(advancedSetup,8);
-    serverToken=input(prefs.getString("token",""),true,"Enter pairing key once");wide(advancedSetup,serverToken);
-    gap(advancedSetup,13);button(advancedSetup,"Save and connect","check",true,()->{
-      save();toggleAdvancedSetup();checkHost();show(1);
+    gap(advancedSetup,13);wide(advancedSetup,eyebrow("ONE-TIME PAIRING CODE"));gap(advancedSetup,8);
+    serverToken=input("",false,"8-digit code shown by Windows");wide(advancedSetup,serverToken);
+    gap(advancedSetup,13);button(advancedSetup,"Pair this computer","check",true,()->{
+      completePairing(serverUrl.getText().toString().trim(),serverToken.getText().toString().trim());
+      toggleAdvancedSetup();
     });
     gap(advancedSetup,13);TextView notice=t("Advanced pairing details stay hidden in everyday use. For connections outside your local network, use your private encrypted VPN; never expose the current HTTP service to the public internet.",11,DesignSystem.MUTED,false);wide(advancedSetup,notice);
     wide(devicesBody,advancedSetup);
@@ -326,7 +327,7 @@ public final class MainActivity extends Activity {
         runOnUiThread(()->{
           prefs.edit().putString("url",address).putString("token",token).apply();
           if(serverUrl!=null)serverUrl.setText(address);
-          if(serverToken!=null)serverToken.setText(token);
+          if(serverToken!=null)serverToken.setText("");
           checkHost();toast("Windows connected");show(1);
           if(AgentService.running)handler.postDelayed(this::registerPhone,600);
         });
@@ -362,7 +363,7 @@ public final class MainActivity extends Activity {
     }
     if(page==1)connectRemote(false);if(page==0||page==2||page==3)updateHealth();
   }
-  private void save(){prefs.edit().putString("url",serverUrl.getText().toString().trim()).putString("token",serverToken.getText().toString().trim())
+  private void save(){prefs.edit().putString("url",serverUrl.getText().toString().trim())
     .putString("phoneip",localAddress.getText().toString().trim()).apply();updateHealth();}
   private void connectRemote(boolean force){String url=prefs.getString("url","");String token=prefs.getString("token","");
     if(!url.matches("(?i)^https?://[^\\s/]+(?:/.*)?$")||token.isEmpty()){
