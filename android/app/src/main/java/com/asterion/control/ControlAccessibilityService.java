@@ -33,7 +33,7 @@ public final class ControlAccessibilityService extends AccessibilityService {
     lastResumeProbe = now;
     handoff.execute(() -> {
       try {
-        ContinuationLedger ledger = new ContinuationLedger(getApplicationContext());
+        ContinuationLedger ledger = ContinuationLedger.get(getApplicationContext());
         if ("queued".equals(ledger.recover().optString("state"))
             && ledger.status().optBoolean("enabled")) {
           // Delay: allow ChatGPT's chat composer and navigation to settle.
