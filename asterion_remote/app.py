@@ -96,6 +96,15 @@ def manifest():
     return FileResponse(STATIC / 'manifest.webmanifest', media_type='application/manifest+json')
 
 
+@app.get('/api/v1/discovery')
+def private_discovery(request: Request):
+    # Return no credentials, file listings or system paths.
+    from .pairing import private_peer
+    if not request.client or not private_peer(request.client.host):
+        raise HTTPException(403, 'Discovery requires a private LAN or VPN peer')
+    return {'service':'asterion-control','version':1,'port':8911,'name':platform.node()}
+
+
 @app.get('/api/v1/health', dependencies=[Depends(require_token)])
 def health():
     return {'ok': True, 'app': 'Asterion Control', 'version': '0.8.0', 'os': platform.system(),
