@@ -92,12 +92,27 @@ public final class AgentService extends Service {
     running=true;return START_STICKY;
   }
   /** Recover from a transient socket failure; do not silently disable the owner's session. */
+  private boolean privatePeer(java.net.InetAddress peer){
+    if(peer==null)return false;
+    if(peer.isLoopbackAddress()||peer.isSiteLocalAddress())return true;
+    byte[] bytes=peer.getAddress();
+    if(bytes.length==4){
+      int first=bytes[0]&255, second=bytes[1]&255;
+      return first==100 && second>=64 && second<=127; // Private CGNAT/VPN
+    }
+    if(bytes.length==16)return (bytes[0]&254)==252; // IPv6 ULA fc00::/7
+    return false;
+  }
   private void serve(){
     while(alive){
       try(ServerSocket s=new ServerSocket(PORT)){
         server=s;s.setReuseAddress(true);
         while(alive){
           Socket client=s.accept();
+          if(!privatePeer(client.getInetAddress())){
+            try{client.close();}catch(Exception ignored){}
+            continue; // Never expose native MCP/control over public IP directly.
+          }
           client.setSoTimeout(8500);
           clients.execute(()->handle(client));
         }
