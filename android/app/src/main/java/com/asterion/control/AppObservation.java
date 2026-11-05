@@ -89,9 +89,13 @@ final class AppObservation {
     });
   }
   static void sample(Context c) {
-    if(!enabled(c)||!target(c).equals(foreground)||!CaptureService.active)return;
+    if(!enabled(c)||!CaptureService.active)return;
     long now=System.currentTimeMillis();
     if(now-lastFrameMs<MIN_FRAME_MS)return;
+    ControlAccessibilityService access=ControlAccessibilityService.active;
+    if(access==null || !target(c).equals(access.currentPackage()))return;
+    if(!target(c).equals(foreground))return;
+    if(now-CaptureService.latestAtMs>1200L || CaptureService.latestAtMs<=0L)return;
     byte[] frame=CaptureService.latest;
     if(frame==null||frame.length<2048)return;
     lastFrameMs=now;
