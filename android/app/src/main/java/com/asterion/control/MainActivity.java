@@ -17,6 +17,7 @@ import android.media.projection.MediaProjectionManager;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
+import android.net.Uri;
 import android.os.BatteryManager;
 import android.os.Build;
 import android.os.Bundle;
@@ -266,7 +267,8 @@ public final class MainActivity extends Activity {
     gap(phone,12);phoneAddress=t("Checking phone access…",12,DesignSystem.MUTED,false);wide(phone,phoneAddress);
     gap(phone,16);button(phone,"Enable phone remote control","shield",true,this::enablePhoneControl);
     gap(phone,9);button(phone,"Share screen · Android permission","share",false,this::beginCapture);
-    gap(phone,9);button(phone,"Disable phone access","power",false,()->{stopService(new Intent(this,CaptureService.class));stopAgent();});
+    gap(phone,9);button(phone,"Keep access active during long sessions","power",false,this::showBatterySetup);
+     gap(phone,9);button(phone,"Disable phone access","power",false,()->{stopService(new Intent(this,CaptureService.class));stopAgent();});
     wide(devicesBody,phone);
 
     gap(devicesBody,12);LinearLayout security=card();
@@ -480,7 +482,13 @@ public final class MainActivity extends Activity {
     if(agentConnection!=null){agentConnection.setText(AgentService.running?"Enabled":"Off");agentConnection.setTextColor(AgentService.running?DesignSystem.TEAL:DesignSystem.MUTED);}
     if(captureConnection!=null){captureConnection.setText(CaptureService.active?"Streaming":"Off");captureConnection.setTextColor(CaptureService.active?DesignSystem.TEAL:DesignSystem.MUTED);}
     if(accessConnection!=null){accessConnection.setText(ControlAccessibilityService.active!=null?"Authorized":"Not enabled");accessConnection.setTextColor(ControlAccessibilityService.active!=null?DesignSystem.TEAL:DesignSystem.MUTED);}
-    if(phoneAddress!=null)phoneAddress.setText(AgentService.running?"Remote control enabled":"Remote control disabled");
+    if(phoneAddress!=null){
+      boolean requested=getSharedPreferences("agent",MODE_PRIVATE)
+        .getBoolean(AgentService.PREF_REMOTE_ENABLED,false);
+      phoneAddress.setText(AgentService.running?"Remote control enabled":
+         requested?"Android stopped access · reopen Control or tap Repair connection":
+                   "Remote control disabled");
+    }
     if(privacyStatus!=null)privacyStatus.setText(
       AgentService.running?"Phone agent active · "+(ControlAccessibilityService.active!=null?"input authorized":"touch permission needed")+" · "+(CaptureService.active?"screen shared":"screen private"):
       "Remote phone access is disabled. No screen or input is shared.");
@@ -505,10 +513,42 @@ public final class MainActivity extends Activity {
       });
     });
   }
-  private void startAgent(){try{if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED){requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},NOTIFICATION_REQUEST);return;}
+  private void startAgent(){try{
+    // Notification permission is not a prerequisite for a user-started foreground agent.
+    // Android can run the service even if notification posting is denied.
+    if(Build.VERSION.SDK_INT>=33&&
+       checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED&&
+       !prefs.getBoolean("asked_notification",false)){
+      prefs.edit().putBoolean("asked_notification",true).apply();
+      requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},NOTIFICATION_REQUEST);
+    }
     startForegroundService(new Intent(this,AgentService.class));handler.postDelayed(()->{updateHealth();toast(AgentService.running?"Phone agent enabled":"Agent could not start; check device permissions");},700);
     }catch(Exception e){toast("Unable to start agent: "+e.getClass().getSimpleName());}}
-  private void stopAgent(){stopService(new Intent(this,AgentService.class));handler.postDelayed(this::updateHealth,450);toast("Phone agent disabled");}
+  private void stopAgent(){
+    getSharedPreferences("agent",MODE_PRIVATE).edit().putBoolean(AgentService.PREF_REMOTE_ENABLED,false).apply();
+    stopService(new Intent(this,AgentService.class));
+    handler.postDelayed(this::updateHealth,450);
+    toast("Phone agent disabled");
+  }
+  private void showBatterySetup(){
+    new AlertDialog.Builder(this).setTitle("Keep Asterion Control active")
+      .setMessage("For long unattended tests on Samsung: select Battery > Unrestricted for Asterion Control, and remove it from Sleeping/Deep sleeping apps. Android may still require screen-sharing permission again if capture is stopped.")
+      .setPositiveButton("Open app settings",(dialog,which)->{
+        try{Intent details=new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+          Uri.parse("package:"+getPackageName()));startActivity(details);}
+        catch(Exception e){toast("Open Android Settings > Apps > Asterion Control > Battery");}
+      }).setNegativeButton("Cancel",null).show();
+  }
+  @Override protected void onResume(){
+    super.onResume();
+    if(prefs!=null&&!destroyed&&getSharedPreferences("agent",MODE_PRIVATE)
+       .getBoolean(AgentService.PREF_REMOTE_ENABLED,false)){
+      if(!AgentService.running)startAgent();
+      if(!prefs.getString("url","").isEmpty()&&!prefs.getString("token","").isEmpty()){
+        handler.postDelayed(()->{if(!destroyed&&AgentService.running)registerPhone();},1400);
+      }
+    }
+  }
   @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results){super.onRequestPermissionsResult(request,permissions,results);
     if(request==NOTIFICATION_REQUEST&&results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED){
       startAgent();
