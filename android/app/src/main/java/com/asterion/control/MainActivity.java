@@ -30,6 +30,7 @@ import android.os.Looper;
 import android.os.PowerManager;
 import android.os.StatFs;
 import android.provider.Settings;
+import android.provider.OpenableColumns;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
@@ -67,7 +68,7 @@ import java.util.concurrent.TimeUnit;
 
 /** Asterion Control · native, phone-first command surface. Technical APIs remain hidden. */
 public final class MainActivity extends Activity {
-  private static final int CAPTURE_REQUEST=112,NOTIFICATION_REQUEST=113;
+  private static final int CAPTURE_REQUEST=112,NOTIFICATION_REQUEST=113,INSTALL_PICK_REQUEST=114;
   private final Handler handler=new Handler(Looper.getMainLooper());
   private final ExecutorService io=Executors.newSingleThreadExecutor();
   private SharedPreferences prefs;
@@ -79,7 +80,7 @@ public final class MainActivity extends Activity {
   private final TextView[] tabLabels=new TextView[4];
   private TextView headerStatus,pcConnection,homeAgent,homeBattery,homeMemory,homeThermal;
   private TextView healthBattery,healthTemp,healthMemory,healthStorage,healthThermal,healthWifi;
-  private TextView remoteConnection,remotePlaceholder,agentConnection,captureConnection,accessConnection,phoneAddress,hostHealth,pairingFeedback,transferFeedback;
+  private TextView remoteConnection,remotePlaceholder,agentConnection,captureConnection,accessConnection,phoneAddress,hostHealth,pairingFeedback,transferFeedback,updateFeedback;
   private String activeTransferId=null;
   private DesignSystem.Meter batteryMeter,memoryMeter,storageMeter;
   private EditText serverUrl,serverToken,localAddress;
@@ -283,6 +284,15 @@ public final class MainActivity extends Activity {
     gap(transfer,9);transferFeedback=t("No transfer active. Uses the existing private Wi-Fi connection, never GitHub or ADB.",12,DesignSystem.MUTED,false);
     transferFeedback.setMaxLines(6);wide(transfer,transferFeedback);wide(devicesBody,transfer);
 
+    gap(devicesBody,12);LinearLayout updater=card();
+    rowTitle(updater,"App updates & installation","Update without ADB · Android approval required",icon("download",DesignSystem.TEAL,22));
+    gap(updater,12);button(updater,"Check for Asterion Control updates","refresh",true,
+       ()->UpdateManager.check(this,this::showUpdateFeedback));
+    gap(updater,9);button(updater,"Install an APK from Downloads","download",false,this::pickInstallPackage);
+    gap(updater,9);updateFeedback=t("Updates download over HTTPS, verify SHA-256 and open Android's installer. Never silent.",12,DesignSystem.MUTED,false);
+    updateFeedback.setMaxLines(5);wide(updater,updateFeedback);
+    wide(devicesBody,updater);
+
     gap(devicesBody,12);LinearLayout security=card();
     rowTitle(security,"Access & privacy","Only connected devices you authorize can control this phone",icon("shield",DesignSystem.TEAL,24));
     gap(security,12);privacyStatus=t("Access is off until you enable it. Android may request accessibility and screen-sharing permission.",12,DesignSystem.MUTED,false);
@@ -402,6 +412,20 @@ public final class MainActivity extends Activity {
         runOnUiThread(()->transferStatus("Cancellation requested"));
       }catch(Exception e){runOnUiThread(()->transferStatus("Cancellation failed: "+e.getMessage()));}
     });
+  }
+
+  private void showUpdateFeedback(String message){
+    if(updateFeedback!=null)updateFeedback.setText(message);
+    else toast(message);
+  }
+  private void pickInstallPackage(){
+    try{
+      Intent picker=new Intent(Intent.ACTION_OPEN_DOCUMENT);
+      picker.setType("*/*");
+      picker.addCategory(Intent.CATEGORY_OPENABLE);
+      picker.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+      startActivityForResult(picker,INSTALL_PICK_REQUEST);
+    }catch(Exception e){showUpdateFeedback("Android file picker unavailable");}
   }
 
   /** Native private-network peer discovery; no ADB or remote-desktop dependency. */
@@ -719,6 +743,19 @@ public final class MainActivity extends Activity {
     }}
   private void beginCapture(){try{MediaProjectionManager p=(MediaProjectionManager)getSystemService(Context.MEDIA_PROJECTION_SERVICE);startActivityForResult(p.createScreenCaptureIntent(),CAPTURE_REQUEST);}catch(Exception e){toast("Screen capture not available");}}
   @Override protected void onActivityResult(int request,int code,Intent data){super.onActivityResult(request,code,data);
+    if(request==INSTALL_PICK_REQUEST && code==RESULT_OK && data!=null && data.getData()!=null){
+      Uri selected=data.getData();
+      String filename="";
+      try(android.database.Cursor cursor=getContentResolver().query(selected,
+           new String[]{OpenableColumns.DISPLAY_NAME},null,null,null)){
+        if(cursor!=null&&cursor.moveToFirst())filename=cursor.getString(0);
+      }catch(Exception e){showUpdateFeedback("Cannot inspect selected file");return;}
+      if(filename==null||!filename.toLowerCase(Locale.ROOT).endsWith(".apk")){
+        showUpdateFeedback("Select an Android .apk file");return;
+      }
+      UpdateManager.installReceived(this,selected,this::showUpdateFeedback);
+      return;
+    }
     if(request==CAPTURE_REQUEST&&code==RESULT_OK&&data!=null){try{Intent i=new Intent(this,CaptureService.class);i.putExtra("result",code);i.putExtra("data",data);startForegroundService(i);handler.postDelayed(this::updateHealth,450);}catch(Exception e){toast("Screen share could not start");}}
   }
   private void registerPhone(){
