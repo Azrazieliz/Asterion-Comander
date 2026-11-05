@@ -11,6 +11,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: android-control-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   source-and-apk:
     runs-on: ubuntu-latest
