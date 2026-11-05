@@ -42,20 +42,19 @@ TOOLS = [
     spec('remote_pc_input', 'Send a mouse, keyboard or text action to the PC',
          {'action': {'type': 'string', 'enum': ['click','double_click','right_click','move','drag','scroll','type','hotkey','press','mouse_down','mouse_up']},
           'x':INT,'y':INT,'to_x':INT,'to_y':INT,'text':STR,'keys':{'type':'array','items':STR},'amount':INT, 'monitor':INT}, ['action']),
-    spec('remote_android_devices', 'List Android phones authorized with PC ADB'),
-    spec('remote_android_connect_wifi', 'Connect to an authorized Android wireless ADB device', {'address':STR},['address']),
-    spec('remote_android_pair_wifi', 'Pair Android Wireless Debugging using its on-screen pairing code', {'address':STR,'code':STR},['address','code']),
-    spec('remote_android_info', 'Get model, Android version, screen size and battery', {'serial': STR}, ['serial']),
-    spec('remote_android_screen', 'Capture an authorized Android phone screen as PNG', {'serial': STR}, ['serial']),
-    spec('remote_android_input', 'Tap, swipe, long press, type or send key to Android phone',
-         {'serial': STR,'action':{'type':'string','enum':['tap','swipe','long_press','key','text']},
-          'x':INT,'y':INT,'to_x':INT,'to_y':INT,'duration_ms':INT,'key':STR,'text':STR}, ['serial','action']),
-    spec('remote_android_shell', 'Execute an ADB shell command on the authorized phone (only if enabled)',
-         {'serial': STR,'command': STR}, ['serial','command']),
-    spec('remote_android_packages', 'List installed Android application package names',
-         {'serial': STR,'q': STR}, ['serial']),
-    spec('remote_android_ui', 'Inspect an authorized Android phone accessibility hierarchy via UIAutomator',
-         {'serial':STR}, ['serial']),
+    spec('control_phone_status','Read paired native Android agent status; requires no ADB'),
+    spec('control_phone_health','Read native Android CPU, memory, battery and thermal indicators'),
+    spec('control_phone_screen','Capture a single current native Android MediaProjection frame'),
+    spec('control_phone_ui','Read native Android accessibility UI hierarchy'),
+    spec('control_phone_input','Send action to the authorized Android agent without ADB',
+         {'action': {'type':'string','enum':['tap','swipe','long_press','back','home','recents','notifications','type','click_text']},
+          'x':INT,'y':INT,'x2':INT,'y2':INT,'duration_ms':INT,'text':STR},['action']),
+    spec('control_scripts','List externally authored deterministic saved scripts'),
+    spec('control_script_run','Run a saved script through the existing bounded PC executor',
+         {'script_id':STR,'arguments':{'type':'array','items':STR},'cwd':STR},['script_id']),
+    spec('control_script_parallel','Launch up to four saved scripts in parallel',
+         {'jobs':{'type':'array','items':{'type':'object','properties':{'script_id':STR,'arguments':{'type':'array','items':STR},'cwd':STR},'required':['script_id']}},'mode':STR},['jobs']),
+
 ]
 
 
@@ -82,17 +81,28 @@ def invoke_tool(name: str, args: dict):
     if name == 'remote_stop_command': return remote.stop_command(args['job_id'])
     if name == 'remote_pc_screen': return remote.screenshot(args.get('monitor',1),75)
     if name == 'remote_pc_input': return remote.desktop_input(remote.DesktopInput(**args))
-    if name == 'remote_android_devices': return remote.android_devices()
-    if name == 'remote_android_connect_wifi': return remote.connect_android(remote.WifiTarget(**args))
-    if name == 'remote_android_pair_wifi': return remote.pair_android(remote.PairTarget(**args))
-    if name == 'remote_android_info': return remote.android_info(args['serial'])
-    if name == 'remote_android_screen': return remote.android_screen(args['serial'])
-    if name == 'remote_android_input':
-        data={k:v for k,v in args.items() if k!='serial'}
-        return remote.android_input(args['serial'],remote.AndroidInput(**data))
-    if name == 'remote_android_shell': return remote.android_shell(args['serial'],remote.AndroidShell(command=args['command']))
-    if name == 'remote_android_packages': return remote.android_packages(args['serial'],args.get('q',''))
-    if name == 'remote_android_ui': return remote.android_ui_hierarchy(args['serial'])
+    if name == 'control_phone_status': from .native_routes import phone_status
+        return phone_status()
+    if name == 'control_phone_health':
+        from .native_routes import phone_health
+        return phone_health()
+    if name == 'control_phone_screen':
+        from .native_routes import phone_screen
+        return phone_screen()
+    if name == 'control_phone_ui':
+        from .native_routes import phone_ui
+        return phone_ui()
+    if name == 'control_phone_input':
+        from .native_routes import phone_input
+        from .phone_bridge import PhoneInput
+        return phone_input(PhoneInput(**args))
+    if name == 'control_scripts': return remote.internal_scripts()
+    if name == 'control_script_run':
+        from .control_services import ScriptRun
+        return remote.run_saved_script(ScriptRun(**args))
+    if name == 'control_script_parallel':
+        from .control_services import BatchRequest
+        return remote.run_saved_scripts(BatchRequest(**args))
     raise KeyError(name)
 
 
@@ -108,8 +118,8 @@ def handle_rpc(message: dict[str,Any]) -> dict | None:
         if method=='initialize':
             result={'protocolVersion':PROTOCOL,
                     'capabilities':{'tools':{'listChanged':False}},
-                    'serverInfo':{'name':'asterion-control','version':'0.3.0'},
-                    'instructions':'Asterion Remote controls only devices authorized by the operator.'}
+                    'serverInfo':{'name':'asterion-control','version':'0.8.0'},
+                    'instructions':'Asterion Control operates only authorized devices. Native Android requires explicit accessibility and screen capture approval.'}
         elif method=='ping':
             result={}
         elif method=='tools/list':
