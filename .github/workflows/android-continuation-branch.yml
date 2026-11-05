@@ -57,6 +57,29 @@ jobs:
           test -s android/app/build/outputs/apk/debug/app-debug.apk
           grep -q "versionName '0.8.7'" android/app/build.gradle
           sha256sum android/app/build/outputs/apk/debug/app-debug.apk
+      - name: Audit debug APK signing identity versus installed v0.8.6 baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SIGNER="$SDK/build-tools/35.0.0/apksigner"
+          test -x "$SIGNER"
+          BASE="dist/Asterion-Control-v0.8.6-debug.apk"
+          NEW="android/app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$BASE"
+          test -s "$NEW"
+          OLD_CERT=$("$SIGNER" verify --print-certs "$BASE" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -1)
+          NEW_CERT=$("$SIGNER" verify --print-certs "$NEW" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -1)
+          test -n "$OLD_CERT"
+          test -n "$NEW_CERT"
+          echo "Installed version baseline cert SHA256: $OLD_CERT"
+          echo "CI build cert SHA256:                $NEW_CERT"
+          if [ "$OLD_CERT" = "$NEW_CERT" ]; then
+            echo "SIGNER_COMPATIBLE_WITH_V086_BASELINE=true" | tee "$RUNNER_TEMP/asterion-signing-compatibility.txt"
+          else
+            echo "SIGNER_COMPATIBLE_WITH_V086_BASELINE=false" | tee "$RUNNER_TEMP/asterion-signing-compatibility.txt"
+            echo "::warning::This CI APK cannot replace v0.8.6 in place; rebuild with the owner's matching original signing key."
+          fi
       - uses: actions/upload-artifact@v4
         if: success()
         with:
