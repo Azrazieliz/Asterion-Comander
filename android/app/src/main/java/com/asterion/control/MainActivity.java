@@ -68,6 +68,12 @@ import java.util.concurrent.TimeUnit;
 
 /** Asterion Control · native, phone-first command surface. Technical APIs remain hidden. */
 public final class MainActivity extends Activity {
+  private static volatile java.lang.ref.WeakReference<MainActivity> visibleActivity =
+      new java.lang.ref.WeakReference<>(null);
+  static Activity foregroundActivity() {
+    MainActivity current=visibleActivity.get();
+    return current==null||current.isFinishing()||current.isDestroyed()?null:current;
+  }
   private static final int CAPTURE_REQUEST=112,NOTIFICATION_REQUEST=113,INSTALL_PICK_REQUEST=114,MICROPHONE_REQUEST=115;
   private final Handler handler=new Handler(Looper.getMainLooper());
   private final ExecutorService io=Executors.newSingleThreadExecutor();
@@ -815,6 +821,7 @@ public final class MainActivity extends Activity {
   }
   @Override protected void onResume(){
     super.onResume();
+    visibleActivity = new java.lang.ref.WeakReference<>(this);
     if(prefs!=null&&!destroyed&&getSharedPreferences("agent",MODE_PRIVATE)
        .getBoolean(AgentService.PREF_REMOTE_ENABLED,false)){
       if(!AgentService.running)startAgent();
@@ -914,5 +921,9 @@ public final class MainActivity extends Activity {
   private static boolean sameOrigin(String a,String b){try{URL u=new URL(a),v=new URL(b);int p=u.getPort()<0?u.getDefaultPort():u.getPort();int q=v.getPort()<0?v.getDefaultPort():v.getPort();return u.getProtocol().equals(v.getProtocol())&&u.getHost().equalsIgnoreCase(v.getHost())&&p==q;}catch(Exception ex){return false;}}
   private static String ipAddress(){try{for(NetworkInterface n:Collections.list(NetworkInterface.getNetworkInterfaces())){if(!n.isUp()||n.isLoopback())continue;for(java.net.InetAddress a:Collections.list(n.getInetAddresses())){if(a instanceof Inet4Address&&!a.isLoopbackAddress()&&a.isSiteLocalAddress())return a.getHostAddress();}}}catch(Exception ignored){}return "Unavailable";}
   @Override public void onBackPressed(){if(currentTab==1&&web!=null&&web.canGoBack())web.goBack();else if(currentTab!=0)show(0);else super.onBackPressed();}
+  @Override protected void onPause(){
+    if(visibleActivity.get()==this)visibleActivity = new java.lang.ref.WeakReference<>(null);
+    super.onPause();
+  }
   @Override protected void onDestroy(){destroyed=true;handler.removeCallbacks(ticker);io.shutdownNow();if(web!=null){web.destroy();}super.onDestroy();}
 }
