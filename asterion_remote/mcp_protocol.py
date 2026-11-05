@@ -39,6 +39,7 @@ TOOLS = [
     spec('remote_command_status', 'Read output of a launched PC command', {'job_id': STR}, ['job_id']),
     spec('remote_stop_command', 'Terminate a launched PC job', {'job_id': STR}, ['job_id']),
     spec('remote_pc_screen', 'Capture the PC desktop screen as an image', {'monitor': INT}),
+    spec('remote_pc_window','Observe the actual Windows foreground app title and PID'),
     spec('remote_pc_input', 'Send a mouse, keyboard or text action to the PC',
          {'action': {'type': 'string', 'enum': ['click','double_click','right_click','move','drag','scroll','type','hotkey','press','mouse_down','mouse_up']},
           'x':INT,'y':INT,'to_x':INT,'to_y':INT,'text':STR,'keys':{'type':'array','items':STR},'amount':INT, 'monitor':INT}, ['action']),
@@ -53,7 +54,7 @@ TOOLS = [
         {'device':{'type':'string','enum':['phone','pc']},
          'steps':{'type':'array','minItems':1,'maxItems':80,'items':{
              'type':'object','properties':{
-                 'kind':{'type':'string','enum':['input','wait','assert_text','capture','health']},
+                 'kind':{'type':'string','enum':['input','wait','assert_text','capture','health','window','assert_window']},
                  'payload':{'type':'object'},'wait_ms':INT,'text':STR},
              'required':['kind']}},
          'timeout_s':INT,'stop_on_error':{'type':'boolean'}},['device','steps']),
@@ -98,6 +99,9 @@ def invoke_tool(name: str, args: dict):
     if name == 'remote_command_status': return remote.command_status(args['job_id'])
     if name == 'remote_stop_command': return remote.stop_command(args['job_id'])
     if name == 'remote_pc_screen': return remote.screenshot(args.get('monitor',1),75)
+    if name == 'remote_pc_window':
+        from .desktop_observe import foreground
+        return foreground()
     if name == 'remote_pc_input': return remote.desktop_input(remote.DesktopInput(**args))
     if name == 'control_phone_status':
         from .native_routes import phone_status
