@@ -44,6 +44,8 @@ import org.json.JSONObject;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.Inet4Address;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.net.NetworkInterface;
 import java.net.URL;
 import java.net.InetAddress;
@@ -373,7 +375,11 @@ public final class MainActivity extends Activity {
         conn.setRequestProperty("Content-Type","application/json");
         byte[] body=new JSONObject().put("name",Build.MODEL).put("code",code).toString().getBytes(StandardCharsets.UTF_8);
         try(OutputStream out=conn.getOutputStream()){out.write(body);}
-        if(conn.getResponseCode()!=200)throw new IllegalArgumentException("Pairing code rejected");
+        int codeResponse=conn.getResponseCode();
+        if(codeResponse!=200){
+          String reason=codeResponse==401?"Incorrect or expired code":codeResponse==403?"The Windows agent rejected this network":codeResponse==429?"Too many attempts; request a new code":codeResponse==404?"The Windows agent needs updating":("Windows returned HTTP "+codeResponse);
+          throw new IllegalStateException(reason);
+        }
         JSONObject response=new JSONObject(new String(conn.getInputStream().readNBytes(16384),StandardCharsets.UTF_8));
         String token=response.getString("token");
         if(token.length()<32)throw new IllegalArgumentException("Invalid token");
@@ -382,9 +388,16 @@ public final class MainActivity extends Activity {
           if(serverUrl!=null)serverUrl.setText(address);
           if(serverToken!=null)serverToken.setText("");
           checkHost();toast("Windows connected");show(1);
-          if(AgentService.running)handler.postDelayed(this::registerPhone,600);
+          startAgent();
+          handler.postDelayed(()->{if(AgentService.running)registerPhone();else if(remoteConnection!=null)remoteConnection.setText("Windows paired; turn on phone access to register this device");},1400);
         });
-      }catch(Exception e){runOnUiThread(()->toast("Pairing failed — check the one-time code"));}
+      }catch(Exception e){
+        String message=e instanceof java.net.SocketTimeoutException?"Windows connection timed out":e instanceof java.net.ConnectException?"Cannot reach Windows on this network":e.getMessage()==null?e.getClass().getSimpleName():e.getMessage();
+        runOnUiThread(()->{
+          if(remoteConnection!=null)remoteConnection.setText("Pairing failed: "+message);
+          toast("Pairing failed: "+message);
+        });
+      }
       finally{if(conn!=null)conn.disconnect();}
     });
   }
@@ -481,19 +494,76 @@ public final class MainActivity extends Activity {
     }catch(Exception e){toast("Unable to start agent: "+e.getClass().getSimpleName());}}
   private void stopAgent(){stopService(new Intent(this,AgentService.class));handler.postDelayed(this::updateHealth,450);toast("Phone agent disabled");}
   @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results){super.onRequestPermissionsResult(request,permissions,results);
-    if(request==NOTIFICATION_REQUEST&&results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED)startAgent();}
+    if(request==NOTIFICATION_REQUEST&&results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED){
+      startAgent();
+      if(!prefs.getString("token","").isEmpty())handler.postDelayed(()->{if(AgentService.running)registerPhone();},1400);
+    }}
   private void beginCapture(){try{MediaProjectionManager p=(MediaProjectionManager)getSystemService(Context.MEDIA_PROJECTION_SERVICE);startActivityForResult(p.createScreenCaptureIntent(),CAPTURE_REQUEST);}catch(Exception e){toast("Screen capture not available");}}
   @Override protected void onActivityResult(int request,int code,Intent data){super.onActivityResult(request,code,data);
     if(request==CAPTURE_REQUEST&&code==RESULT_OK&&data!=null){try{Intent i=new Intent(this,CaptureService.class);i.putExtra("result",code);i.putExtra("data",data);startForegroundService(i);handler.postDelayed(this::updateHealth,450);}catch(Exception e){toast("Screen share could not start");}}
   }
-  private void registerPhone(){save();if(!AgentService.running){toast("Enable phone agent first");return;}
-    io.execute(()->{try{String raw=prefs.getString("url","").replaceAll("/+$","");if(raw.isEmpty())throw new IllegalArgumentException("Windows address required");
-      URL url=new URL(raw+"/api/v1/phone/register");HttpURLConnection conn=(HttpURLConnection)url.openConnection();conn.setConnectTimeout(5500);conn.setReadTimeout(6500);conn.setRequestMethod("POST");conn.setDoOutput(true);
-      conn.setRequestProperty("Authorization","Bearer "+prefs.getString("token",""));conn.setRequestProperty("Content-Type","application/json");
-      String ip=prefs.getString("phoneip",ipAddress());JSONObject body=new JSONObject().put("base_url","http://"+ip+":"+AgentService.PORT).put("token",AgentService.token(this));
-      try(OutputStream out=conn.getOutputStream()){out.write(body.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));}
-      int code=conn.getResponseCode();conn.disconnect();runOnUiThread(()->toast(code==200?"Phone linked with Windows":"Registration failed · HTTP "+code));
-    }catch(Exception e){runOnUiThread(()->toast("Registration failed · "+e.getClass().getSimpleName()));}});
+  private void registerPhone(){
+    if(!AgentService.running){if(remoteConnection!=null)remoteConnection.setText("Enable phone access to register this device");return;}
+    io.execute(()->{
+      String raw=prefs.getString("url","").replaceAll("/+$","");
+      if(raw.isEmpty()){runOnUiThread(()->toast("Windows is not paired"));return;}
+      String ip=localIpForPeer(raw);
+      if(ip.equals("Unavailable")){runOnUiThread(()->toast("Phone has no private network route to Windows"));return;}
+      String bearer=prefs.getString("token","");
+      for(int attempt=0;attempt<4;attempt++){
+        HttpURLConnection conn=null;
+        try{
+          conn=(HttpURLConnection)new URL(raw+"/api/v1/phone/register").openConnection();
+          conn.setConnectTimeout(3500);conn.setReadTimeout(4000);
+          conn.setRequestMethod("POST");conn.setDoOutput(true);
+          conn.setRequestProperty("Authorization","Bearer "+bearer);
+          conn.setRequestProperty("Content-Type","application/json");
+          JSONObject body=new JSONObject().put("base_url","http://"+ip+":"+AgentService.PORT)
+                                      .put("token",AgentService.token(this))
+                                      .put("device",Build.MODEL);
+          try(OutputStream out=conn.getOutputStream()){out.write(body.toString().getBytes(StandardCharsets.UTF_8));}
+          int status=conn.getResponseCode();
+          if(status==200){
+            runOnUiThread(()->{
+              if(remoteConnection!=null)remoteConnection.setText("Connected · Windows worker + Android registered");
+              toast("Phone registered with Windows");
+              updateHealth();
+            });return;
+          }
+          if(status!=502&&status!=503){
+            final int failure=status;
+            runOnUiThread(()->{
+              if(remoteConnection!=null)remoteConnection.setText("Phone registration HTTP "+failure);
+              toast("Phone registration returned HTTP "+failure);
+            });return;
+          }
+        }catch(Exception e){
+          if(attempt==3){
+            final String failure=e.getClass().getSimpleName();
+            runOnUiThread(()->{
+              if(remoteConnection!=null)remoteConnection.setText("Phone registration failed: "+failure);
+              toast("Phone registration failed: "+failure);
+            });
+          }
+        }finally{if(conn!=null)conn.disconnect();}
+        try{Thread.sleep(700);}catch(InterruptedException e){Thread.currentThread().interrupt();return;}
+      }
+      runOnUiThread(()->toast("Phone agent is not reachable from Windows"));
+    });
+  }
+  /** Select the phone address Windows can actually reach, not an arbitrary VPN/cellular interface. */
+  private String localIpForPeer(String host){
+    try{
+      URL u=new URL(host);
+      int port=u.getPort()<0?u.getDefaultPort():u.getPort();
+      try(Socket sock=new Socket()){
+        sock.connect(new InetSocketAddress(u.getHost(),port),1800);
+        java.net.InetAddress addr=sock.getLocalAddress();
+        if(addr instanceof Inet4Address&&!addr.isLoopbackAddress()&&addr.isSiteLocalAddress())
+          return addr.getHostAddress();
+      }
+    }catch(Exception ignored){}
+    return ipAddress();
   }
   private static boolean sameOrigin(String a,String b){try{URL u=new URL(a),v=new URL(b);int p=u.getPort()<0?u.getDefaultPort():u.getPort();int q=v.getPort()<0?v.getDefaultPort():v.getPort();return u.getProtocol().equals(v.getProtocol())&&u.getHost().equalsIgnoreCase(v.getHost())&&p==q;}catch(Exception ex){return false;}}
   private static String ipAddress(){try{for(NetworkInterface n:Collections.list(NetworkInterface.getNetworkInterfaces())){if(!n.isUp()||n.isLoopback())continue;for(java.net.InetAddress a:Collections.list(n.getInetAddresses())){if(a instanceof Inet4Address&&!a.isLoopbackAddress()&&a.isSiteLocalAddress())return a.getHostAddress();}}}catch(Exception ignored){}return "Unavailable";}
