@@ -5,6 +5,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE"/>
@@ -12,7 +13,13 @@
       <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="unspecified">
         <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
       </activity>
-      <service android:name=".AgentService" android:exported="false" android:foregroundServiceType="connectedDevice" />
+      <service android:name=".AgentService" android:exported="false" android:stopWithTask="false" android:foregroundServiceType="connectedDevice" />
+      <receiver android:name=".RestoreReceiver" android:enabled="true" android:exported="false">
+        <intent-filter>
+          <action android:name="android.intent.action.BOOT_COMPLETED"/>
+          <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+        </intent-filter>
+      </receiver>
       <service android:name=".CaptureService" android:exported="false" android:foregroundServiceType="mediaProjection" />
       <service android:name=".ControlAccessibilityService" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:exported="true">
         <intent-filter><action android:name="android.accessibilityservice.AccessibilityService"/></intent-filter>
