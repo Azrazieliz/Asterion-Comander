@@ -32,8 +32,17 @@ final class AppObservation {
   static boolean enabled(Context c){return prefs(c).getBoolean("enabled",false);}
   static String target(Context c){return prefs(c).getString("target","");}
   static synchronized JSONObject configure(Context c,boolean enabled,String packageName) throws Exception {
-    if(enabled && (packageName==null || !packageName.matches("com\\.asterion\\.[A-Za-z0-9_.]{2,100}")))
-      throw new IllegalArgumentException("Choose an Asterion application package (com.asterion.*)");
+    // Asterion Pilot operates third-party Android games (not com.asterion.*).
+    // Record only the owner-selected foreground package, never system UI or ChatGPT.
+    if(enabled && (packageName==null ||
+        !packageName.matches("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*){1,12}") ||
+        packageName.equals("com.openai.chatgpt") ||
+        packageName.equals("com.asterion.control") ||
+        packageName.startsWith("com.android.") ||
+        packageName.startsWith("com.google.android.") ||
+        packageName.startsWith("com.samsung.android.") ||
+        packageName.startsWith("com.sec.android.")))
+      throw new IllegalArgumentException("Choose an explicitly authorized game package");
     if(!enabled)packageName=target(c);
     prefs(c).edit().putBoolean("enabled",enabled).putString("target",packageName)
       .putLong("started_ms",System.currentTimeMillis()).apply();
