@@ -50,6 +50,11 @@ TOOLS = [
     spec('control_phone_input','Send action to the authorized Android agent without ADB',
          {'action': {'type':'string','enum':['tap','swipe','long_press','back','home','recents','notifications','type','click_text']},
           'x':INT,'y':INT,'x2':INT,'y2':INT,'duration_ms':INT,'text':STR},['action']),
+    spec('control_phone_continuation_status','Inspect the Android-owned checkpoint lifecycle (requires device opt-in)'),
+    spec('control_phone_continuation_queue','Queue one spec-referenced ChatGPT app continuation on the phone; requires owner opt-in',
+         {'project':STR,'checkpoint_id':STR,'priority_tier':{'type':'string','enum':['5*','6*','7*']},
+          'spec_reference':STR,'message':STR},['project','checkpoint_id','priority_tier','spec_reference','message']),
+    spec('control_phone_continuation_dispatch','Attempt guarded queued checkpoint submission in foreground ChatGPT'),
     spec('control_session_start','Start a bounded persistent Control-side interaction session (no ChatGPT turn per gesture)',
         {'device':{'type':'string','enum':['phone','pc']},
          'steps':{'type':'array','minItems':1,'maxItems':80,'items':{
@@ -119,6 +124,15 @@ def invoke_tool(name: str, args: dict):
         from .native_routes import phone_input
         from .phone_bridge import PhoneInput
         return phone_input(PhoneInput(**args))
+    if name == 'control_phone_continuation_status':
+        from .native_routes import phone_continuation_status
+        return phone_continuation_status()
+    if name == 'control_phone_continuation_queue':
+        from .native_routes import phone_continuation_queue, ContinuationRequest
+        return phone_continuation_queue(ContinuationRequest(**args))
+    if name == 'control_phone_continuation_dispatch':
+        from .native_routes import phone_continuation_dispatch
+        return phone_continuation_dispatch()
     if name == 'control_session_start':
         from .interaction_sessions import SessionRequest, start
         return start(SessionRequest(**args))
