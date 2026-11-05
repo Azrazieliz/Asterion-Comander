@@ -74,53 +74,100 @@ public final class ControlAccessibilityService extends AccessibilityService {
    * UI-only ChatGPT handoff. This is not a model call; it consumes normal app usage.
    * A successful Accessibility click is NOT proof that ChatGPT accepted the message.
    */
+  private AccessibilityNodeInfo findComposer(AccessibilityNodeInfo root) {
+    AccessibilityNodeInfo field=findEditable(root,0);
+    if(field==null)return null;
+    // Avoid typing into a ChatGPT search field or unrelated top-bar input.
+    Rect bounds=new Rect(), screen=new Rect();
+    field.getBoundsInScreen(bounds);
+    root.getBoundsInScreen(screen);
+    if(bounds.isEmpty() || screen.isEmpty() || bounds.centerY()<screen.top+screen.height()/2)
+      return null;
+    return field;
+  }
+  private JSONObject chatOutcome(boolean sent,boolean uncertain,String reason){
+    JSONObject result=new JSONObject();
+    try {
+      result.put("sent",sent).put("uncertain",uncertain).put("reason",reason);
+    }catch(Exception ignored){}
+    return result;
+  }
   JSONObject sendChatMessage(String message) {
-    final CountDownLatch done = new CountDownLatch(1);
-    final JSONObject[] output = {new JSONObject()};
-    main.post(() -> {
-      String reason = "ChatGPT composer not ready";
+    final CountDownLatch done=new CountDownLatch(1);
+    final JSONObject[] output={chatOutcome(false,true,"UI dispatch did not finish")};
+    main.post(()->{
       try {
-        AccessibilityNodeInfo root = getRootInActiveWindow();
-        if (root == null || root.getPackageName() == null
-            || !"com.openai.chatgpt".contentEquals(root.getPackageName())) {
-          reason = "ChatGPT Android app is not foreground";
-        } else {
-          AccessibilityNodeInfo editor = findEditable(root, 0);
-          if (editor == null) reason = "No editable ChatGPT message field";
-          else if (editor.getText() != null && editor.getText().length() != 0) {
-            reason = "ChatGPT composer has user text; refusing to overwrite";
-          } else if (!editor.performAction(AccessibilityNodeInfo.ACTION_FOCUS)) {
-            reason = "ChatGPT composer focus not granted";
-          } else {
-            Bundle args = new Bundle();
-            args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, message);
-            if (!editor.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
-              reason = "ChatGPT composer rejected text";
-            } else {
-              AccessibilityNodeInfo after = getRootInActiveWindow();
-              AccessibilityNodeInfo send = findSend(after, 0);
-              if (send != null && send.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
-                output[0].put("sent", true);
-                output[0].put("reason", "Send control clicked; response not yet verified");
-                done.countDown(); return;
-              }
-              reason = "No accessible Send control; text prepared but not sent";
-            }
+        AccessibilityNodeInfo root=getRootInActiveWindow();
+        if(root==null || root.getPackageName()==null ||
+           !"com.openai.chatgpt".contentEquals(root.getPackageName())){
+          output[0]=chatOutcome(false,false,"ChatGPT Android app is not foreground");
+          done.countDown();return;
+        }
+        AccessibilityNodeInfo editor=findComposer(root);
+        if(editor==null){
+          output[0]=chatOutcome(false,false,"No lower-screen ChatGPT composer found");
+          done.countDown();return;
+        }
+        String existing=editor.getText()==null?"":editor.getText().toString();
+        if(!existing.isEmpty() && !existing.equals(message)){
+          output[0]=chatOutcome(false,false,"ChatGPT composer has user text; refusing to overwrite");
+          done.countDown();return;
+        }
+        if(!existing.equals(message)){
+          Bundle input=new Bundle();
+          input.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,message);
+          if(!editor.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,input)){
+            output[0]=chatOutcome(false,false,"ChatGPT composer rejected text");
+            done.countDown();return;
           }
         }
-        output[0].put("sent", false).put("reason", reason);
-      } catch (Exception e) {
-        try { output[0].put("sent", false).put("reason", e.getClass().getSimpleName()); }
-        catch (Exception ignored) {}
-      } finally { done.countDown(); }
+        // Compose send controls may only appear after the next recomposition.
+        // Verify the exact queued text before clicking anything.
+        main.postDelayed(()->{
+          try{
+            AccessibilityNodeInfo after=getRootInActiveWindow();
+            if(after==null||after.getPackageName()==null||
+              !"com.openai.chatgpt".contentEquals(after.getPackageName())){
+              output[0]=chatOutcome(false,false,"ChatGPT is no longer foreground");
+              return;
+            }
+            AccessibilityNodeInfo verify=findComposer(after);
+            String actual=verify==null||verify.getText()==null
+              ?"":verify.getText().toString();
+            if(!message.equals(actual)){
+              output[0]=chatOutcome(false,true,
+                "ChatGPT composer changed during submission; inspect before retry");
+              return;
+            }
+            AccessibilityNodeInfo send=findSend(after,0);
+            if(send==null){
+              output[0]=chatOutcome(false,false,
+                "No accessible Send control; queued text remains prepared");
+              return;
+            }
+            if(!send.performAction(AccessibilityNodeInfo.ACTION_CLICK)){
+              output[0]=chatOutcome(false,true,
+                "Send click not accepted; queued text may remain");
+              return;
+            }
+            output[0]=chatOutcome(true,false,
+              "Send control clicked; model response remains unverified");
+          }catch(Exception e){
+            output[0]=chatOutcome(false,true,
+              "Uncertain ChatGPT composer outcome: "+e.getClass().getSimpleName());
+          }finally{done.countDown();}
+        },400L);
+      }catch(Exception e){
+        output[0]=chatOutcome(false,false,
+          "ChatGPT UI preparation failed: "+e.getClass().getSimpleName());
+        done.countDown();
+      }
     });
     boolean finished=false;
-    try { finished=done.await(9, TimeUnit.SECONDS); }
-    catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-    if(!finished)try{
-      return new JSONObject().put("sent",false).put("uncertain",true)
-        .put("reason","ChatGPT UI send timed out; inspect conversation before requeue");
-    }catch(Exception ignored){}
+    try{finished=done.await(11,TimeUnit.SECONDS);}
+    catch(InterruptedException e){Thread.currentThread().interrupt();}
+    if(!finished)return chatOutcome(false,true,
+      "ChatGPT UI dispatch timed out; inspect before requeue");
     return output[0];
   }
   @Override public void onInterrupt() { }
