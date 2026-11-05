@@ -169,6 +169,22 @@ public final class ControlAccessibilityService extends AccessibilityService {
     try { done.await(7,TimeUnit.SECONDS); } catch(InterruptedException e) {Thread.currentThread().interrupt();}
     return result[0];
   }
+  /** Current visible package, sampled on Accessibility's main thread.
+   * Used only to prevent screen evidence from crossing application boundaries.
+   */
+  String currentPackage(){
+    final String[] name={""};
+    final CountDownLatch completed=new CountDownLatch(1);
+    main.post(()->{
+      try{
+        AccessibilityNodeInfo root=getRootInActiveWindow();
+        if(root!=null&&root.getPackageName()!=null)name[0]=root.getPackageName().toString();
+      }catch(Exception ignored){}finally{completed.countDown();}
+    });
+    try{completed.await(2,TimeUnit.SECONDS);}
+    catch(InterruptedException e){Thread.currentThread().interrupt();}
+    return name[0];
+  }
   public JSONObject dump() {
     final CountDownLatch done = new CountDownLatch(1);
     final JSONObject result = new JSONObject();
