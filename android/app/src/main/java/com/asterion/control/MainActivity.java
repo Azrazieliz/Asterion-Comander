@@ -277,6 +277,17 @@ public final class MainActivity extends Activity {
      gap(phone,9);button(phone,"Disable phone access","power",false,()->{stopService(new Intent(this,CaptureService.class));stopAgent();});
     wide(devicesBody,phone);
 
+    gap(devicesBody,12);LinearLayout handoff=card();
+    rowTitle(handoff,"ChatGPT checkpoint continuation",
+      "Phone-owned · no AI model or paid API inside Control",icon("refresh",DesignSystem.TEAL,22));
+    gap(handoff,12);
+    button(handoff,"Enable checkpoint continuation","check",true,this::enableCheckpointContinuation);
+    gap(handoff,9);button(handoff,"Pause all continuation","power",false,this::pauseCheckpointContinuation);
+    gap(handoff,9);button(handoff,"Open ChatGPT for queued checkpoint","share",false,this::openChatGptCheckpoint);
+    gap(handoff,9);
+    wide(handoff,t("Only a queued, spec-referenced checkpoint is sent. Existing drafts are never overwritten; Android and ChatGPT limits still apply.",11,DesignSystem.MUTED,false));
+    wide(devicesBody,handoff);
+
     gap(devicesBody,12);LinearLayout transfer=card();
     rowTitle(transfer,"Direct Wi-Fi file transfer","PC → Phone · Files are saved to Downloads/Asterion Control",icon("download",DesignSystem.TEAL,24));
     gap(transfer,12);button(transfer,"Send a PC file to this phone","share",true,this::promptWifiTransfer);
@@ -716,6 +727,33 @@ public final class MainActivity extends Activity {
         runOnUiThread(()->setPairingFeedback("Direct ChatGPT setup unavailable: "+message));
       }finally{if(connection!=null)connection.disconnect();}
     });
+  }
+  private void enableCheckpointContinuation(){
+    new AlertDialog.Builder(this).setTitle("Enable ChatGPT continuation")
+      .setMessage("Asterion Control may send a saved continuation checkpoint in the ChatGPT Android app when you open ChatGPT. This uses your existing app access and is not an API subscription. It never erases an existing draft. You can pause it here at any time.")
+      .setPositiveButton("Enable", (dialog,which)->{
+        try { ContinuationLedger.get(this).configure(true);
+          toast("Checkpoint continuation enabled"); }
+        catch(Exception e){toast("Checkpoint setting could not be saved");}
+      }).setNegativeButton("Cancel",null).show();
+  }
+  private void pauseCheckpointContinuation(){
+    try { ContinuationLedger.get(this).configure(false);
+      toast("Checkpoint continuation paused"); }
+    catch(Exception e){toast("Checkpoint setting could not be saved");}
+  }
+  private void openChatGptCheckpoint(){
+    try {
+      JSONObject state=ContinuationLedger.get(this).status();
+      if(!state.optBoolean("enabled") || !"queued".equals(state.optString("state"))){
+        toast("Enable continuation and queue a checkpoint first");return;
+      }
+      Intent launch=getPackageManager().getLaunchIntentForPackage("com.openai.chatgpt");
+      if(launch==null){toast("ChatGPT Android app not found");return;}
+      startActivity(launch);
+      // An accessibility window event will send only after verifying a blank
+      // ChatGPT composer and a labeled Send action.
+    }catch(Exception e){toast("Cannot open ChatGPT checkpoint");}
   }
   private void showBatterySetup(){
     new AlertDialog.Builder(this).setTitle("Keep Asterion Control active")
