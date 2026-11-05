@@ -24,6 +24,7 @@ public final class ControlAccessibilityService extends AccessibilityService {
       new java.util.concurrent.atomic.AtomicBoolean(false);
   private long lastResumeProbe = 0L;
   @Override public void onAccessibilityEvent(AccessibilityEvent e) {
+    AppObservation.event(getApplicationContext(),e);
     // A queued, owner-enabled checkpoint can resume when ChatGPT becomes visible.
     // Never inject text into a different application or into an occupied composer.
     if (e == null || !"com.openai.chatgpt".contentEquals(e.getPackageName() == null
