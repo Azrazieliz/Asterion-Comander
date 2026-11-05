@@ -23,10 +23,12 @@ def test_continuation_and_observation_endpoints_require_auth():
             "/api/v1/phone/observation/status",
             "/api/v1/phone/observation/events",
             "/api/v1/phone/observation/frame",
+            "/api/v1/phone/voice/status",
         ):
             assert client.get(path).status_code == 401
         assert client.post("/api/v1/phone/continuation/queue", json=PAYLOAD).status_code == 401
         assert client.post("/api/v1/phone/continuation/dispatch").status_code == 401
+        assert client.post("/api/v1/phone/voice/question",json={"text":"Question"}).status_code == 401
 
 def test_checkpoint_requires_ranked_spec_and_safe_message():
     assert native_routes.ContinuationRequest(**PAYLOAD).priority_tier == "7*"
@@ -45,7 +47,9 @@ def test_mcp_lists_phone_continuation_and_game_observer():
         "control_phone_continuation_dispatch",
         "control_phone_observation_status",
         "control_phone_observation_events",
-        "control_phone_observation_frame"
+        "control_phone_observation_frame",
+        "control_phone_voice_status",
+        "control_phone_voice_question"
     }.issubset(names)
 
 def test_mcp_uses_native_authorized_routes(monkeypatch):
@@ -57,3 +61,14 @@ def test_mcp_uses_native_authorized_routes(monkeypatch):
     monkeypatch.setattr(native_routes,"phone_observation_status",
                         lambda:{"enabled":True,"target":"com.asterion.game"})
     assert mcp_protocol.invoke_tool("control_phone_observation_status",{})["enabled"]
+
+def test_voice_question_schema_and_direct_native_dispatch(monkeypatch):
+    assert native_routes.VoiceQuestion(text="What happened?",locale="en-US").text
+    with pytest.raises(ValidationError):
+        native_routes.VoiceQuestion(text="")
+    with pytest.raises(ValidationError):
+        native_routes.VoiceQuestion(text="x"*701)
+    monkeypatch.setattr(native_routes,"phone_voice_question",
+                        lambda question:{"ok":True,"question":question.text})
+    assert mcp_protocol.invoke_tool("control_phone_voice_question",
+                                    {"text":"What happened?","locale":"en-US"})["ok"]
