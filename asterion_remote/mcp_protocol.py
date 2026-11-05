@@ -49,6 +49,24 @@ TOOLS = [
     spec('control_phone_input','Send action to the authorized Android agent without ADB',
          {'action': {'type':'string','enum':['tap','swipe','long_press','back','home','recents','notifications','type','click_text']},
           'x':INT,'y':INT,'x2':INT,'y2':INT,'duration_ms':INT,'text':STR},['action']),
+    spec('control_session_start','Start a bounded persistent Control-side interaction session (no ChatGPT turn per gesture)',
+        {'device':{'type':'string','enum':['phone','pc']},
+         'steps':{'type':'array','minItems':1,'maxItems':80,'items':{
+             'type':'object','properties':{
+                 'kind':{'type':'string','enum':['input','wait','assert_text','capture','health']},
+                 'payload':{'type':'object'},'wait_ms':INT,'text':STR},
+             'required':['kind']}},
+         'timeout_s':INT,'stop_on_error':{'type':'boolean'}},['device','steps']),
+    spec('control_session_status','Read progress, observations, and step timing for a running Control session',
+         {'id':STR},['id']),
+    spec('control_session_cancel','Interrupt a running Control session at its next safe step boundary',
+         {'id':STR},['id']),
+    spec('control_phone_send_file','Transfer an authorized PC file directly to Android Downloads over private Wi-Fi',
+         {'pc_path':STR,'name':STR},['pc_path']),
+    spec('control_phone_transfer_status','Check native Android Wi-Fi file transfer and its SHA-256 receipt',
+         {'id':STR},['id']),
+    spec('control_phone_transfer_cancel','Cancel ongoing private Wi-Fi file transfer',
+         {'id':STR},['id']),
     spec('control_scripts','List externally authored deterministic saved scripts'),
     spec('control_script_run','Run a saved script through the existing bounded PC executor',
          {'script_id':STR,'arguments':{'type':'array','items':STR},'cwd':STR},['script_id']),
@@ -97,6 +115,24 @@ def invoke_tool(name: str, args: dict):
         from .native_routes import phone_input
         from .phone_bridge import PhoneInput
         return phone_input(PhoneInput(**args))
+    if name == 'control_session_start':
+        from .interaction_sessions import SessionRequest, start
+        return start(SessionRequest(**args))
+    if name == 'control_session_status':
+        from .interaction_sessions import status
+        return status(args['id'])
+    if name == 'control_session_cancel':
+        from .interaction_sessions import cancel
+        return cancel(args['id'])
+    if name == 'control_phone_send_file':
+        from .native_transfer import TransferRequest, start_transfer
+        return start_transfer(TransferRequest(**args),remote.safe_path)
+    if name == 'control_phone_transfer_status':
+        from .native_transfer import transfer_status
+        return transfer_status(args['id'])
+    if name == 'control_phone_transfer_cancel':
+        from .native_transfer import cancel_transfer
+        return cancel_transfer(args['id'])
     if name == 'control_scripts': return remote.internal_scripts()
     if name == 'control_script_run':
         from .control_services import ScriptRun
@@ -119,7 +155,7 @@ def handle_rpc(message: dict[str,Any]) -> dict | None:
         if method=='initialize':
             result={'protocolVersion':PROTOCOL,
                     'capabilities':{'tools':{'listChanged':False}},
-                    'serverInfo':{'name':'asterion-control','version':'0.8.0'},
+                    'serverInfo':{'name':'asterion-control','version':'0.8.5'},
                     'instructions':'Asterion Control operates only authorized devices. Native Android requires explicit accessibility and screen capture approval.'}
         elif method=='ping':
             result={}
