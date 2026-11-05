@@ -11,8 +11,11 @@ $env:ANDROID_HOME=Join-Path $env:LOCALAPPDATA 'Android\Sdk'
 $version='0.8.2'
 if (-not ((Get-Content 'android\app\build.gradle' -Raw) -match "versionName '$version'")) {throw 'Unexpected Android version'}
 Set-Location (Join-Path $root 'android')
-& $gradle :app:assembleDebug --offline --no-daemon --console=plain *> (Join-Path $root 'ANDROID_BUILD_v082.log')
-if ($LASTEXITCODE -ne 0) {
+$ErrorActionPreference='Continue'
+& $gradle :app:assembleDebug --offline --no-daemon --console=plain > (Join-Path $root 'ANDROID_BUILD_v082.log') 2>&1
+$gradleExit=$LASTEXITCODE
+$ErrorActionPreference='Stop'
+if ($gradleExit -ne 0) {
   Get-Content (Join-Path $root 'ANDROID_BUILD_v082.log') -Tail 35
   throw 'Gradle build failed'
 }
