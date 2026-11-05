@@ -19,14 +19,14 @@ from pydantic import BaseModel, Field, model_validator
 from .phone_bridge import PhoneInput, load
 
 class Step(BaseModel):
-    kind: Literal["input","wait","assert_text","capture","health"]
+    kind: Literal["input","wait","assert_text","capture","health","window","assert_window"]
     payload: dict[str,Any] = Field(default_factory=dict)
     wait_ms: int = Field(default=0,ge=0,le=10000)
     text: str | None = Field(default=None,max_length=300)
 
     @model_validator(mode="after")
     def check(self):
-        if self.kind=="assert_text" and not self.text:raise ValueError("Expected text required")
+        if self.kind in ("assert_text","assert_window") and not self.text:raise ValueError("Expected text required")
         if self.kind=="input" and not self.payload:raise ValueError("Input payload required")
         if self.kind=="wait" and not self.wait_ms:raise ValueError("Wait duration required")
         return self
@@ -84,6 +84,18 @@ def perform(step: Step,device: str,client: httpx.Client | None,headers:dict | No
             return {"bytes":len(frame),"sha256":hashlib.sha256(frame).hexdigest()}
     else:
         from . import app as remote
+        if kind in ("window","assert_window"):
+            from .desktop_observe import foreground
+            if kind=="window":return foreground()
+            deadline=time.monotonic()+min(5.0,max(0.1,step.wait_ms/1000 if step.wait_ms else 3.0))
+            state=foreground()
+            while time.monotonic()<deadline and (not state.get("available") or
+                    step.text.casefold() not in state.get("title","").casefold()):
+                time.sleep(0.1)
+                state=foreground()
+            if not state.get("available") or step.text.casefold() not in state.get("title","").casefold():
+                raise AssertionError("Foreground window does not contain expected title: "+step.text)
+            return state
         if kind=="input":
             arg=remote.DesktopInput(**step.payload)
             result=remote.desktop_input(arg)
