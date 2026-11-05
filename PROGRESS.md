@@ -1,3 +1,14 @@
+# 2026-11-05 — v0.8.3 Samsung inactivity recovery (latest)
+- **Compiled and installed** Android APK [v0.8.3](dist/Asterion-Control-v0.8.3-debug.apk); APK build published by independent Control Git bridge (commit `86bab7a`, 199,093 bytes, SHA-256 `ed77266a546b6df6200722536f8cd0235f890ad2e4c19159be1d8f79c1c4a484`). The owner-authorized ADB command was used ONLY for install and opening/starting the app, not device acceptance.
+- **Implemented**: foreground notification directly opens Control; previous owner-enabled state persisted; `START_STICKY` recovery and transient socket accept retry; safe boot/app-update restart attempt; `stopWithTask=false`; re-arm on Activity resume; user-facing Samsung Battery > Unrestricted settings access; explicit user disable remains respected.
+- **Actual Control-only verification** through private, authenticated Git transport: `phone_status` returned `paired:true, reachable:true`; `phone_health` returned Android 17 / Samsung SM-S948B, battery 94%, memory/thermal telemetry; `pc_input` moved pointer with `ok:true`; PC screen and health succeeded.
+- **Remaining user consent**: Android Control `accessible:false`, `capture:false`. `phone_ui` and `phone_screen` returned HTTP 503 as expected, not acceptance failures of transport. Owner must enable Asterion Control Accessibility and approve Android MediaProjection once through the phone; Android may require new MediaProjection approval after reboot/stop. Battery unrestricted mode requires owner approval in Settings.
+- **Long-idle resilience not yet empirically verified** after background/screen lock; Android vendor OS can still terminate foreground services. Do not claim unkillable service. Periodic acceptance check over actual elapsed inactivity is required, using Control only.
+- **ChatGPT control**: Private plugin installed, skill accessible in normal Android ChatGPT, GitHub-based authenticated command bridge operational. Bridge is a high-latency fallback, NOT a real-time ChatGPT transport. Samsung remains primary user controller; Windows subordinate.
+- No Work/Desktop Commander for acceptance. No ADB for actual Control functionality checks.
+
+---
+
 # Current continuation — Android v0.8.2 / Plugin v1.2.0 (2026-11-05)
 - **Compiled APK published** at [dist/Asterion-Control-v0.8.2-debug.apk](dist/Asterion-Control-v0.8.2-debug.apk). Built on the owner's Windows PC through its PRIVATE Asterion Control GitHub bridge, without Desktop Commander or ADB. Verified build exit 0, 194,889 bytes, SHA-256 `b3e5fe037b43d98dc64682615be37ab77fdd07ad8ca9b84d8435c8ce9d25505f` (commit `cdd475c`).
 - v0.8.2 updates pairing failure diagnostics, starts/auto-registers the phone agent after Windows pairing, selects phone's routable Wi-Fi address, retries registration, adds Repair connection and preserves saved credentials. **Android 0.8.2 is not confirmed installed**; owner must approve the APK update without an existing authorized installer channel.
