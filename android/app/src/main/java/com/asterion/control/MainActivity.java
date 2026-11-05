@@ -75,7 +75,7 @@ public final class MainActivity extends Activity {
   private final TextView[] tabLabels=new TextView[4];
   private TextView headerStatus,pcConnection,homeAgent,homeBattery,homeMemory,homeThermal;
   private TextView healthBattery,healthTemp,healthMemory,healthStorage,healthThermal,healthWifi;
-  private TextView remoteConnection,remotePlaceholder,agentConnection,captureConnection,accessConnection,phoneAddress,hostHealth;
+  private TextView remoteConnection,remotePlaceholder,agentConnection,captureConnection,accessConnection,phoneAddress,hostHealth,pairingFeedback;
   private DesignSystem.Meter batteryMeter,memoryMeter,storageMeter;
   private EditText serverUrl,serverToken,localAddress;
   private WebView web;
@@ -139,6 +139,9 @@ public final class MainActivity extends Activity {
     pages[0]=scrollHome();pages[1]=remotePage();pages[2]=scrollHealth();pages[3]=scrollDevices();
     for(View page:pages){page.setVisibility(View.GONE);stage.addView(page,new FrameLayout.LayoutParams(-1,-1));}
     buildNav();show(0);updateHealth();handler.postDelayed(ticker,3500);
+    if(!prefs.getString("url","").isEmpty()&&!prefs.getString("token","").isEmpty()){
+      handler.postDelayed(()->{if(AgentService.running)registerPhone();},1500);
+    }
   }
   private void buildHeader(){
     LinearLayout header=h();header.setPadding(dp(20),dp(16),dp(20),dp(14));mark(header,43);
@@ -248,6 +251,14 @@ public final class MainActivity extends Activity {
     gap(summary,12);remoteConnection=t("Checking saved connection…",12,DesignSystem.MUTED,false);wide(summary,remoteConnection);
     gap(summary,16);twoActions(summary,"Open desktop","monitor",()->show(1),"Reconnect","refresh",()->{save();checkHost();});
     gap(summary,10);button(summary,"Find my Windows computer","devices",true,this::discoverComputer);
+    gap(summary,9);button(summary,"Repair connection","refresh",false,()->{
+      if(!prefs.getString("token","").isEmpty()&&!prefs.getString("url","").isEmpty()){
+        startAgent();
+        handler.postDelayed(()->{if(AgentService.running)registerPhone();else setPairingFeedback("Phone service did not start. Enable phone access in this screen.");},1500);
+      }else discoverComputer();
+    });
+    gap(summary,10);pairingFeedback=t("Your phone is the controller. Connect once; the Windows worker follows.",12,DesignSystem.MUTED,false);
+    pairingFeedback.setMaxLines(5);wide(summary,pairingFeedback);
     wide(devicesBody,summary);
 
     gap(devicesBody,12);LinearLayout phone=card();
@@ -387,19 +398,24 @@ public final class MainActivity extends Activity {
           prefs.edit().putString("url",address).putString("token",token).apply();
           if(serverUrl!=null)serverUrl.setText(address);
           if(serverToken!=null)serverToken.setText("");
-          checkHost();toast("Windows connected");show(1);
+          setPairingFeedback("Windows paired. Starting phone control and registering this device…");
+          checkHost();toast("Windows connected");show(3);
           startAgent();
           handler.postDelayed(()->{if(AgentService.running)registerPhone();else if(remoteConnection!=null)remoteConnection.setText("Windows paired; turn on phone access to register this device");},1400);
         });
       }catch(Exception e){
         String message=e instanceof java.net.SocketTimeoutException?"Windows connection timed out":e instanceof java.net.ConnectException?"Cannot reach Windows on this network":e.getMessage()==null?e.getClass().getSimpleName():e.getMessage();
         runOnUiThread(()->{
-          if(remoteConnection!=null)remoteConnection.setText("Pairing failed: "+message);
+          setPairingFeedback("Pairing failed: "+message);
           toast("Pairing failed: "+message);
         });
       }
       finally{if(conn!=null)conn.disconnect();}
     });
+  }
+  private void setPairingFeedback(String message){
+    if(pairingFeedback!=null)pairingFeedback.setText(message);
+    if(remoteConnection!=null)remoteConnection.setText(message);
   }
   private void toggleAdvancedSetup(){
     advancedSetupVisible=!advancedSetupVisible;
@@ -503,7 +519,7 @@ public final class MainActivity extends Activity {
     if(request==CAPTURE_REQUEST&&code==RESULT_OK&&data!=null){try{Intent i=new Intent(this,CaptureService.class);i.putExtra("result",code);i.putExtra("data",data);startForegroundService(i);handler.postDelayed(this::updateHealth,450);}catch(Exception e){toast("Screen share could not start");}}
   }
   private void registerPhone(){
-    if(!AgentService.running){if(remoteConnection!=null)remoteConnection.setText("Enable phone access to register this device");return;}
+    if(!AgentService.running){setPairingFeedback("Enable phone access to register this device");return;}
     io.execute(()->{
       String raw=prefs.getString("url","").replaceAll("/+$","");
       if(raw.isEmpty()){runOnUiThread(()->toast("Windows is not paired"));return;}
@@ -525,7 +541,7 @@ public final class MainActivity extends Activity {
           int status=conn.getResponseCode();
           if(status==200){
             runOnUiThread(()->{
-              if(remoteConnection!=null)remoteConnection.setText("Connected · Windows worker + Android registered");
+              setPairingFeedback("Connected · Samsung is the controller and Windows is the worker");
               toast("Phone registered with Windows");
               updateHealth();
             });return;
@@ -533,7 +549,7 @@ public final class MainActivity extends Activity {
           if(status!=502&&status!=503){
             final int failure=status;
             runOnUiThread(()->{
-              if(remoteConnection!=null)remoteConnection.setText("Phone registration HTTP "+failure);
+              setPairingFeedback("Phone registration HTTP "+failure+" — retry using Repair connection");
               toast("Phone registration returned HTTP "+failure);
             });return;
           }
@@ -541,7 +557,7 @@ public final class MainActivity extends Activity {
           if(attempt==3){
             final String failure=e.getClass().getSimpleName();
             runOnUiThread(()->{
-              if(remoteConnection!=null)remoteConnection.setText("Phone registration failed: "+failure);
+              setPairingFeedback("Phone registration failed: "+failure+" — retry using Repair connection");
               toast("Phone registration failed: "+failure);
             });
           }
