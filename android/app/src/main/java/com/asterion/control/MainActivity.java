@@ -2,6 +2,7 @@ package com.asterion.control;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.ActivityManager;
 
 
@@ -45,6 +46,10 @@ import java.net.HttpURLConnection;
 import java.net.Inet4Address;
 import java.net.NetworkInterface;
 import java.net.URL;
+import java.net.InetAddress;
+import java.net.DatagramSocket;
+import java.net.DatagramPacket;
+import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
@@ -236,6 +241,7 @@ public final class MainActivity extends Activity {
     rowTitle(summary,"Windows computer","Your remote desktop and device resources",icon("monitor",DesignSystem.PURPLE,25));
     gap(summary,12);remoteConnection=t("Checking saved connection…",12,DesignSystem.MUTED,false);wide(summary,remoteConnection);
     gap(summary,16);twoActions(summary,"Open desktop","monitor",()->show(1),"Reconnect","refresh",()->{save();checkHost();});
+    gap(summary,10);button(summary,"Find my Windows computer","devices",true,this::discoverComputer);
     wide(devicesBody,summary);
 
     gap(devicesBody,12);LinearLayout phone=card();
@@ -267,6 +273,66 @@ public final class MainActivity extends Activity {
     // Retained internally for registration; never displayed as a plain-text access credential.
     localAddress=input(prefs.getString("phoneip",ipAddress()),false,"");
     return scroll(devicesBody);
+  }
+  /** Native private-network peer discovery; no ADB or remote-desktop dependency. */
+  private void discoverComputer(){
+    if(remoteConnection!=null)remoteConnection.setText("Searching for your Windows computer…");
+    io.execute(()->{
+      try(DatagramSocket socket=new DatagramSocket()){
+        socket.setBroadcast(true);socket.setSoTimeout(2200);
+        byte[] bytes="ASTERION_CONTROL_DISCOVER_V1".getBytes(StandardCharsets.UTF_8);
+        socket.send(new DatagramPacket(bytes,bytes.length,InetAddress.getByName("255.255.255.255"),8912));
+        byte[] replyBytes=new byte[512];DatagramPacket reply=new DatagramPacket(replyBytes,replyBytes.length);
+        socket.receive(reply);
+        JSONObject info=new JSONObject(new String(reply.getData(),0,reply.getLength(),StandardCharsets.UTF_8));
+        if(!"asterion-control".equals(info.optString("service"))||info.optInt("version")!=1)throw new IllegalArgumentException("Unexpected service");
+        InetAddress peer=reply.getAddress();
+        if(!(peer.isSiteLocalAddress()||peer.isLoopbackAddress()||peer.getHostAddress().startsWith("100.")))throw new IllegalArgumentException("Not private LAN");
+        String address="http://"+peer.getHostAddress()+":"+info.optInt("port",8911);
+        runOnUiThread(()->showPairingPrompt(address,info.optString("name","Windows computer")));
+      }catch(Exception e){runOnUiThread(()->{
+        if(remoteConnection!=null)remoteConnection.setText("Computer discovery not available on this network");
+        new AlertDialog.Builder(this).setTitle("Computer not found")
+          .setMessage("Start the Windows agent on the same private network or VPN. Advanced pairing remains available if discovery is blocked.")
+          .setPositiveButton("Advanced pairing",(d,w)->{
+            advancedSetupVisible=true;if(advancedSetup!=null)advancedSetup.setVisibility(View.VISIBLE);
+          }).setNegativeButton("Cancel",null).show();
+      });}
+    });
+  }
+  private void showPairingPrompt(String address,String name){
+    EditText code=input("",false,"8-digit code on your Windows computer");
+    code.setInputType(InputType.TYPE_CLASS_NUMBER);
+    code.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(8)});
+    new AlertDialog.Builder(this).setTitle("Connect to "+name)
+      .setMessage("Enter the one-time code shown by the Asterion Control Windows agent. Future connections use saved device authorization.")
+      .setView(code).setNegativeButton("Cancel",null)
+      .setPositiveButton("Connect",(d,w)->completePairing(address,code.getText().toString().trim())).show();
+  }
+  private void completePairing(String address,String code){
+    if(!code.matches("[0-9]{8}")){toast("Enter the eight-digit code");return;}
+    io.execute(()->{
+      HttpURLConnection conn=null;
+      try{
+        conn=(HttpURLConnection)new URL(address+"/api/v1/pair").openConnection();
+        conn.setRequestMethod("POST");conn.setDoOutput(true);conn.setConnectTimeout(4500);conn.setReadTimeout(6000);
+        conn.setRequestProperty("Content-Type","application/json");
+        byte[] body=new JSONObject().put("name",Build.MODEL).put("code",code).toString().getBytes(StandardCharsets.UTF_8);
+        try(OutputStream out=conn.getOutputStream()){out.write(body);}
+        if(conn.getResponseCode()!=200)throw new IllegalArgumentException("Pairing code rejected");
+        JSONObject response=new JSONObject(new String(conn.getInputStream().readNBytes(16384),StandardCharsets.UTF_8));
+        String token=response.getString("token");
+        if(token.length()<32)throw new IllegalArgumentException("Invalid token");
+        runOnUiThread(()->{
+          prefs.edit().putString("url",address).putString("token",token).apply();
+          if(serverUrl!=null)serverUrl.setText(address);
+          if(serverToken!=null)serverToken.setText(token);
+          checkHost();toast("Windows connected");show(1);
+          if(AgentService.running)handler.postDelayed(this::registerPhone,600);
+        });
+      }catch(Exception e){runOnUiThread(()->toast("Pairing failed — check the one-time code"));}
+      finally{if(conn!=null)conn.disconnect();}
+    });
   }
   private void toggleAdvancedSetup(){
     advancedSetupVisible=!advancedSetupVisible;
