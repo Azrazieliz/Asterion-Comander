@@ -7,6 +7,9 @@ import android.app.ActivityManager;
 
 
 import android.content.Context;
+import android.content.ClipData;
+import android.content.ClipDescription;
+import android.content.ClipboardManager;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
@@ -267,7 +270,8 @@ public final class MainActivity extends Activity {
     gap(phone,12);phoneAddress=t("Checking phone access…",12,DesignSystem.MUTED,false);wide(phone,phoneAddress);
     gap(phone,16);button(phone,"Enable phone remote control","shield",true,this::enablePhoneControl);
     gap(phone,9);button(phone,"Share screen · Android permission","share",false,this::beginCapture);
-    gap(phone,9);button(phone,"Keep access active during long sessions","power",false,this::showBatterySetup);
+    gap(phone,9);button(phone,"Connect ChatGPT directly","check",false,this::showMcpConnection);
+     gap(phone,9);button(phone,"Keep access active during long sessions","power",false,this::showBatterySetup);
      gap(phone,9);button(phone,"Disable phone access","power",false,()->{stopService(new Intent(this,CaptureService.class));stopAgent();});
     wide(devicesBody,phone);
 
@@ -529,6 +533,59 @@ public final class MainActivity extends Activity {
     stopService(new Intent(this,AgentService.class));
     handler.postDelayed(this::updateHealth,450);
     toast("Phone agent disabled");
+  }
+  private void copyPrivateConnection(String label,String data,boolean secret){
+    ClipboardManager clipboard=(ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
+    ClipData clip=ClipData.newPlainText(label,data);
+    if(secret&&Build.VERSION.SDK_INT>=33){
+      android.os.PersistableBundle extras=new android.os.PersistableBundle();
+      extras.putBoolean(ClipDescription.EXTRA_IS_SENSITIVE,true);
+      clip.getDescription().setExtras(extras);
+    }
+    clipboard.setPrimaryClip(clip);
+    toast(label+" copied");
+  }
+  /** Explicit owner action only. Credentials are never logged or sent to GitHub. */
+  private void showMcpConnection(){
+    final String url=prefs.getString("url","").replaceAll("/+$","");
+    final String bearer=prefs.getString("token","");
+    if(url.isEmpty()||bearer.isEmpty()){
+      toast("Pair the Windows worker once in Connect first");
+      return;
+    }
+    setPairingFeedback("Getting ChatGPT connector details over your private device link…");
+    io.execute(()->{
+      HttpURLConnection connection=null;
+      try{
+        connection=(HttpURLConnection)new URL(url+"/api/v1/mcp-connection").openConnection();
+        connection.setRequestMethod("POST");connection.setDoOutput(true);
+        connection.setConnectTimeout(5000);connection.setReadTimeout(8000);
+        connection.setRequestProperty("Authorization","Bearer "+bearer);
+        connection.setRequestProperty("Content-Type","application/json");
+        try(OutputStream os=connection.getOutputStream()){os.write("{}".getBytes(StandardCharsets.UTF_8));}
+        int status=connection.getResponseCode();
+        if(status!=200)throw new IllegalArgumentException("Connection service HTTP "+status);
+        JSONObject details=new JSONObject(new String(connection.getInputStream().readNBytes(8192),StandardCharsets.UTF_8));
+        String endpoint=details.getString("server_url"),secret=details.getString("api_key");
+        if(!endpoint.startsWith("https://")||secret.length()<43)throw new IllegalArgumentException("Invalid connector details");
+        runOnUiThread(()->{
+          LinearLayout layout=v();layout.setPadding(dp(18),dp(12),dp(18),dp(7));
+          TextView desc=t("ChatGPT direct MCP trial. This is a temporary HTTPS address; connect once using Bearer API key authentication. The key remains on your phone.",12,DesignSystem.MUTED,false);
+          wide(layout,desc);gap(layout,15);
+          EditText address=input(endpoint,false,"MCP server URL");
+          address.setTextIsSelectable(true);wide(layout,address);
+          gap(layout,8);button(layout,"Copy server URL","check",false,()->copyPrivateConnection("Server URL",endpoint,false));
+          gap(layout,12);button(layout,"Copy connection key","shield",true,()->copyPrivateConnection("Connection key",secret,true));
+          gap(layout,10);wide(layout,t("Only paste the key into ChatGPT's private plugin connection screen. Never post it in a chat or repository.",11,DesignSystem.MUTED,false));
+          new AlertDialog.Builder(this).setTitle("Connect ChatGPT to Asterion Control")
+            .setView(layout).setPositiveButton("Close",null).show();
+          setPairingFeedback("Direct MCP setup available. Connect the plugin in ChatGPT.");
+        });
+      }catch(Exception e){
+        final String message=e.getMessage()==null?e.getClass().getSimpleName():e.getMessage();
+        runOnUiThread(()->setPairingFeedback("Direct ChatGPT setup unavailable: "+message));
+      }finally{if(connection!=null)connection.disconnect();}
+    });
   }
   private void showBatterySetup(){
     new AlertDialog.Builder(this).setTitle("Keep Asterion Control active")
