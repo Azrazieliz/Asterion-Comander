@@ -25,6 +25,9 @@ ALLOWED={
  'phone_screen':('GET','/api/v1/phone/screen'),
  'phone_ui':('GET','/api/v1/phone/ui'),
  'phone_input':('POST','/api/v1/phone/input'),
+ 'phone_continuation_status':('GET','/api/v1/phone/continuation/status'),
+ 'phone_continuation_queue':('POST','/api/v1/phone/continuation/queue'),
+ 'phone_continuation_dispatch':('POST','/api/v1/phone/continuation/dispatch'),
 }
 
 def git_token():
