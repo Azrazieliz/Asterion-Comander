@@ -79,7 +79,8 @@ public final class MainActivity extends Activity {
   private final TextView[] tabLabels=new TextView[4];
   private TextView headerStatus,pcConnection,homeAgent,homeBattery,homeMemory,homeThermal;
   private TextView healthBattery,healthTemp,healthMemory,healthStorage,healthThermal,healthWifi;
-  private TextView remoteConnection,remotePlaceholder,agentConnection,captureConnection,accessConnection,phoneAddress,hostHealth,pairingFeedback;
+  private TextView remoteConnection,remotePlaceholder,agentConnection,captureConnection,accessConnection,phoneAddress,hostHealth,pairingFeedback,transferFeedback;
+  private String activeTransferId=null;
   private DesignSystem.Meter batteryMeter,memoryMeter,storageMeter;
   private EditText serverUrl,serverToken,localAddress;
   private WebView web;
@@ -275,6 +276,13 @@ public final class MainActivity extends Activity {
      gap(phone,9);button(phone,"Disable phone access","power",false,()->{stopService(new Intent(this,CaptureService.class));stopAgent();});
     wide(devicesBody,phone);
 
+    gap(devicesBody,12);LinearLayout transfer=card();
+    rowTitle(transfer,"Direct Wi-Fi file transfer","PC → Phone · Files are saved to Downloads/Asterion Control",icon("download",DesignSystem.TEAL,24));
+    gap(transfer,12);button(transfer,"Send a PC file to this phone","share",true,this::promptWifiTransfer);
+    gap(transfer,9);button(transfer,"Cancel active transfer","power",false,this::cancelWifiTransfer);
+    gap(transfer,9);transferFeedback=t("No transfer active. Uses the existing private Wi-Fi connection, never GitHub or ADB.",12,DesignSystem.MUTED,false);
+    transferFeedback.setMaxLines(6);wide(transfer,transferFeedback);wide(devicesBody,transfer);
+
     gap(devicesBody,12);LinearLayout security=card();
     rowTitle(security,"Access & privacy","Only connected devices you authorize can control this phone",icon("shield",DesignSystem.TEAL,24));
     gap(security,12);privacyStatus=t("Access is off until you enable it. Android may request accessibility and screen-sharing permission.",12,DesignSystem.MUTED,false);
@@ -298,6 +306,104 @@ public final class MainActivity extends Activity {
     localAddress=input(prefs.getString("phoneip",ipAddress()),false,"");
     return scroll(devicesBody);
   }
+  private void transferStatus(String message){
+    if(transferFeedback!=null)transferFeedback.setText(message);
+  }
+  private void promptWifiTransfer(){
+    if(prefs.getString("url","").isEmpty()||prefs.getString("token","").isEmpty()){
+      toast("Pair your Windows computer first");return;
+    }
+    EditText field=input("",false,"PC path, for example Downloads\\report.zip");
+    new AlertDialog.Builder(this)
+      .setTitle("Send PC file over Wi-Fi")
+      .setMessage("Enter the path of an existing Windows file inside the authorized Asterion Control PC root. The phone receives it in Downloads/Asterion Control.")
+      .setView(field)
+      .setPositiveButton("Transfer",(d,w)->{
+        String pcPath=field.getText().toString().trim();
+        if(pcPath.isEmpty()){toast("Choose a Windows file path");return;}
+        submitWifiTransfer(pcPath);
+      })
+      .setNegativeButton("Cancel",null).show();
+  }
+  private JSONObject pcTransferRequest(String path,String method,JSONObject body)throws Exception{
+    String url=prefs.getString("url","").replaceAll("/+$","");
+    String token=prefs.getString("token","");
+    if(url.isEmpty()||token.isEmpty())throw new IllegalStateException("Windows not paired");
+    HttpURLConnection conn=(HttpURLConnection)new URL(url+path).openConnection();
+    try{
+      conn.setConnectTimeout(4000);conn.setReadTimeout(9000);
+      conn.setRequestMethod(method);
+      conn.setRequestProperty("Authorization","Bearer "+token);
+      if(body!=null){
+        conn.setDoOutput(true);conn.setRequestProperty("Content-Type","application/json");
+        try(OutputStream out=conn.getOutputStream()){out.write(body.toString().getBytes(StandardCharsets.UTF_8));}
+      }
+      int code=conn.getResponseCode();
+      java.io.InputStream input=code<400?conn.getInputStream():conn.getErrorStream();
+      String json=input==null?"{}":new String(input.readNBytes(4000),StandardCharsets.UTF_8);
+      JSONObject parsed=new JSONObject(json);
+      if(code>=400)throw new IllegalStateException("HTTP "+code+": "+parsed.optString("detail","transfer refused"));
+      return parsed;
+    }finally{conn.disconnect();}
+  }
+  private void submitWifiTransfer(String pcPath){
+    if(activeTransferId!=null){toast("Cancel or finish the current transfer first");return;}
+    transferStatus("Preparing authenticated Wi-Fi transfer…");
+    io.execute(()->{
+      try{
+        JSONObject out=pcTransferRequest("/api/v1/phone/transfers","POST",new JSONObject().put("pc_path",pcPath));
+        String id=out.getString("id");
+        runOnUiThread(()->{
+          activeTransferId=id;
+          transferStatus("Transfer started · "+pcPath);
+          pollWifiTransfer(id,0);
+        });
+      }catch(Exception e){runOnUiThread(()->transferStatus("Transfer not started: "+e.getMessage()));}
+    });
+  }
+  private void pollWifiTransfer(String id,int attempts){
+    if(destroyed||!id.equals(activeTransferId))return;
+    if(attempts>1800){transferStatus("Transfer status timed out. Check Downloads and Windows.");activeTransferId=null;return;}
+    io.execute(()->{
+      try{
+        JSONObject job=pcTransferRequest("/api/v1/phone/transfers/"+id,"GET",null);
+        runOnUiThread(()->{
+          if(destroyed||!id.equals(activeTransferId))return;
+          String state=job.optString("state","unknown");
+          long sent=job.optLong("bytes_sent",0),total=job.optLong("size",0);
+          if(state.equals("completed")){
+            JSONObject receipt=job.optJSONObject("result");
+            activeTransferId=null;
+            transferStatus(receipt!=null?"Saved to "+receipt.optString("location")+"\nVerified SHA-256: "+receipt.optString("sha256"):
+                         "Completed; check phone Downloads");
+          }else if(state.equals("failed")||state.equals("cancelled")){
+            activeTransferId=null;
+            transferStatus("Transfer "+state+": "+job.optString("error",""));
+          }else{
+            double percent=total>0?100.0*sent/total:0;
+            transferStatus(state+" · "+sent+" / "+total+" bytes · "+
+              String.format(Locale.US,"%.1f",percent)+"%");
+            handler.postDelayed(()->pollWifiTransfer(id,attempts+1),750);
+          }
+        });
+      }catch(Exception e){runOnUiThread(()->{
+        if(!destroyed&&id.equals(activeTransferId)){
+          transferStatus("Transfer status unavailable: "+e.getMessage());
+          handler.postDelayed(()->pollWifiTransfer(id,attempts+1),1500);
+        }
+      });}
+    });
+  }
+  private void cancelWifiTransfer(){
+    String id=activeTransferId;
+    if(id==null){toast("No active transfer");return;}
+    io.execute(()->{
+      try{pcTransferRequest("/api/v1/phone/transfers/"+id+"/cancel","POST",new JSONObject());
+        runOnUiThread(()->transferStatus("Cancellation requested"));
+      }catch(Exception e){runOnUiThread(()->transferStatus("Cancellation failed: "+e.getMessage()));}
+    });
+  }
+
   /** Native private-network peer discovery; no ADB or remote-desktop dependency. */
   private void discoverComputer(){
     if(remoteConnection!=null)remoteConnection.setText("Searching for your Windows computer…");
