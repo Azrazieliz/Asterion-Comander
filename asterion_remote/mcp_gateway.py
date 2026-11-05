@@ -164,8 +164,10 @@ async def rpc(req: Request):
         raise HTTPException(400, "A single MCP JSON-RPC object is required")
     method = message.get("method")
     name = (message.get("params") or {}).get("name") if isinstance(message.get("params"), dict) else ""
-    if method == "tools/call" and isinstance(name, str) and _tool_is_native(name):
-        upstream = await _preferred(payload, req.headers, phone_first=True)
+    if method == "tools/call":
+        # PC-only tools must never be routed to the phone's native-only MCP.
+        native = isinstance(name, str) and _tool_is_native(name)
+        upstream = await _preferred(payload, req.headers, phone_first=native)
         return _response(upstream)
     if method == "tools/list":
         # Merge the phone and optional Windows tool catalogues. A phone-owned
