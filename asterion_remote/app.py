@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field
 
 from .security import configured_token, require_token
 from .native_routes import router as phone_router
+from .pairing import router as pairing_router, start_discovery, stop_discovery, create_code
 from .live_stream import install_stream
 from .control_services import ScriptRun, BatchRequest, script_command, script_list, host_health
 
@@ -43,11 +44,15 @@ STATIC = Path(__file__).parent / 'static'
 app = FastAPI(title='Asterion Control', version='0.3.0', docs_url='/docs', redoc_url=None)
 app.mount('/static', StaticFiles(directory=STATIC), name='static')
 app.include_router(phone_router)
+app.include_router(pairing_router)
 
 
 @app.on_event('startup')
 def check_config():
     configured_token()
+    if os.getenv('ASTERION_ENABLE_DISCOVERY') == '1':
+        create_code()
+        start_discovery()
     if not ROOT.is_dir():
         raise RuntimeError(f'ASTERION_REMOTE_ROOT not a directory: {ROOT}')
 
@@ -709,3 +714,7 @@ def _desktop_jpeg(monitor: int):
     return screenshot(monitor=monitor,quality=67).body
 
 install_stream(app, _desktop_jpeg)
+
+@app.on_event('shutdown')
+def stop_lan_discovery():
+    stop_discovery()
