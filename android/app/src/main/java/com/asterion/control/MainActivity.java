@@ -289,13 +289,13 @@ public final class MainActivity extends Activity {
     wide(devicesBody,handoff);
 
     gap(devicesBody,12);LinearLayout observation=card();
-    rowTitle(observation,"Asterion game observation",
+    rowTitle(observation,"Cross-app screen observation",
       "Local screen evidence & events · no embedded AI",icon("activity",DesignSystem.TEAL,23));
     gap(observation,12);
-    button(observation,"Observe an Asterion app","share",true,this::startAsterionObservation);
+    button(observation,"Observe selected application","share",true,this::startAsterionObservation);
     gap(observation,9);button(observation,"Stop observation","power",false,this::stopAsterionObservation);
     gap(observation,9);
-    wide(observation,t("Requires Android screen-sharing approval. Records the selected Asterion app only. Evidence stays on this phone until explicitly retrieved.",11,DesignSystem.MUTED,false));
+    wide(observation,t("Requires Android screen-sharing approval. Records only the explicitly selected foreground application; Control does not analyze or replace app engines.",11,DesignSystem.MUTED,false));
     wide(devicesBody,observation);
 
     gap(devicesBody,12);LinearLayout voice=card();
@@ -760,17 +760,17 @@ public final class MainActivity extends Activity {
   }
   private void startAsterionObservation(){
     EditText targetApp=input(getSharedPreferences("asterion_observation",MODE_PRIVATE)
-      .getString("target",""),false,"Asterion application package (com.asterion.*)");
+      .getString("target",""),false,"Installed application package name");
     LinearLayout layout=v();pad(layout,18,12);
     wide(layout,targetApp);
-    gap(layout,12);wide(layout,t("Only this selected app will be recorded. Screen sharing needs Android approval; protected content remains protected.",12,DesignSystem.MUTED,false));
-    new AlertDialog.Builder(this).setTitle("Observe Asterion gameplay")
+    gap(layout,12);wide(layout,t("Only the selected foreground app is observed. Android permissions and protected surfaces remain respected.",12,DesignSystem.MUTED,false));
+    new AlertDialog.Builder(this).setTitle("Observe selected application")
       .setView(layout).setPositiveButton("Start observation",(d,w)->{
         try{
           AppObservation.configure(this,true,targetApp.getText().toString().trim());
-          toast("Observation enabled for the selected Asterion app");
+          toast("Observation enabled for the selected app");
           if(!CaptureService.active)beginCapture();
-        }catch(Exception e){toast("Enter the installed Asterion app package");}
+        }catch(Exception e){toast("Enter the installed application package");}
       }).setNegativeButton("Cancel",null).show();
   }
   private void stopAsterionObservation(){
