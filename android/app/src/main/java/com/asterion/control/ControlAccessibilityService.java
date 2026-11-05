@@ -114,8 +114,13 @@ public final class ControlAccessibilityService extends AccessibilityService {
         catch (Exception ignored) {}
       } finally { done.countDown(); }
     });
-    try { done.await(9, TimeUnit.SECONDS); }
+    boolean finished=false;
+    try { finished=done.await(9, TimeUnit.SECONDS); }
     catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+    if(!finished)try{
+      return new JSONObject().put("sent",false).put("uncertain",true)
+        .put("reason","ChatGPT UI send timed out; inspect conversation before requeue");
+    }catch(Exception ignored){}
     return output[0];
   }
   @Override public void onInterrupt() { }
