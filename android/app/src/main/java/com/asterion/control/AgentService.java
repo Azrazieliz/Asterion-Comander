@@ -150,6 +150,23 @@ public final class AgentService extends Service {
     // Phone-resident checkpoint state. Owner must first opt in using Control's
     // native UI; HTTP bearer possession alone cannot enable self-continuation.
     // User-enabled Asterion app recording; only native MediaProjection frames.
+    // Foreground voice exchange is independently owner-enabled on Android.
+    if(method.equals("GET")&&path.equals("/voice/status")){
+      try {
+        VoiceDialogueService voice=VoiceDialogueService.active;
+        json(out,200,voice==null?new JSONObject().put("enabled",false)
+          .put("phase","stopped"):voice.report());
+      } catch(Exception e){json(out,400,error("Voice status unavailable"));}
+      return;
+    }
+    if(method.equals("POST")&&path.equals("/voice/question")){
+      try {
+        VoiceDialogueService voice=VoiceDialogueService.active;
+        if(voice==null){json(out,503,error("Enable voice dialogue from the phone"));return;}
+        json(out,200,voice.ask(body.getString("text"),body.optString("locale","en-US")));
+      } catch(Exception e){json(out,400,error(e.getMessage()));}
+      return;
+    }
     if(method.equals("GET")&&path.equals("/observation/status")){
       try{json(out,200,AppObservation.status(this));}
       catch(Exception e){json(out,400,error("Observation status unavailable"));}return;
