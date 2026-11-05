@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field
 
 from .security import configured_token, require_token
 from .native_routes import router as phone_router
+from .mcp_setup import router as mcp_setup_router
 from .pairing import router as pairing_router, start_discovery, stop_discovery, create_code
 from .live_stream import install_stream
 from .control_services import ScriptRun, BatchRequest, script_command, script_list, host_health
@@ -44,6 +45,7 @@ STATIC = Path(__file__).parent / 'static'
 app = FastAPI(title='Asterion Control', version='0.8.0', docs_url='/docs', redoc_url=None)
 app.mount('/static', StaticFiles(directory=STATIC), name='static')
 app.include_router(phone_router)
+app.include_router(mcp_setup_router)
 app.include_router(pairing_router)
 
 
