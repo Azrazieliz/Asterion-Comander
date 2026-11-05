@@ -112,7 +112,7 @@ def phone_voice_question(data:VoiceQuestion):
 # Generic application transport for authorized Asterion projects.
 # The Android app must be foreground before dispatching launch intents.
 class AppLaunch(BaseModel):
-    package: str = Field(min_length=3,max_length=180,pattern=r'^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*){1,12}$')
+    package: str = Field(min_length=3,max_length=180,pattern=r'^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*){1,12}$')
 
 @router.get('/phone/apps')
 def phone_apps():
