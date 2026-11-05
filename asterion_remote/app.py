@@ -41,7 +41,7 @@ COMMAND_LOCK = Lock()
 COMMANDS: dict[str, dict] = {}
 STATIC = Path(__file__).parent / 'static'
 
-app = FastAPI(title='Asterion Control', version='0.3.0', docs_url='/docs', redoc_url=None)
+app = FastAPI(title='Asterion Control', version='0.8.0', docs_url='/docs', redoc_url=None)
 app.mount('/static', StaticFiles(directory=STATIC), name='static')
 app.include_router(phone_router)
 app.include_router(pairing_router)
@@ -98,7 +98,7 @@ def manifest():
 
 @app.get('/api/v1/health', dependencies=[Depends(require_token)])
 def health():
-    return {'ok': True, 'app': 'Asterion Control', 'version': '0.3.0', 'os': platform.system(),
+    return {'ok': True, 'app': 'Asterion Control', 'version': '0.8.0', 'os': platform.system(),
             'host': platform.node(), 'root': str(ROOT), 'shell': ALLOW_SHELL,
             'android_shell': ALLOW_ADB_SHELL,
             'capabilities': ['files', 'commands', 'processes', 'system', 'desktop_screen',
