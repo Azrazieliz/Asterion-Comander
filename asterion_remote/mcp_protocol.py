@@ -50,6 +50,9 @@ TOOLS = [
     spec('control_phone_input','Send action to the authorized Android agent without ADB',
          {'action': {'type':'string','enum':['tap','swipe','long_press','back','home','recents','notifications','type','click_text']},
           'x':INT,'y':INT,'x2':INT,'y2':INT,'duration_ms':INT,'text':STR},['action']),
+    spec('control_phone_observation_status','Read user-selected Asterion game observation state on Samsung'),
+    spec('control_phone_observation_events','Read timestamped event metadata from the user-selected Asterion app'),
+    spec('control_phone_observation_frame','Read the latest recorded native Android gameplay frame'),
     spec('control_phone_continuation_status','Inspect the Android-owned checkpoint lifecycle (requires device opt-in)'),
     spec('control_phone_continuation_queue','Queue one spec-referenced ChatGPT app continuation on the phone; requires owner opt-in',
          {'project':STR,'checkpoint_id':STR,'priority_tier':{'type':'string','enum':['5*','6*','7*']},
@@ -124,6 +127,15 @@ def invoke_tool(name: str, args: dict):
         from .native_routes import phone_input
         from .phone_bridge import PhoneInput
         return phone_input(PhoneInput(**args))
+    if name == 'control_phone_observation_status':
+        from .native_routes import phone_observation_status
+        return phone_observation_status()
+    if name == 'control_phone_observation_events':
+        from .native_routes import phone_observation_events
+        return phone_observation_events()
+    if name == 'control_phone_observation_frame':
+        from .native_routes import phone_observation_frame
+        return phone_observation_frame()
     if name == 'control_phone_continuation_status':
         from .native_routes import phone_continuation_status
         return phone_continuation_status()
