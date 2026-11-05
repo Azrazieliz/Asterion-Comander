@@ -55,12 +55,14 @@ final class ContinuationLedger {
     return new JSONObject(state.toString());
   }
   synchronized JSONObject configure(boolean enabled) throws Exception {
-    state.put("enabled", enabled);
-    if (!enabled) {
-      state.put("state", "paused");
-    } else if ("paused".equals(state.optString("state"))) {
-      state.put("state", state.has("pending") ? "queued" : "idle");
+    String current=state.optString("state","idle");
+    if(!enabled && !"paused".equals(current)){
+      state.put("paused_previous_state",current).put("state","paused");
+    }else if(enabled && "paused".equals(current)){
+      state.put("state",state.optString("paused_previous_state","idle"));
+      state.remove("paused_previous_state");
     }
+    state.put("enabled",enabled);
     persist();
     return status();
   }
@@ -116,6 +118,9 @@ final class ContinuationLedger {
       state.put("state", "submitted_unverified")
         .put("last_submit_ms", System.currentTimeMillis()).put("last_error", "");
       state.remove("pending");
+    } else if(outcome.optBoolean("uncertain")) {
+      state.put("state","requires_manual_review")
+        .put("last_error",outcome.optString("reason","Uncertain ChatGPT send"));
     } else {
       state.put("state", "failed")
         .put("last_error", outcome.optString("reason", "UI send was not confirmed"));
@@ -129,12 +134,16 @@ final class ContinuationLedger {
    * the transport. The phone cannot infer model processing from UI clicks.
    */
   synchronized JSONObject acknowledge(String checkpoint,String receipt) throws Exception {
-    if(!"submitted_unverified".equals(state.optString("state")) ||
+    String current=state.optString("state");
+    if(!("submitted_unverified".equals(current)||
+         ("paused".equals(current)&&"submitted_unverified".equals(state.optString("paused_previous_state")))) ||
        !checkpoint.equals(state.optString("last_checkpoint")))
       throw new IllegalStateException("No matching unacknowledged checkpoint");
     if(receipt==null||receipt.length()<8||receipt.length()>512)
       throw new IllegalArgumentException("Response evidence marker required (8-512 characters)");
-    state.put("state","acknowledged").put("response_observed_ms",System.currentTimeMillis())
+    state.put("state",state.optBoolean("enabled")?"acknowledged":"paused")
+         .put("paused_previous_state",state.optBoolean("enabled")?"":"acknowledged")
+         .put("response_observed_ms",System.currentTimeMillis())
          .put("response_receipt",receipt);
     persist();
     return new JSONObject().put("ok",true).put("state","acknowledged")
@@ -144,9 +153,12 @@ final class ContinuationLedger {
     String current=state.optString("state");
     if("dispatching".equals(current) || "submitted_unverified".equals(current))
       throw new IllegalStateException("A send may already have happened; inspect before cancelling");
-    if("queued".equals(current)||"failed".equals(current)||"requires_manual_review".equals(current)){
+    if("queued".equals(current)||"failed".equals(current)||"requires_manual_review".equals(current)||
+       ("paused".equals(current)&&"queued".equals(state.optString("paused_previous_state")))){
       state.remove("pending");
-      state.put("state","cancelled");persist();
+      state.put("state",state.optBoolean("enabled")?"cancelled":"paused");
+      if(!state.optBoolean("enabled"))state.put("paused_previous_state","cancelled");
+      persist();
     }
     return new JSONObject().put("ok",true).put("state",state.optString("state"));
   }
