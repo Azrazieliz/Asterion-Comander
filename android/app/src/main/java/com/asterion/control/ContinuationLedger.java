@@ -17,9 +17,14 @@ final class ContinuationLedger {
   private static final String FILE = "continuation-state.json";
   private static final int MAX_PROMPT = 3800;
   private static final long COOLDOWN_MS = 60_000L;
+  private static volatile ContinuationLedger singleton;
+  static synchronized ContinuationLedger get(Context context) {
+    if (singleton == null) singleton = new ContinuationLedger(context.getApplicationContext());
+    return singleton;
+  }
   private final AtomicFile store;
   private JSONObject state;
-  ContinuationLedger(Context context) {
+  private ContinuationLedger(Context context) {
     store = new AtomicFile(new File(context.getNoBackupFilesDir(), FILE));
     state = read();
   }
