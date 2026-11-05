@@ -1,3 +1,13 @@
+# Current continuation — Android v0.8.2 / Plugin v1.2.0 (2026-11-05)
+- **Compiled APK published** at [dist/Asterion-Control-v0.8.2-debug.apk](dist/Asterion-Control-v0.8.2-debug.apk). Built on the owner's Windows PC through its PRIVATE Asterion Control GitHub bridge, without Desktop Commander or ADB. Verified build exit 0, 194,889 bytes, SHA-256 `b3e5fe037b43d98dc64682615be37ab77fdd07ad8ca9b84d8435c8ce9d25505f` (commit `cdd475c`).
+- v0.8.2 updates pairing failure diagnostics, starts/auto-registers the phone agent after Windows pairing, selects phone's routable Wi-Fi address, retries registration, adds Repair connection and preserves saved credentials. **Android 0.8.2 is not confirmed installed**; owner must approve the APK update without an existing authorized installer channel.
+- **Asterion Control private plugin v1.2.0** created and updated; its skill has been loaded from `skills://plugins/asterion-control/asterion-control` in an ordinary ChatGPT conversation. **Do not tell user to use Work or web.** ChatGPT currently calls connected GitHub as the separate private command relay, not a connected direct MCP tool.
+- GitHub bridge independent acceptance: Windows health succeeds; latest `phone_status` still reports `paired:false`. Phone's native agent was reachable over Wi-Fi and rejected unauthenticated requests with HTTP 401; this is NOT successful phone authorization.
+- **Still blocked**: user-initiated Android APK update, then one-time phone-to-Windows pairing and Android Accessibility/MediaProjection approval, followed by actual phone screen/gesture validation. Low-latency PC↔Android streaming exists in source, but ChatGPT's GitHub fallback remains polling rather than real-time. Do not claim full completion.
+- Use no more routine ADB or Desktop Commander. Use the private GitHub bridge to execute PC commands. Android is the head; Windows is a subordinate worker.
+
+---
+
 # Asterion Control — deployment and acceptance ledger
 Date: 2026-11-05. Frozen scope: [7STAR_FROZEN_MASTER.md](7STAR_FROZEN_MASTER.md).
 
