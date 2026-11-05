@@ -2,7 +2,7 @@
 from __future__ import annotations
 import hashlib, hmac, ipaddress, json, os, platform, secrets, socket, threading, time
 from pathlib import Path
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Header
 from pydantic import BaseModel, Field
 
 PORT=8912
@@ -77,6 +77,16 @@ def _exchange(code:str,name:str,peer:str)->dict:
 @router.post('')
 async def pair(data:Join,req:Request):
     return _exchange(data.code,data.name,req.client.host if req.client else '')
+
+@router.post('/new-code')
+def issue_new_pairing_code(authorization: str | None = Header(default=None)):
+    """Issue a short-lived PIN through the already authorized Windows Control API."""
+    from .security import configured_token
+    candidate=(authorization or '')
+    if not candidate.startswith('Bearer ') or not hmac.compare_digest(candidate[7:].encode(), configured_token().encode()):
+        raise HTTPException(401,'Windows master authorization required')
+    return {'code':create_code(),'expires_in_seconds':600}
+
 
 def _broadcast_server(stop:threading.Event)->None:
     try:
