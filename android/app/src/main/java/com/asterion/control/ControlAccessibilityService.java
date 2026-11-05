@@ -40,11 +40,12 @@ public final class ControlAccessibilityService extends AccessibilityService {
           }
           done.countDown(); return;
         }
-        case "tap": case "swipe": {
+        case "tap": case "swipe": case "long_press": {
           float x = (float)a.optDouble("x",0), y = (float)a.optDouble("y",0);
           Path p = new Path(); p.moveTo(x,y);
           long duration = 55;
           if(cmd.equals("swipe")) { p.lineTo((float)a.optDouble("x2",x),(float)a.optDouble("y2",y)); duration = Math.max(100,Math.min(5000,a.optLong("duration_ms",400))); }
+          if(cmd.equals("long_press")) duration = Math.max(550,Math.min(2500,a.optLong("duration_ms",900)));
           GestureDescription gd = new GestureDescription.Builder().addStroke(new GestureDescription.StrokeDescription(p,0,duration)).build();
           dispatchGesture(gd,new GestureResultCallback() {
             @Override public void onCompleted(GestureDescription g){result[0]=true;done.countDown();}
