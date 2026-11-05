@@ -722,7 +722,10 @@ from . import mcp_protocol  # noqa: E402,F401
 def _desktop_jpeg(monitor: int):
     return screenshot(monitor=monitor,quality=67).body
 
-install_stream(app, _desktop_jpeg)
+def _desktop_ws_input(payload: dict):
+    return desktop_input(DesktopInput(**payload))
+
+install_stream(app, _desktop_jpeg, _desktop_ws_input)
 
 @app.on_event('shutdown')
 def stop_lan_discovery():
