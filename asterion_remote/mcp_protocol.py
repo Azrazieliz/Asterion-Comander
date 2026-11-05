@@ -56,6 +56,12 @@ TOOLS = [
     spec('control_phone_observation_status','Read user-selected Asterion game observation state on Samsung'),
     spec('control_phone_observation_events','Read timestamped event metadata from the user-selected Asterion app'),
     spec('control_phone_observation_frame','Read the latest recorded native Android gameplay frame'),
+    spec('control_phone_apps','Discover installed launchable Android apps for cross-project work'),
+    spec('control_phone_app_launch','Request opening an installed Android application while Control is foreground (not verified launch)',
+         {'package':STR},['package']),
+    spec('control_phone_continuation_ack','Acknowledge a checkpoint only after this ChatGPT operator actually observes the next response',
+         {'checkpoint_id':STR,'response_receipt':STR},['checkpoint_id','response_receipt']),
+    spec('control_phone_continuation_cancel','Cancel a queued or failed phone checkpoint, not one already sent'),
     spec('control_phone_continuation_status','Inspect the Android-owned checkpoint lifecycle (requires device opt-in)'),
     spec('control_phone_continuation_queue','Queue one spec-referenced ChatGPT app continuation on the phone; requires owner opt-in',
          {'project':STR,'checkpoint_id':STR,'priority_tier':{'type':'string','enum':['5*','6*','7*']},
@@ -145,6 +151,18 @@ def invoke_tool(name: str, args: dict):
     if name == 'control_phone_observation_frame':
         from .native_routes import phone_observation_frame
         return phone_observation_frame()
+    if name == 'control_phone_apps':
+        from .native_routes import phone_apps
+        return phone_apps()
+    if name == 'control_phone_app_launch':
+        from .native_routes import phone_app_launch, AppLaunch
+        return phone_app_launch(AppLaunch(**args))
+    if name == 'control_phone_continuation_ack':
+        from .native_routes import phone_continuation_ack, CheckpointAcknowledgment
+        return phone_continuation_ack(CheckpointAcknowledgment(**args))
+    if name == 'control_phone_continuation_cancel':
+        from .native_routes import phone_continuation_cancel
+        return phone_continuation_cancel()
     if name == 'control_phone_continuation_status':
         from .native_routes import phone_continuation_status
         return phone_continuation_status()
