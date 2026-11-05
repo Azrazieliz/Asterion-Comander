@@ -25,3 +25,16 @@ Commit the full preserved source; implement independent Android native agent and
 
 ## GitHub source commit
 - asterion_remote/control_services.py committed in f47b7adf. This module is a component, not a standalone server.
+
+## 2026-11-05 — Hardware independence acceptance gate (UNPASSED)
+User deliberately unplugged USB/ADB. **Do not report a working release until all of these succeed without ADB and without Desktop Commander carrying actions:**
+1. Android app directly sees and operates Windows PC over authenticated wireless link.
+2. ChatGPT (through a separately connected Asterion Control MCP/API bridge) executes a genuine PC control action and receives the result.
+3. ChatGPT executes a genuine Android control action, reading screen/UI state and sending authorized input via the Asterion Android agent, not ADB.
+4. Both directions survive reconnect and provide repeatable observable results; test after Desktop Commander is stopped or disconnected.
+
+Observed before USB removal: v0.7.0 native APK compiled/installed; Windows API responded on private LAN 192.168.1.133:8911; the Android agent occasionally responded on 192.168.1.116:8973. Phone-to-PC pairing was not verified; Android screen/accessibility permissions and reliable control via own API were not proven. **This is NOT end-to-end success.**
+
+Remaining independent access gap: ChatGPT currently has a Desktop Commander connector but NO connected Asterion Control MCP client in the available tools. A listening /mcp endpoint alone is insufficient for direct tool invocation here. The user must be able to explicitly authorize a proper independent connection; do not pretend a local build gives ChatGPT access.
+
+At acceptance time, test evidence must include executed action, transport, target device, success/failure, and confirmation that ADB and Desktop Commander were not used as the action path. No more synthetic test claims.
