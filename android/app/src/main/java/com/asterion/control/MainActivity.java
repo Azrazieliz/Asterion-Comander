@@ -288,6 +288,16 @@ public final class MainActivity extends Activity {
     wide(handoff,t("Only a queued, spec-referenced checkpoint is sent. Existing drafts are never overwritten; Android and ChatGPT limits still apply.",11,DesignSystem.MUTED,false));
     wide(devicesBody,handoff);
 
+    gap(devicesBody,12);LinearLayout observation=card();
+    rowTitle(observation,"Asterion game observation",
+      "Local screen evidence & events · no embedded AI",icon("activity",DesignSystem.TEAL,23));
+    gap(observation,12);
+    button(observation,"Observe an Asterion app","share",true,this::startAsterionObservation);
+    gap(observation,9);button(observation,"Stop observation","power",false,this::stopAsterionObservation);
+    gap(observation,9);
+    wide(observation,t("Requires Android screen-sharing approval. Records the selected Asterion app only. Evidence stays on this phone until explicitly retrieved.",11,DesignSystem.MUTED,false));
+    wide(devicesBody,observation);
+
     gap(devicesBody,12);LinearLayout transfer=card();
     rowTitle(transfer,"Direct Wi-Fi file transfer","PC → Phone · Files are saved to Downloads/Asterion Control",icon("download",DesignSystem.TEAL,24));
     gap(transfer,12);button(transfer,"Send a PC file to this phone","share",true,this::promptWifiTransfer);
@@ -727,6 +737,25 @@ public final class MainActivity extends Activity {
         runOnUiThread(()->setPairingFeedback("Direct ChatGPT setup unavailable: "+message));
       }finally{if(connection!=null)connection.disconnect();}
     });
+  }
+  private void startAsterionObservation(){
+    EditText targetApp=input(getSharedPreferences("asterion_observation",MODE_PRIVATE)
+      .getString("target",""),false,"Asterion application package (com.asterion.*)");
+    LinearLayout layout=v();pad(layout,18,12);
+    wide(layout,targetApp);
+    gap(layout,12);wide(layout,t("Only this selected app will be recorded. Screen sharing needs Android approval; protected content remains protected.",12,DesignSystem.MUTED,false));
+    new AlertDialog.Builder(this).setTitle("Observe Asterion gameplay")
+      .setView(layout).setPositiveButton("Start observation",(d,w)->{
+        try{
+          AppObservation.configure(this,true,targetApp.getText().toString().trim());
+          toast("Observation enabled for the selected Asterion app");
+          if(!CaptureService.active)beginCapture();
+        }catch(Exception e){toast("Enter the installed Asterion app package");}
+      }).setNegativeButton("Cancel",null).show();
+  }
+  private void stopAsterionObservation(){
+    try{AppObservation.configure(this,false,"");toast("Observation stopped");}
+    catch(Exception e){toast("Observation could not stop");}
   }
   private void enableCheckpointContinuation(){
     new AlertDialog.Builder(this).setTitle("Enable ChatGPT continuation")
