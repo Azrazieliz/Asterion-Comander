@@ -8,28 +8,28 @@ $gradle = 'C:\Users\mimim\.gradle\wrapper\dists\gradle-8.13-bin\5xuhj0ry160q40cl
 if (-not (Test-Path $gradle)) {throw 'Installed Gradle 8.13 missing'}
 $env:JAVA_HOME='C:\Program Files\Android\Android Studio\jbr'
 $env:ANDROID_HOME=Join-Path $env:LOCALAPPDATA 'Android\Sdk'
-$version='0.8.5'
+$version='0.8.6'
 if (-not ((Get-Content 'android\app\build.gradle' -Raw) -match "versionName '$version'")) {throw 'Unexpected Android version'}
 Set-Location (Join-Path $root 'android')
 $ErrorActionPreference='Continue'
-& $gradle :app:assembleDebug --offline --no-daemon --console=plain > (Join-Path $root 'ANDROID_BUILD_v085.log') 2>&1
+& $gradle :app:assembleDebug --offline --no-daemon --console=plain > (Join-Path $root 'ANDROID_BUILD_v086.log') 2>&1
 $gradleExit=$LASTEXITCODE
 $ErrorActionPreference='Stop'
 if ($gradleExit -ne 0) {
-  Get-Content (Join-Path $root 'ANDROID_BUILD_v085.log') -Tail 35
+  Get-Content (Join-Path $root 'ANDROID_BUILD_v086.log') -Tail 35
   throw 'Gradle build failed'
 }
 Set-Location $root
 New-Item -ItemType Directory 'dist' -Force | Out-Null
 $source='android\app\build\outputs\apk\debug\app-debug.apk'
-$target='dist\Asterion-Control-v0.8.5-debug.apk'
+$target='dist\Asterion-Control-v0.8.6-debug.apk'
 if (-not (Test-Path $source)) {throw 'APK artifact missing'}
 Copy-Item $source $target -Force
 $hash=(Get-FileHash $target -Algorithm SHA256).Hash.ToLowerInvariant()
-Set-Content 'dist\SHA256SUMS-v0.8.5.txt' ($hash+'  Asterion-Control-v0.8.5-debug.apk') -Encoding ASCII
-git add -- $target 'dist/SHA256SUMS-v0.8.5.txt'
+Set-Content 'dist\SHA256SUMS-v0.8.6.txt' ($hash+'  Asterion-Control-v0.8.6-debug.apk') -Encoding ASCII
+git add -- $target 'dist/SHA256SUMS-v0.8.6.txt'
 if ($LASTEXITCODE -ne 0) {throw 'Git stage failed'}
-git -c user.name='Asterion Build' -c user.email='build@users.noreply.github.com' commit -m 'Publish independently built Android Control v0.8.5 phone-first pairing repair'
+git -c user.name='Asterion Build' -c user.email='build@users.noreply.github.com' commit -m 'Publish independently built Android Control v0.8.6 phone-first pairing repair'
 if ($LASTEXITCODE -ne 0) {throw 'Git commit failed'}
 git push origin HEAD:main
 if ($LASTEXITCODE -ne 0) {throw 'Git upload failed'}
