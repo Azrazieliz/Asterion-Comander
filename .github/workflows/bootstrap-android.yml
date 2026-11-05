@@ -1,0 +1,46 @@
+name: Build Asterion Control Android
+on:
+  push:
+    paths:
+      - 'android-bootstrap.xz.b64'
+      - '.github/workflows/bootstrap-android.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Expand source bootstrap
+        shell: bash
+        run: |
+          base64 -d android-bootstrap.xz.b64 | tar -xJ
+          test -f android/app/src/main/AndroidManifest.xml
+      - name: Commit expanded source files
+        shell: bash
+        run: |
+          git config user.email 'actions@users.noreply.github.com'
+          git config user.name 'Asterion Build'
+          git add android
+          if ! git diff --cached --quiet; then
+            git commit -m 'Import native Android source for Asterion Control'
+            git push origin HEAD:main
+          fi
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Compile Android APK
+        working-directory: android
+        run: gradle --no-daemon assembleDebug --stacktrace
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: Asterion-Control-debug-APK
+          path: android/app/build/outputs/apk/debug/app-debug.apk
