@@ -27,6 +27,7 @@ import java.nio.ByteBuffer;
 /** One explicit MediaProjection grant yields a continuously updated compressed frame. */
 public final class CaptureService extends Service {
   public static volatile byte[] latest;
+  public static volatile long latestAtMs = 0L;
   public static volatile int width = 0, height = 0;
   public static volatile boolean active = false;
   private ImageReader reader;
@@ -69,7 +70,7 @@ public final class CaptureService extends Service {
         Bitmap cropped=Bitmap.createBitmap(raw,0,0,width,height);
         ByteArrayOutputStream bytes=new ByteArrayOutputStream(width*height/4);
         cropped.compress(Bitmap.CompressFormat.JPEG,62,bytes);
-        latest=bytes.toByteArray();cropped.recycle();raw.recycle();
+        latest=bytes.toByteArray();latestAtMs=now;cropped.recycle();raw.recycle();
       }catch(Exception ignored){}finally {if(im!=null)im.close();}},new Handler(thread.getLooper()));
       display=projection.createVirtualDisplay("AsterionScreen",width,height,metrics.densityDpi,
         DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,reader.getSurface(),null,new Handler(thread.getLooper()));
@@ -77,7 +78,7 @@ public final class CaptureService extends Service {
     }catch(Exception e){android.util.Log.e("AsterionCapture","Capture failed",e);stopCapture();stopSelf();}
     return START_NOT_STICKY;
   }
-  private void stopCapture(){active=false;latest=null;try{if(display!=null)display.release();}catch(Exception ignored){}display=null;
+  private void stopCapture(){active=false;latest=null;latestAtMs=0L;try{if(display!=null)display.release();}catch(Exception ignored){}display=null;
     try{if(reader!=null)reader.close();}catch(Exception ignored){}reader=null;
     try{if(thread!=null)thread.quitSafely();}catch(Exception ignored){}thread=null;
     MediaProjection old=projection;projection=null;try{if(old!=null)old.stop();}catch(Exception ignored){}
