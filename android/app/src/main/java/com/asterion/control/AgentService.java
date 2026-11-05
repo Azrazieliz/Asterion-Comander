@@ -180,6 +180,23 @@ public final class AgentService extends Service {
       if(jpeg==null){json(out,503,error("No recorded frame available"));return;}
       write(out,200,"image/jpeg",jpeg);return;
     }
+    if(method.equals("GET")&&path.equals("/apps")){
+      try{json(out,200,AppCatalog.list(this));}
+      catch(Exception e){json(out,400,error("Application catalogue unavailable"));}return;
+    }
+    if(method.equals("POST")&&path.equals("/apps/launch")){
+      try{json(out,200,AppCatalog.requestLaunch(this,body.getString("package")));}
+      catch(Exception e){json(out,400,error(e.getMessage()));}return;
+    }
+    if(method.equals("POST")&&path.equals("/continuation/ack")){
+      try{json(out,200,continuation.acknowledge(
+        body.getString("checkpoint_id"),body.getString("response_receipt")));}
+      catch(Exception e){json(out,400,error(e.getMessage()));}return;
+    }
+    if(method.equals("POST")&&path.equals("/continuation/cancel")){
+      try{json(out,200,continuation.cancel());}
+      catch(Exception e){json(out,400,error(e.getMessage()));}return;
+    }
     if(method.equals("GET")&&path.equals("/continuation/status")){
       try { JSONObject state=continuation.status();state.remove("pending");json(out,200,state); }
       catch(Exception e){json(out,400,error("Continuation status unavailable"));}return;
