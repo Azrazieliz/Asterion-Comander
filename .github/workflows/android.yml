@@ -4,6 +4,8 @@ on:
     branches: [main]
     paths: ['android/**', '.github/workflows/android.yml']
   workflow_dispatch:
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -14,14 +16,30 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify Windows API and pairing
+        run: |
+          python -m pip install -r requirements.txt pytest
+          python -m pytest -q tests
       - uses: android-actions/setup-android@v3
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Build APK
+      - name: Compile native Android APK
         working-directory: android
-        run: gradle --no-daemon assembleDebug
+        run: gradle --no-daemon --stacktrace assembleDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: Asterion-Control-Android-debug
+          name: Asterion-Control-v0.8.0-Android-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+      - name: Publish installable beta APK
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if ! gh release view v0.8.0-beta >/dev/null 2>&1; then
+            gh release create v0.8.0-beta --target "$GITHUB_SHA" --title "Asterion Control 0.8.0 beta" --prerelease --notes "Cable-free Android-first Asterion Control beta. Older debug-signed builds may require removal before installation. Standalone end-to-end device control is not yet verified."
+          fi
+          gh release upload v0.8.0-beta "android/app/build/outputs/apk/debug/app-debug.apk#Asterion-Control-v0.8.0-debug.apk" --clobber
