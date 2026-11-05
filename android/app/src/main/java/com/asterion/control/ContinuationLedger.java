@@ -3,6 +3,7 @@ package com.asterion.control;
 import android.content.Context;
 import android.util.AtomicFile;
 import org.json.JSONObject;
+import org.json.JSONArray;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -76,15 +77,24 @@ final class ContinuationLedger {
       throw new IllegalArgumentException("Priority tier must be 5*, 6* or 7*");
     if (spec.length() < 3 || spec.length() > 250 || text.isEmpty() || text.length() > MAX_PROMPT)
       throw new IllegalArgumentException("Invalid spec reference or continuation message");
-    if (checkpoint.equals(state.optString("last_checkpoint")))
-      return new JSONObject().put("ok", true).put("duplicate", true).put("state", state.optString("state"));
-    if (state.has("pending") && !"idle".equals(state.optString("state")) &&
-        !"submitted_unverified".equals(state.optString("state")) &&
-        !"failed".equals(state.optString("state")))
-      throw new IllegalStateException("A previous checkpoint is still pending");
+    JSONArray history=state.optJSONArray("history");
+    if(history!=null)for(int i=0;i<history.length();i++)
+      if(checkpoint.equals(history.optString(i)))
+        return new JSONObject().put("ok",true).put("duplicate",true)
+          .put("state",state.optString("state"));
+    String before=state.optString("state","idle");
+    if(!("idle".equals(before)||"acknowledged".equals(before)||
+         "cancelled".equals(before)||"failed".equals(before)))
+      throw new IllegalStateException("Prior checkpoint has not been acknowledged or cancelled");
     JSONObject item = new JSONObject().put("project", project).put("checkpoint_id", checkpoint)
       .put("priority_tier", tier).put("spec_reference", spec).put("message", text)
       .put("queued_at_ms", System.currentTimeMillis());
+    if(history==null)history=new JSONArray();
+    JSONArray kept=new JSONArray();
+    for(int i=Math.max(0,history.length()-62);i<history.length();i++)
+      kept.put(history.optString(i));
+    kept.put(checkpoint);
+    state.put("history",kept);
     state.put("pending", item).put("state", "queued").put("last_checkpoint", checkpoint)
       .put("sequence", state.optInt("sequence", 0) + 1).put("last_error", "");
     persist();
@@ -113,6 +123,32 @@ final class ContinuationLedger {
     persist();
     return new JSONObject().put("ok", outcome.optBoolean("sent"))
       .put("state", state.optString("state")).put("reason", outcome.optString("reason"));
+  }
+  /**
+   * Only the external operator observing a real ChatGPT reply can acknowledge
+   * the transport. The phone cannot infer model processing from UI clicks.
+   */
+  synchronized JSONObject acknowledge(String checkpoint,String receipt) throws Exception {
+    if(!"submitted_unverified".equals(state.optString("state")) ||
+       !checkpoint.equals(state.optString("last_checkpoint")))
+      throw new IllegalStateException("No matching unacknowledged checkpoint");
+    if(receipt==null||receipt.length()<8||receipt.length()>512)
+      throw new IllegalArgumentException("Response evidence marker required (8-512 characters)");
+    state.put("state","acknowledged").put("response_observed_ms",System.currentTimeMillis())
+         .put("response_receipt",receipt);
+    persist();
+    return new JSONObject().put("ok",true).put("state","acknowledged")
+      .put("checkpoint_id",checkpoint);
+  }
+  synchronized JSONObject cancel() throws Exception {
+    String current=state.optString("state");
+    if("dispatching".equals(current) || "submitted_unverified".equals(current))
+      throw new IllegalStateException("A send may already have happened; inspect before cancelling");
+    if("queued".equals(current)||"failed".equals(current)||"requires_manual_review".equals(current)){
+      state.remove("pending");
+      state.put("state","cancelled");persist();
+    }
+    return new JSONObject().put("ok",true).put("state",state.optString("state"));
   }
   synchronized JSONObject recover() throws Exception {
     // A previous dispatch might have sent the message before a crash; NEVER replay it.
