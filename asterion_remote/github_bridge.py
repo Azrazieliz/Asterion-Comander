@@ -101,33 +101,43 @@ def content_put(folder,name,value,key,sha=None):
     return gh('/contents/'+folder+'/'+name,key,'PUT',body)
 
 def cycle(github,local):
-    try:items=gh('/contents/commands?ref=main',github)
-    except urllib.error.HTTPError as e:
-        if e.code==404:return 0
+    """Two directory reads per scan; no O(N) per-command GitHub requests.
+
+    The previous implementation requested a separate result for *every* historical
+    command on *every* poll, rapidly exhausted GitHub API quotas, and starved
+    new Control requests. Existing result files remain the durable execution log.
+    """
+    try:
+        items=gh('/contents/commands?ref=main',github)
+    except urllib.error.HTTPError as exc:
+        if exc.code==404:return 0
         raise
+    try:
+        prior=gh('/contents/results?ref=main',github)
+    except urllib.error.HTTPError as exc:
+        if exc.code==404:prior=[]
+        else:raise
+    completed_names={entry.get('name') for entry in prior if isinstance(entry,dict)}
     completed=0
     for item in items:
         filename=item.get('name','')
         ident=filename[:-5] if filename.endswith('.json') else ''
-        if not NAME.fullmatch(ident):continue
-        try:
-            gh('/contents/results/'+filename+'?ref=main',github)
+        if not NAME.fullmatch(ident) or filename in completed_names:
             continue
-        except urllib.error.HTTPError as exc:
-            if exc.code!=404:raise
-        # Durable in-flight marker prevents destructive commands from being replayed after crashes.
         content_put('results',filename,{'id':ident,'ok':False,'status':'running'},github)
+        completed_names.add(filename)
         start=time.monotonic()
         try:
             request=content_get('commands',filename,github)
             if request.get('id')!=ident or not isinstance(request.get('op'),str):
                 raise ValueError('Request identity mismatch')
             result=run(request,local)
-            final={'id':ident,'ok':True,'status':'complete','elapsed_ms':int((time.monotonic()-start)*1000),
-                   'result':result}
-        except Exception as e:
-            final={'id':ident,'ok':False,'status':'error','elapsed_ms':int((time.monotonic()-start)*1000),
-                   'error':str(e)[:500]}
+            final={'id':ident,'ok':True,'status':'complete',
+                   'elapsed_ms':int((time.monotonic()-start)*1000),'result':result}
+        except Exception as exc:
+            final={'id':ident,'ok':False,'status':'error',
+                   'elapsed_ms':int((time.monotonic()-start)*1000),
+                   'error':str(exc)[:500]}
         old=gh('/contents/results/'+filename+'?ref=main',github)
         content_put('results',filename,final,github,old['sha'])
         print('Completed',ident,final['status'],flush=True)
