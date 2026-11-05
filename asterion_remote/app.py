@@ -66,7 +66,7 @@ def safe_path(value: str) -> Path:
 
 
 def relative(path: Path) -> str:
-    return str(path.relative_to(ROOT)) if path.is_relative_to(ROOT) else str(path)
+    return path.relative_to(ROOT).as_posix() if path.is_relative_to(ROOT) else str(path)
 
 
 def api_error(e: Exception, feature: str) -> HTTPException:
