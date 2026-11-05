@@ -60,3 +60,26 @@ def get_control_session(key: str):
 @router.post('/sessions/{key}/cancel')
 def stop_control_session(key: str):
     return cancel_session(key)
+
+# Checkpoint messages are stored and sent by the Android head, never by PC AI.
+from pydantic import BaseModel, Field
+from typing import Literal
+
+class ContinuationRequest(BaseModel):
+    project: str = Field(min_length=3,max_length=70)
+    checkpoint_id: str = Field(min_length=3,max_length=100)
+    priority_tier: Literal['5*','6*','7*']
+    spec_reference: str = Field(min_length=3,max_length=250)
+    message: str = Field(min_length=1,max_length=3800)
+
+@router.get('/phone/continuation/status')
+def phone_continuation_status():
+    return request('/continuation/status').json()
+
+@router.post('/phone/continuation/queue')
+def phone_continuation_queue(data:ContinuationRequest):
+    return request('/continuation/queue','POST',data.model_dump(),timeout=6.0).json()
+
+@router.post('/phone/continuation/dispatch')
+def phone_continuation_dispatch():
+    return request('/continuation/dispatch','POST',{},timeout=15.0).json()
