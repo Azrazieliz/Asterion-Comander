@@ -14,6 +14,7 @@ def configured_token() -> str:
 def require_token(authorization: str | None = Header(default=None)) -> None:
     supplied = (authorization or '')
     supplied = supplied[7:] if supplied.startswith('Bearer ') else ''
-    if not hmac.compare_digest(supplied.encode(), configured_token().encode()):
+    from .pairing import is_authorized
+    if not hmac.compare_digest(supplied.encode(), configured_token().encode()) and not is_authorized(supplied):
         raise HTTPException(status_code=401, detail='Bearer token required',
                             headers={'WWW-Authenticate': 'Bearer'})
