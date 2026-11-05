@@ -116,7 +116,7 @@ public final class AgentService extends Service {
     return b.toString("UTF-8");
   }
   private void write(OutputStream o,int status,String kind,byte[] body)throws Exception{
-    String label=status==200?"OK":status==401?"Unauthorized":status==403?"Forbidden":status==404?"Not Found":status==503?"Unavailable":"Bad Request";
+    String label=status==200?"OK":status==202?"Accepted":status==405?"Method Not Allowed":status==401?"Unauthorized":status==403?"Forbidden":status==404?"Not Found":status==503?"Unavailable":"Bad Request";
     String head="HTTP/1.1 "+status+" "+label+"\r\nContent-Type: "+kind+"\r\nContent-Length: "+body.length+"\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n";
     o.write(head.getBytes(StandardCharsets.UTF_8));o.write(body);o.flush();
   }
@@ -147,6 +147,16 @@ public final class AgentService extends Service {
     byte[] data=in.readNBytes(len);
     if(data.length!=len){json(out,400,error("Truncated JSON request"));return;}
     JSONObject body=len>0?new JSONObject(new String(data,StandardCharsets.UTF_8)):new JSONObject();
+    // Android-native MCP is stateless, bearer-authenticated and LAN-only here.
+    // Public HTTPS ingress must be deployed separately; do not publish this port.
+    if(path.equals("/mcp")){
+      if(!method.equals("POST")){
+        write(out,405,"application/json; charset=utf-8",new byte[0]);return;
+      }
+      JSONObject reply=AndroidMcp.handle(this,body);
+      if(reply==null){write(out,202,"application/json; charset=utf-8",new byte[0]);return;}
+      json(out,200,reply);return;
+    }
     // Phone-resident checkpoint state. Owner must first opt in using Control's
     // native UI; HTTP bearer possession alone cannot enable self-continuation.
     // User-enabled Asterion app recording; only native MediaProjection frames.
@@ -247,7 +257,7 @@ public final class AgentService extends Service {
     }
     json(out,404,error("Unknown endpoint"));
   }catch(Exception e){android.util.Log.w("AsterionAgent","Client closed: "+e.getClass().getSimpleName());}}
-  private JSONObject health()throws Exception {
+  JSONObject health()throws Exception {
     DisplayMetrics m=new DisplayMetrics();((WindowManager)getSystemService(WINDOW_SERVICE)).getDefaultDisplay().getRealMetrics(m);
     ActivityManager.MemoryInfo mem=new ActivityManager.MemoryInfo();((ActivityManager)getSystemService(ACTIVITY_SERVICE)).getMemoryInfo(mem);
     Intent battery=registerReceiver(null,new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
