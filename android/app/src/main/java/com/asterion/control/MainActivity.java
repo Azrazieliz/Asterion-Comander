@@ -54,6 +54,10 @@ import java.util.Collections;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorCompletionService;
+import java.util.concurrent.CompletionService;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 /** Asterion Control · native, phone-first command surface. Technical APIs remain hidden. */
 public final class MainActivity extends Activity {
@@ -291,7 +295,9 @@ public final class MainActivity extends Activity {
         if(!(peer.isSiteLocalAddress()||peer.isLoopbackAddress()||peer.getHostAddress().startsWith("100.")))throw new IllegalArgumentException("Not private LAN");
         String address="http://"+peer.getHostAddress()+":"+info.optInt("port",8911);
         runOnUiThread(()->showPairingPrompt(address,info.optString("name","Windows computer")));
-      }catch(Exception e){runOnUiThread(()->{
+      }catch(Exception e){
+        if(discoverByPrivateTcp())return;
+        runOnUiThread(()->{
         if(remoteConnection!=null)remoteConnection.setText("Computer discovery not available on this network");
         new AlertDialog.Builder(this).setTitle("Computer not found")
           .setMessage("Start the Windows agent on the same private network or VPN. Advanced pairing remains available if discovery is blocked.")
@@ -300,6 +306,53 @@ public final class MainActivity extends Activity {
           }).setNegativeButton("Cancel",null).show();
       });}
     });
+  }
+  /** TCP fallback for Windows installations whose private firewall blocks UDP discovery.
+      Tries the phone's current /24 subnet, limited by timeouts and a bounded pool. */
+  private boolean discoverByPrivateTcp(){
+    String local=ipAddress();
+    String[] octets=local.split("\\.");
+    if(octets.length!=4)return false;
+    final String prefix=octets[0]+"."+octets[1]+"."+octets[2]+".";
+    java.util.concurrent.ExecutorService scan=Executors.newFixedThreadPool(24);
+    CompletionService<JSONObject> completions=new ExecutorCompletionService<>(scan);
+    int count=0;
+    for(int host=1;host<=254;host++){
+      final String ip=prefix+host;
+      if(ip.equals(local))continue;
+      completions.submit(()->{
+        HttpURLConnection connection=null;
+        try{
+          connection=(HttpURLConnection)new URL("http://"+ip+":8911/api/v1/discovery").openConnection();
+          connection.setConnectTimeout(350);
+          connection.setReadTimeout(350);
+          if(connection.getResponseCode()!=200)return null;
+          JSONObject response=new JSONObject(new String(connection.getInputStream().readNBytes(1024),StandardCharsets.UTF_8));
+          if(!"asterion-control".equals(response.optString("service"))||response.optInt("version")!=1)return null;
+          return new JSONObject().put("address","http://"+ip+":8911").put("name",response.optString("name","Windows computer"));
+        }catch(Exception error){return null;}
+        finally{if(connection!=null)connection.disconnect();}
+      });
+      count++;
+    }
+    boolean found=false;
+    try{
+      long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(6);
+      for(int i=0;i<count;i++){
+        long remaining=deadline-System.nanoTime();
+        if(remaining<=0)break;
+        Future<JSONObject> result=completions.poll(remaining,TimeUnit.NANOSECONDS);
+        if(result==null)break;
+        JSONObject response=result.get();
+        if(response!=null){
+          String address=response.getString("address"),name=response.getString("name");
+          runOnUiThread(()->showPairingPrompt(address,name));
+          found=true;break;
+        }
+      }
+    }catch(Exception ignored){}
+    finally{scan.shutdownNow();}
+    return found;
   }
   private void showPairingPrompt(String address,String name){
     EditText code=input("",false,"8-digit code on your Windows computer");
