@@ -41,6 +41,8 @@ public final class AgentService extends Service {
   private ServerSocket server;
   private Thread acceptThread;
   private final ExecutorService clients=Executors.newFixedThreadPool(6);
+  private TransferStore transfers;
+  @Override public void onCreate(){super.onCreate();transfers=new TransferStore(this);}
   public static final String PREF_REMOTE_ENABLED="remote_enabled";
   public static String token(Context c){
     SharedPreferences p=c.getSharedPreferences("agent",MODE_PRIVATE);
@@ -121,15 +123,39 @@ public final class AgentService extends Service {
     InputStream in=new BufferedInputStream(s.getInputStream());OutputStream out=new BufferedOutputStream(s.getOutputStream());
     String first=line(in);String[] request=first.split(" ");if(request.length<2){json(out,400,error("Malformed request"));return;}
     String method=request[0],path=request[1].split("\\?")[0];
-    String auth="";int len=0;
+    String auth="";int len=0;long offset=-1;
     for(int i=0;i<64;i++){String h=line(in);if(h.isEmpty())break;int at=h.indexOf(':');if(at<0)continue;
       String key=h.substring(0,at).trim().toLowerCase(),val=h.substring(at+1).trim();
       if(key.equals("authorization"))auth=val;
       if(key.equals("content-length"))len=Integer.parseInt(val);
+      if(key.equals("x-transfer-offset"))offset=Long.parseLong(val);
     }
     if(!auth.equals("Bearer "+token(this))){json(out,401,error("Unauthorized"));return;}
+    if(method.equals("PUT")&&path.startsWith("/transfer/chunk/")){
+      String id=path.substring("/transfer/chunk/".length());
+      try{
+        if(len<=0||len>TransferStore.CHUNK_MAX||offset<0)
+          throw new IllegalArgumentException("Invalid binary chunk headers");
+        json(out,200,transfers.append(id,offset,in,len));
+      }catch(Exception e){json(out,400,error(e.getMessage()));}
+      return;
+    }
     if(len<0||len>65536){json(out,400,error("Body too large"));return;}
-    byte[] data=in.readNBytes(len);JSONObject body=len>0?new JSONObject(new String(data,StandardCharsets.UTF_8)):new JSONObject();
+    byte[] data=in.readNBytes(len);
+    if(data.length!=len){json(out,400,error("Truncated JSON request"));return;}
+    JSONObject body=len>0?new JSONObject(new String(data,StandardCharsets.UTF_8)):new JSONObject();
+    if(method.equals("POST")&&path.equals("/transfer/start")){
+      try{json(out,200,transfers.start(body));}catch(Exception e){json(out,400,error(e.getMessage()));}
+      return;
+    }
+    if(method.equals("POST")&&path.startsWith("/transfer/finish/")){
+      try{json(out,200,transfers.finish(path.substring("/transfer/finish/".length())));}
+      catch(Exception e){json(out,400,error(e.getMessage()));}return;
+    }
+    if(method.equals("POST")&&path.startsWith("/transfer/cancel/")){
+      try{json(out,200,transfers.cancel(path.substring("/transfer/cancel/".length())));}
+      catch(Exception e){json(out,400,error(e.getMessage()));}return;
+    }
     if(method.equals("GET")&&path.equals("/health")){json(out,200,health());return;}
     if(method.equals("GET")&&path.equals("/ui")){
       ControlAccessibilityService a=ControlAccessibilityService.active;
