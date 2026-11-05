@@ -50,6 +50,9 @@ TOOLS = [
     spec('control_phone_input','Send action to the authorized Android agent without ADB',
          {'action': {'type':'string','enum':['tap','swipe','long_press','back','home','recents','notifications','type','click_text']},
           'x':INT,'y':INT,'x2':INT,'y2':INT,'duration_ms':INT,'text':STR},['action']),
+    spec('control_phone_voice_status','Read permissioned Android foreground voice dialogue state and transcript'),
+    spec('control_phone_voice_question','Speak a bounded question on Samsung, then listen once using on-device recognition',
+         {'text':STR,'locale':STR},['text']),
     spec('control_phone_observation_status','Read user-selected Asterion game observation state on Samsung'),
     spec('control_phone_observation_events','Read timestamped event metadata from the user-selected Asterion app'),
     spec('control_phone_observation_frame','Read the latest recorded native Android gameplay frame'),
@@ -127,6 +130,12 @@ def invoke_tool(name: str, args: dict):
         from .native_routes import phone_input
         from .phone_bridge import PhoneInput
         return phone_input(PhoneInput(**args))
+    if name == 'control_phone_voice_status':
+        from .native_routes import phone_voice_status
+        return phone_voice_status()
+    if name == 'control_phone_voice_question':
+        from .native_routes import phone_voice_question, VoiceQuestion
+        return phone_voice_question(VoiceQuestion(**args))
     if name == 'control_phone_observation_status':
         from .native_routes import phone_observation_status
         return phone_observation_status()
