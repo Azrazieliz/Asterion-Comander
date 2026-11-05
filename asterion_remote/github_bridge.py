@@ -28,6 +28,9 @@ ALLOWED={
  'phone_continuation_status':('GET','/api/v1/phone/continuation/status'),
  'phone_continuation_queue':('POST','/api/v1/phone/continuation/queue'),
  'phone_continuation_dispatch':('POST','/api/v1/phone/continuation/dispatch'),
+ 'phone_observation_status':('GET','/api/v1/phone/observation/status'),
+ 'phone_observation_events':('GET','/api/v1/phone/observation/events'),
+ 'phone_observation_frame':('GET','/api/v1/phone/observation/frame'),
 }
 
 def git_token():
@@ -88,7 +91,7 @@ def run(request,key):
                                                         'notifications','type','click_text'):
         raise ValueError('Invalid Android action')
     return pc(path,key,method,args if method=='POST' else None,
-              binary=op in ('pc_screen','phone_screen'))
+              binary=op in ('pc_screen','phone_screen','phone_observation_frame'))
 
 def content_get(folder,name,key):
     item=gh('/contents/'+folder+'/'+urllib.parse.quote(name)+'?ref=main',key)
