@@ -64,7 +64,7 @@ def test_phone_source_uses_direct_tls_and_phone_owned_cycles():
     assert "PhoneDirectMcp.start(this)" in agent
     assert "PhoneGitBridge.poll(this)" not in agent
     assert "setEndpointIdentificationAlgorithm(\"HTTPS\")" in direct
-    assert "Sec-WebSocket-Accept" in direct
+    assert "sec-websocket-accept" in direct.lower()
     assert "Authorization: Bearer " in direct
     assert "TRANSPORT_CELLULAR" in net and "TRANSPORT_VPN" in net
     assert "scheduleWithFixedDelay" in agent and "cycles.tick()" in agent
