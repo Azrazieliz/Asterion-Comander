@@ -42,6 +42,17 @@ if($env:ASTERION_DISABLE_GIT_BRIDGE -ne '1' -and (Test-Path $bridge)){
     '-File',('"' + $bridge + '"')
   ) -WorkingDirectory $root -WindowStyle Hidden | Out-Null
 }
+# When the owner has explicitly enabled a stable MCP Funnel, restore the
+# authenticated loopback gateway at Windows login. Tailscale itself keeps the
+# stable Funnel rule across a daemon restart; do not create a new hostname.
+$stableFlag=Join-Path $settings 'mcp-persistent-enabled.flag'
+$stableGateway=Join-Path $PSScriptRoot 'start_persistent_mcp_funnel.ps1'
+if((Test-Path $stableFlag) -and (Test-Path $stableGateway)){
+  Start-Process -FilePath 'powershell.exe' -ArgumentList @(
+    '-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass',
+    '-File',('"' + $stableGateway + '"'),'-Maintain'
+  ) -WorkingDirectory $root -WindowStyle Hidden | Out-Null
+}
 # Restart the actual native agent after unexpected termination.
 $failureCount=0
 while($true){
