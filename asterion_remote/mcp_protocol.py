@@ -47,6 +47,10 @@ TOOLS = [
     spec('control_phone_bridge_status','Legacy alias for direct Android TLS connection state'),
     spec('control_phone_direct_status','Inspect phone-initiated authenticated WSS MCP readiness'),
     spec('control_phone_health','Read native Android CPU, memory, battery and thermal indicators'),
+    spec('control_phone_performance_status','Read Android capture/observation workload policy and actual pressure'),
+    spec('control_phone_performance_mode','Set Android resource mode automatic, foreground, full or quiet',
+         {'mode': {'type':'string','enum':['automatic','foreground','full','quiet']}},['mode']),
+    spec('control_phone_performance_optimize','Prioritize foreground Android performance for 20 minutes'),
     spec('control_phone_screen','Capture a single current native Android MediaProjection frame'),
     spec('control_phone_ui','Read native Android accessibility UI hierarchy'),
     spec('control_phone_input','Send action to the authorized Android agent without ADB',
@@ -148,6 +152,15 @@ def invoke_tool(name: str, args: dict):
     if name == 'control_phone_health':
         from .native_routes import phone_health
         return phone_health()
+    if name == 'control_phone_performance_status':
+        from .native_routes import phone_performance_status
+        return phone_performance_status()
+    if name == 'control_phone_performance_mode':
+        from .native_routes import phone_performance_mode, PerformanceMode
+        return phone_performance_mode(PerformanceMode(**args))
+    if name == 'control_phone_performance_optimize':
+        from .native_routes import phone_performance_optimize
+        return phone_performance_optimize()
     if name == 'control_phone_screen':
         from .native_routes import phone_screen
         return phone_screen()
