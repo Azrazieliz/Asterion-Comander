@@ -91,7 +91,7 @@ public final class MainActivity extends Activity {
   private final DesignSystem.Icon[] tabIcons=new DesignSystem.Icon[4];
   private final TextView[] tabLabels=new TextView[4];
   private TextView headerStatus,pcConnection,homeAgent,homeBattery,homeMemory,homeThermal;
-  private TextView healthBattery,healthTemp,healthMemory,healthStorage,healthThermal,healthWifi;
+  private TextView healthBattery,healthTemp,healthMemory,healthStorage,healthThermal,healthWifi,healthActionStatus;
   private TextView remoteConnection,remotePlaceholder,agentConnection,captureConnection,accessConnection,phoneAddress,hostHealth,pairingFeedback,transferFeedback,updateFeedback;
   private String activeTransferId=null;
   private DesignSystem.Meter batteryMeter,memoryMeter,storageMeter;
@@ -250,7 +250,29 @@ public final class MainActivity extends Activity {
     gap(meters,17);wide(meters,t("BATTERY LEVEL",10,DesignSystem.MUTED,true));gap(meters,8);batteryMeter=new DesignSystem.Meter(this,DesignSystem.TEAL);wide(meters,batteryMeter);
     gap(meters,16);wide(meters,t("MEMORY IN USE",10,DesignSystem.MUTED,true));gap(meters,8);memoryMeter=new DesignSystem.Meter(this,DesignSystem.PURPLE);wide(meters,memoryMeter);
     gap(meters,16);wide(meters,t("INTERNAL STORAGE IN USE",10,DesignSystem.MUTED,true));gap(meters,8);storageMeter=new DesignSystem.Meter(this,DesignSystem.WARNING);wide(meters,storageMeter);
-    wide(healthBody,meters);gap(healthBody,12);LinearLayout store=card();healthStorage=t("—",18,DesignSystem.TEXT,true);metricRow(store,"Internal storage",null,healthStorage,DesignSystem.PURPLE);margin(healthBody,store,0);
+    wide(healthBody,meters);gap(healthBody,12);
+    LinearLayout actions=card();
+    rowTitle(actions,"Active performance manager",
+      "Adjust Control workload to respond to heat, RAM pressure, and foreground demands",
+      icon("activity",DesignSystem.TEAL,23));
+    gap(actions,12);
+    healthActionStatus=t("Reading active controls…",12,DesignSystem.MUTED,false);
+    wide(actions,healthActionStatus);gap(actions,12);
+    button(actions,"Prioritize foreground app · 20 min","power",true,()->applyPerformanceAction("boost"));
+    gap(actions,8);
+    button(actions,"Automatic thermal / memory protection","check",false,
+      ()->applyPerformanceAction("automatic"));
+    gap(actions,8);
+    button(actions,"Restore full screen capture quality","monitor",false,
+      ()->applyPerformanceAction("full"));
+    gap(actions,8);
+    button(actions,"Low-overhead Control mode","activity",false,
+      ()->applyPerformanceAction("quiet"));
+    gap(actions,10);
+    wide(actions,t("These actions change real capture frequency, JPEG encoding, and "
+      +"optional observation sampling. Phone input, voice, and continuation remain active. "
+      +"Thermal safety overrides manual modes.",11,DesignSystem.MUTED,false));
+    wide(healthBody,actions);gap(healthBody,12);LinearLayout store=card();healthStorage=t("—",18,DesignSystem.TEXT,true);metricRow(store,"Internal storage",null,healthStorage,DesignSystem.PURPLE);margin(healthBody,store,0);
     gap(healthBody,12);LinearLayout network=card();healthWifi=t("Checking…",17,DesignSystem.TEXT,true);metricRow(network,"Network",null,healthWifi,DesignSystem.TEAL);wide(healthBody,network);
     gap(healthBody,24);wide(healthBody,eyebrow("REMOTE SERVICES"));gap(healthBody,10);
     LinearLayout services=card();agentConnection=serviceLine(services,"Phone agent","power");services.addView(line(),new LinearLayout.LayoutParams(-1,dp(1)));
@@ -695,6 +717,17 @@ public final class MainActivity extends Activity {
     if(healthTemp!=null)healthTemp.setText(rawTemp<0?"—":String.format(Locale.US,"%.1f°",rawTemp/10.0));
     if(healthMemory!=null)healthMemory.setText(String.format(Locale.US,"%.1f GB",m.availMem/1e9));
     if(healthThermal!=null){healthThermal.setText(thermalText);healthThermal.setTextColor(tint);}
+    if(healthActionStatus!=null){
+      JSONObject p=PerformanceManager.status(this);
+      int every=p.optInt("capture_interval_ms",90);
+      String details="Mode: "+p.optString("requested_mode","automatic")+
+        " · "+p.optString("reason","normal")+
+        "\nScreen capture: "+every+" ms/frame, JPEG "+p.optInt("jpeg_quality",62)+
+        "\nObservation interval: "+p.optLong("observation_interval_ms",5000)+" ms"+
+        "\nFrames encoded: "+p.optLong("frames_encoded")+
+        " · saved by frame skipping: "+p.optLong("frames_skipped");
+      healthActionStatus.setText(details);
+    }
     if(healthStorage!=null)healthStorage.setText(String.format(Locale.US,"%.1f GB free of %.0f GB",fs.getAvailableBytes()/1e9,fs.getTotalBytes()/1e9));
     if(healthWifi!=null)healthWifi.setText(networkName());
     if(batteryMeter!=null)batteryMeter.setProgress(percent<0?0:(float)(percent/100));
@@ -716,6 +749,17 @@ public final class MainActivity extends Activity {
     if(headerStatus!=null)headerStatus.setText(AgentService.running?"SHARING ON":"ON DEVICE");
     if(!hostRefreshing&&(currentTab==0||currentTab==2)&&System.currentTimeMillis()-lastHostRefresh>12000){lastHostRefresh=System.currentTimeMillis();checkHost();}
   }catch(Exception ignored){} }
+  private void applyPerformanceAction(String mode){
+    try{
+      JSONObject result="boost".equals(mode)?
+        PerformanceManager.prioritizeForegroundNow(this):
+        PerformanceManager.setMode(this,mode);
+      if(result.optBoolean("ok")){
+        updateHealth();
+        toast("Control workload: "+result.optString("reason","updated"));
+      }else toast("Control performance action did not complete");
+    }catch(Exception e){toast("Performance action rejected: "+e.getClass().getSimpleName());}
+  }
   private String thermalName(int level){switch(level){case PowerManager.THERMAL_STATUS_NONE:return "Nominal";case PowerManager.THERMAL_STATUS_LIGHT:return "Light";case PowerManager.THERMAL_STATUS_MODERATE:return "Moderate";case PowerManager.THERMAL_STATUS_SEVERE:return "Severe";case PowerManager.THERMAL_STATUS_CRITICAL:return "Critical";case PowerManager.THERMAL_STATUS_EMERGENCY:return "Emergency";case PowerManager.THERMAL_STATUS_SHUTDOWN:return "Shutdown";default:return "Unavailable";}}
   private String networkName(){try{ConnectivityManager cm=(ConnectivityManager)getSystemService(CONNECTIVITY_SERVICE);Network n=cm.getActiveNetwork();NetworkCapabilities cap=cm.getNetworkCapabilities(n);if(cap==null)return "Offline";if(cap.hasTransport(NetworkCapabilities.TRANSPORT_WIFI))return "Wi-Fi connected";if(cap.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR))return "Mobile data";if(cap.hasTransport(NetworkCapabilities.TRANSPORT_VPN))return "VPN connected";if(cap.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))return "Ethernet";return "Connected";}catch(Exception e){return "Unavailable";}}
   private void checkHost(){String url=prefs.getString("url","").replaceAll("/+$","");String token=prefs.getString("token","");
