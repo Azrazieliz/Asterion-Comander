@@ -28,8 +28,13 @@ $settings=Get-Content 'android\app\build.gradle' -Raw
 if(-not ($settings -match "versionName '$version'") -or -not ($settings -match "versionCode $versionCode")){
   throw 'Unexpected APK version configuration'
 }
-$signer=Join-Path $env:ANDROID_HOME 'build-tools\35.0.0\apksigner.bat'
-if(-not (Test-Path $signer)){throw 'Android apksigner 35.0.0 missing'}
+# Select an installed compatible apksigner, not a nonexistent exact SDK patch.
+$signer=$null
+foreach($buildToolsVersion in @('35.0.1','36.1.0','34.0.0','37.0.0','35.0.0')){
+  $candidate=Join-Path $env:ANDROID_HOME ('build-tools\'+$buildToolsVersion+'\apksigner.bat')
+  if(Test-Path $candidate){$signer=$candidate;break}
+}
+if(-not $signer){throw 'Android apksigner unavailable in installed build-tools'}
 $baseline=Join-Path $root 'dist\Asterion-Control-v0.8.6-debug.apk'
 if(-not (Test-Path $baseline)){throw 'Original signed 0.8.6 baseline missing'}
 function Get-SignerDigest([string]$file){
