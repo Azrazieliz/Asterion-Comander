@@ -29,6 +29,7 @@ ALLOWED={
  'phone_continuation_status':('GET','/api/v1/phone/continuation/status'),
  'phone_continuation_queue':('POST','/api/v1/phone/continuation/queue'),
  'phone_continuation_dispatch':('POST','/api/v1/phone/continuation/dispatch'),
+ 'phone_chat_new':('POST','/api/v1/phone/chat/new'),
  'phone_apps':('GET','/api/v1/phone/apps'),
  'phone_app_launch':('POST','/api/v1/phone/apps/launch'),
  'phone_continuation_ack':('POST','/api/v1/phone/continuation/ack'),
