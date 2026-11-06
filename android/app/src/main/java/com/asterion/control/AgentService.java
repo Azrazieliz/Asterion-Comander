@@ -205,6 +205,16 @@ public final class AgentService extends Service {
       } catch(Exception e){json(out,400,error(e.getMessage()));}
       return;
     }
+    if(method.equals("GET")&&path.equals("/observation/timeline")){
+      try{json(out,200,AppObservation.timeline(this,100));}
+      catch(Exception e){json(out,400,error("Observation timeline unavailable"));}return;
+    }
+    if(method.equals("GET")&&path.startsWith("/observation/frame/")){
+      String id=path.substring("/observation/frame/".length());
+      byte[] jpeg=AppObservation.recordedFrame(this,id);
+      if(jpeg==null){json(out,404,error("Recorded frame not available"));return;}
+      write(out,200,"image/jpeg",jpeg);return;
+    }
     if(method.equals("GET")&&path.equals("/observation/status")){
       try{json(out,200,AppObservation.status(this));}
       catch(Exception e){json(out,400,error("Observation status unavailable"));}return;
