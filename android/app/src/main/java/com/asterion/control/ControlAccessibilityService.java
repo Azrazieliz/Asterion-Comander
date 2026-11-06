@@ -184,9 +184,11 @@ public final class ControlAccessibilityService extends AccessibilityService {
         String accepted="ASTERION-CYCLE-ACK:"+checkpoint;
         String complete="ASTERION-CYCLE-DONE:"+checkpoint;
         boolean[] flags=new boolean[3]; // ack, done, generating
-        observeMarkers(root,accepted,complete,flags,0,new int[]{0});
-        evidence.put("visible",flags[0]||flags[1])
-          .put("generating",flags[2]).put("finished",flags[1]);
+        String[] spokenQuestion={""};
+        observeMarkers(root,accepted,complete,flags,spokenQuestion,0,new int[]{0});
+        evidence.put("visible",flags[0]||flags[1]||!spokenQuestion[0].isEmpty())
+          .put("generating",flags[2]).put("finished",flags[1])
+          .put("voice_question",spokenQuestion[0]);
         result[0]=evidence;
       }catch(Exception ignored){}finally{finished.countDown();}
     });
@@ -195,7 +197,7 @@ public final class ControlAccessibilityService extends AccessibilityService {
     return result[0];
   }
   private void observeMarkers(AccessibilityNodeInfo node,String accepted,String complete,
-       boolean[] flags,int depth,int[] seen) {
+       boolean[] flags,String[] spokenQuestion,int depth,int[] seen) {
     if(node==null||depth>28||seen[0]++>=450||!node.isVisibleToUser())return;
     CharSequence value=node.getText(),description=node.getContentDescription();
     if(!node.isEditable()) {
@@ -205,6 +207,19 @@ public final class ControlAccessibilityService extends AccessibilityService {
         if(text.length()>25000)continue;
         if(text.contains(accepted))flags[0]=true;
         if(text.contains(complete))flags[1]=true;
+        // A question is only accepted from a visible non-editable reply
+        // containing this exact cycle's checkpoint token.
+        String prefix="ASTERION-VOICE-ASK:"+complete.substring(
+            "ASTERION-CYCLE-DONE:".length())+"|";
+        int begin=text.indexOf(prefix);
+        if(begin>=0){
+          String candidate=text.substring(begin+prefix.length());
+          int end=candidate.indexOf('\\n');
+          if(end>=0)candidate=candidate.substring(0,end);
+          candidate=candidate.trim();
+          if(candidate.length()>=2&&candidate.length()<=700)
+            spokenQuestion[0]=candidate;
+        }
         String label=text.trim().toLowerCase(java.util.Locale.ROOT);
         if(label.equals("stop generating")||label.equals("stop responding")||
            label.equals("stop response")||label.equals("arrêter la génération")||
@@ -212,7 +227,7 @@ public final class ControlAccessibilityService extends AccessibilityService {
       }
     }
     for(int i=0;i<node.getChildCount()&&seen[0]<450;i++)
-      observeMarkers(node.getChild(i),accepted,complete,flags,depth+1,seen);
+      observeMarkers(node.getChild(i),accepted,complete,flags,spokenQuestion,depth+1,seen);
   }
 
   JSONObject sendChatMessage(String message) {
