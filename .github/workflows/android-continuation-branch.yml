@@ -34,7 +34,8 @@ jobs:
           $scripts=@(
             'scripts/build_owner_signed_control_088.ps1',
             'scripts/start_git_bridge.ps1',
-            'scripts/start_windows.ps1'
+            'scripts/start_windows.ps1',
+            'scripts/restart_control_worker.ps1'
           )
           foreach($path in $scripts){
             $file=Join-Path (Get-Location) $path
