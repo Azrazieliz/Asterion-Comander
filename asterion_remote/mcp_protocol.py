@@ -57,6 +57,9 @@ TOOLS = [
     spec('control_phone_observation_status','Read user-selected Asterion game observation state on Samsung'),
     spec('control_phone_observation_events','Read timestamped event metadata from the user-selected Asterion app'),
     spec('control_phone_observation_frame','Read the latest recorded native Android gameplay frame'),
+    spec('control_phone_observation_timeline','List retained Android gameplay observation frame timestamps'),
+    spec('control_phone_observation_get_frame','Retrieve one retained Android gameplay screenshot by recorded ID',
+         {'frame_id':STR},['frame_id']),
     spec('control_phone_apps','Discover installed launchable Android apps for cross-project work'),
     spec('control_phone_app_launch','Request opening an installed Android application while Control is foreground (not verified launch)',
          {'package':STR},['package']),
@@ -153,6 +156,12 @@ def invoke_tool(name: str, args: dict):
     if name == 'control_phone_observation_events':
         from .native_routes import phone_observation_events
         return phone_observation_events()
+    if name == 'control_phone_observation_timeline':
+        from .native_routes import phone_observation_timeline
+        return phone_observation_timeline()
+    if name == 'control_phone_observation_get_frame':
+        from .native_routes import phone_observation_get_frame
+        return phone_observation_get_frame(args['frame_id'])
     if name == 'control_phone_observation_frame':
         from .native_routes import phone_observation_frame
         return phone_observation_frame()
