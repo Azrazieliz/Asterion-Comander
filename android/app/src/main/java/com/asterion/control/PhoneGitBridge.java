@@ -54,6 +54,7 @@ final class PhoneGitBridge {
   private static volatile long lastPollMs=0,lastSuccessMs=0;
   private static volatile long completed=0;
   private static volatile String commandsEtag="";
+  private static volatile String phoneCommandsEtag="";
   private PhoneGitBridge(){}
   private static SharedPreferences pref(Context ctx){
     return ctx.getSharedPreferences("asterion_phone_git_bridge",Context.MODE_PRIVATE);
@@ -199,10 +200,10 @@ final class PhoneGitBridge {
     }
   }
   private static boolean publish(Context ctx,String pat,File file)throws Exception{
-    if(!file.getName().matches("android-[A-Za-z0-9_.-]{3,90}\\.json"))
+    if(!file.getName().matches("(?:android|phone)-[A-Za-z0-9_.-]{3,90}\\.json"))
       return false;
     String id=file.getName().substring(0,file.getName().length()-5);
-    String remote="results/"+id+".json";
+    String remote=(id.startsWith("phone-")?"results/android/":"results/")+id+".json";
     if(getFile(remote,pat)!=null){file.delete();return true;}
     JSONObject result=readPending(file);
     byte[] value=result.toString().getBytes(StandardCharsets.UTF_8);
@@ -215,7 +216,7 @@ final class PhoneGitBridge {
     return true;
   }
   private static void flush(Context ctx,String pat)throws Exception{
-    File[] files=outbox(ctx).listFiles((dir,name)->name.startsWith("android-")&&name.endsWith(".json"));
+    File[] files=outbox(ctx).listFiles((dir,name)->(name.startsWith("android-")||name.startsWith("phone-"))&&name.endsWith(".json"));
     if(files==null)return;
     Arrays.sort(files,(a,b)->a.getName().compareTo(b.getName()));
     for(int i=0;i<Math.min(files.length,4);i++)publish(ctx,pat,files[i]);
@@ -256,57 +257,62 @@ final class PhoneGitBridge {
       String pat=token(owner);
       if(pat.isEmpty())throw new IllegalStateException("Missing private GitHub credential");
       flush(owner,pat);
-      // Only android-* commands are executed here. Existing PC-owned bridge
-      // commands and their results remain untouched.
-      // GitHub Contents directories are arrays, not JSON objects.
-      JSONArray files=directory(pat);
-      if(files==null){lastSuccessMs=System.currentTimeMillis();return;}
-      int examined=0;
-      for(int i=0;i<files.length()&&examined<MAX_ITEMS;i++){
-        JSONObject entry=files.optJSONObject(i);
-        if(entry==null)continue;
-        String name=entry.optString("name");
-        if(!name.matches("android-[A-Za-z0-9_.-]{3,90}\\.json"))continue;
-        examined++;
-        String id=name.substring(0,name.length()-5);
-        if(handled(owner,id))continue;
-        // GitHub result records survive app reinstalls and local cache resets.
-        // A completed remote command must NEVER be replayed.
-        if(getFile("results/"+id+".json",pat)!=null){
-          markHandled(owner,id);continue;
-        }
-        JSONObject raw=getFile("commands/"+name,pat);
-        if(raw==null)continue;
-        String content=raw.optString("content","").replace("\n","");
-        JSONObject command=new JSONObject(new String(Base64.decode(content,Base64.DEFAULT),
-          StandardCharsets.UTF_8));
-        if(!id.equals(command.optString("id")))continue;
-        File pending=pendingFile(owner,id);
-        // Persist the crash/uncertain receipt BEFORE executing a write action.
-        savePending(pending,new JSONObject().put("id",id).put("ok",false)
-          .put("status","uncertain").put("error",
-            "Phone Control worker was interrupted; do not replay this operation blindly"));
-        markHandled(owner,id);
-        JSONObject receipt;
-        try{receipt=execute(owner,id,command);}
-        catch(Exception e){
-          receipt=new JSONObject().put("id",id).put("ok",false).put("status","failed")
-            .put("error",e.getClass().getSimpleName()+": "+String.valueOf(e.getMessage()));
-        }
-        savePending(pending,receipt);
-        lastCommand=id;
-        publish(owner,pat,pending);
-        completed++;
-        break; // at most one new command per poll, bounded device load
-      }
+      // Prefer the isolated phone-owned queue. The legacy android-* queue
+      // remains supported for commands already issued before this upgrade.
+      boolean processed=processDirectory(owner,pat,"commands/android/",true);
+      if(!processed)processDirectory(owner,pat,"commands/",false);
       lastSuccessMs=System.currentTimeMillis();lastError="";
     }catch(Exception e){
       lastError=e.getClass().getSimpleName()+": "+String.valueOf(e.getMessage());
       if(lastError.length()>190)lastError=lastError.substring(0,190);
     }finally{busy=false;}
   }
-  private static JSONArray directory(String pat)throws Exception{
-    String url=API+"commands?ref=main";
+  private static boolean processDirectory(AgentService owner,String pat,String folder,boolean isolated)throws Exception{
+    JSONArray files=directory(pat,folder,isolated);
+    if(files==null)return false;
+    int examined=0;
+    for(int i=0;i<files.length()&&examined<MAX_ITEMS;i++){
+      JSONObject entry=files.optJSONObject(i);
+      if(entry==null||!"file".equals(entry.optString("type")))continue;
+      String name=entry.optString("name","");
+      String pattern=isolated?"phone-[A-Za-z0-9_.-]{3,90}\\.json":
+        "android-[A-Za-z0-9_.-]{3,90}\\.json";
+      if(!name.matches(pattern))continue;
+      examined++;
+      String id=name.substring(0,name.length()-5);
+      if(handled(owner,id))continue;
+      String remote=(isolated?"results/android/":"results/")+id+".json";
+      if(getFile(remote,pat)!=null){
+        markHandled(owner,id);continue;
+      }
+      JSONObject raw=getFile(folder+name,pat);
+      if(raw==null)continue;
+      String content=raw.optString("content","").replace("\\n","");
+      JSONObject command=new JSONObject(new String(Base64.decode(content,Base64.DEFAULT),
+        StandardCharsets.UTF_8));
+      if(!id.equals(command.optString("id")))continue;
+      File pending=pendingFile(owner,id);
+      // A restart cannot replay a partially executed remote command.
+      savePending(pending,new JSONObject().put("id",id).put("ok",false)
+        .put("status","uncertain").put("error",
+          "Android worker was interrupted; inspect before retrying"));
+      markHandled(owner,id);
+      JSONObject receipt;
+      try{receipt=execute(owner,id,command);}
+      catch(Exception e){
+        receipt=new JSONObject().put("id",id).put("ok",false).put("status","failed")
+          .put("error",e.getClass().getSimpleName()+": "+String.valueOf(e.getMessage()));
+      }
+      savePending(pending,receipt);
+      lastCommand=id;
+      publish(owner,pat,pending);
+      completed++;
+      return true;
+    }
+    return false;
+  }
+  private static JSONArray directory(String pat,String folder,boolean isolated)throws Exception{
+    String url=API+folder.substring(0,folder.length()-1)+"?ref=main";
     HttpsURLConnection c=(HttpsURLConnection)new URL(url).openConnection();
     c.setConnectTimeout(5500);c.setReadTimeout(8000);
     c.setInstanceFollowRedirects(false);
@@ -314,7 +320,8 @@ final class PhoneGitBridge {
     c.setRequestProperty("Accept","application/vnd.github+json");
     c.setRequestProperty("X-GitHub-Api-Version","2022-11-28");
     c.setRequestProperty("User-Agent","Asterion-Control-Android");
-    if(!commandsEtag.isEmpty())c.setRequestProperty("If-None-Match",commandsEtag);
+    String etag=isolated?phoneCommandsEtag:commandsEtag;
+    if(!etag.isEmpty())c.setRequestProperty("If-None-Match",etag);
     int code=c.getResponseCode();
     if(code==304){c.disconnect();return null;}
     byte[] data=readBounded(code>=400?c.getErrorStream():c.getInputStream());
@@ -322,7 +329,10 @@ final class PhoneGitBridge {
     c.disconnect();
     if(code==404)return null;
     if(code!=200)throw new IllegalStateException("Private command listing returned HTTP "+code);
-    if(receivedEtag!=null && receivedEtag.length()<256)commandsEtag=receivedEtag;
+    if(receivedEtag!=null&&receivedEtag.length()<256){
+      if(isolated)phoneCommandsEtag=receivedEtag;else commandsEtag=receivedEtag;
+    }
     return new JSONArray(new String(data,StandardCharsets.UTF_8));
   }
+
 }
