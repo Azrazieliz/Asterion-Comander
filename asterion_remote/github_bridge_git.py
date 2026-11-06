@@ -2,14 +2,89 @@
 Uses the authorized Windows Control API; Android remains the controller.
 """
 from __future__ import annotations
-import json,os,subprocess,time
+import json,os,subprocess,time,ipaddress
+from urllib.parse import urlsplit
 from pathlib import Path
+from . import github_bridge
 from .github_bridge import NAME,local_token,run
 
 REPO='Azrazieliz/Asterion-Control-Bridge'
 URL='https://github.com/'+REPO+'.git'
 ROOT=Path(os.environ.get('ASTERION_BRIDGE_GIT_WORKTREE',str(Path(os.environ.get('LOCALAPPDATA',str(Path.home()))) / 'AsterionControl' / 'private-bridge-repo')))
 STAMP=ROOT.parent/'git-bridge-migration-v1.done'
+
+
+def agent_host():
+    """Follow the native Control host across private LAN changes."""
+    state=Path(os.environ.get('LOCALAPPDATA',str(Path.home()))) / 'AsterionControl'
+    address_file=state/'agent-host.txt'
+    address=(address_file.read_text('utf8').strip() if address_file.exists()
+             else os.environ.get('ASTERION_CONTROL_HOST',''))
+    parsed=urlsplit(address)
+    try:
+        ip=ipaddress.ip_address(parsed.hostname or '')
+        port=parsed.port
+    except (ValueError,TypeError) as exc:
+        raise RuntimeError('Native Control agent endpoint not initialized') from exc
+    cgnat=ip in ipaddress.ip_network('100.64.0.0/10')
+    if (parsed.scheme!='http' or port!=8911 or parsed.username or
+        parsed.password or parsed.path not in ('','/') or parsed.query or
+        parsed.fragment or not (ip.is_private or ip.is_loopback or cgnat)):
+        raise RuntimeError('Control endpoint is not an authorized private IP')
+    host=('['+str(ip)+']') if ip.version==6 else str(ip)
+    return 'http://'+host+':8911'
+
+def ensure_agent(key):
+    """Do not consume commands until the native Windows Control API answers."""
+    github_bridge.PC=agent_host()
+    response=github_bridge.pc('/api/v1/health',key)
+    if not isinstance(response,dict) or not response.get('ok'):
+        raise RuntimeError('Native Control agent is not healthy yet')
+    return response
+
+def outstanding_jobs():
+    """Load only native job receipts that lack a final exit status."""
+    folder=ROOT/'results'
+    if not folder.is_dir():return []
+    pending=[]
+    for path in sorted(folder.glob('*.json')):
+        if not NAME.fullmatch(path.stem):continue
+        try: receipt=json.loads(path.read_text('utf8'))
+        except (ValueError,OSError):continue
+        if receipt.get('status') in ('accepted','running'):
+            pending.append((path,receipt))
+    return pending
+
+def reconcile_jobs(key,pending):
+    """Preserve uncertain execution without replaying side-effecting commands."""
+    for path,receipt in pending:
+        identity=path.stem
+        if receipt.get('status')=='running':
+            write_result(identity,dict(receipt,ok=False,status='uncertain',
+                error='Previous Control worker stopped before a durable job receipt'))
+            continue
+        remote=receipt.get('result',{})
+        ident=remote.get('id','') if isinstance(remote,dict) else ''
+        if not isinstance(ident,str) or len(ident)!=32:
+            write_result(identity,dict(receipt,ok=False,status='uncertain',
+                error='Native job identifier unavailable'))
+            continue
+        try:
+            job=run({'op':'pc_job_status','params':{'job_id':ident}},key)
+        except Exception as exc:
+            if '404' in str(exc) or 'Unknown job' in str(exc):
+                write_result(identity,dict(receipt,ok=False,status='uncertain',
+                    error='Agent restarted and lost job state; inspect saved build artifacts'))
+                continue
+            raise
+        if job.get('status')!='finished':continue
+        code=job.get('exit_code')
+        good=code==0
+        write_result(identity,dict(receipt,ok=good,
+            status='complete' if good else 'error',
+            result={'id':ident,'exit_code':code,
+                    'output_tail':str(job.get('output',''))[-1600:]},
+            error='' if good else 'Native Control command exited unsuccessfully'))
 
 def git(*args,timeout=60):
     p=subprocess.run(['git',*args],cwd=ROOT if ROOT.is_dir() else None,
@@ -94,20 +169,38 @@ def cycle(key):
     git('fetch','--quiet','origin','main')
     git('merge','--ff-only','origin/main')
     tasks=entries()
+    unfinished=outstanding_jobs()
+    if tasks or unfinished:
+        ensure_agent(key)
+    if unfinished:
+        reconcile_jobs(key,unfinished)
     for request in tasks:
         identity=request.stem
+        # This receipt prevents replay after crashes but is not a success claim.
         write_result(identity,{'id':identity,'ok':False,'status':'running'})
         started=time.monotonic()
         try:
             task=json.loads(request.read_text('utf8'))
             if task.get('id')!=identity or not isinstance(task.get('op'),str):
                 raise ValueError('Invalid request identity')
-            result=run(task,key)
-            reply={'id':identity,'ok':True,'status':'complete',
-                'elapsed_ms':round((time.monotonic()-started)*1000),'result':result}
+            response=run(task,key)
+            accepted=(task['op']=='pc_command' and isinstance(response,dict)
+                and response.get('status')=='running'
+                and isinstance(response.get('id'),str)
+                and len(response['id'])==32)
+            if task['op']=='pc_command' and not accepted:
+                reply={'id':identity,'ok':False,'status':'uncertain',
+                       'error':'No durable Windows job id from native Control',
+                       'result':response}
+            else:
+                reply={'id':identity,'ok':True,
+                       'status':'accepted' if accepted else 'complete',
+                       'result':response}
+            reply['elapsed_ms']=round((time.monotonic()-started)*1000)
         except Exception as exc:
             reply={'id':identity,'ok':False,'status':'error',
-                'elapsed_ms':round((time.monotonic()-started)*1000),'error':str(exc)[:500]}
+                   'elapsed_ms':round((time.monotonic()-started)*1000),
+                   'error':str(exc)[:500]}
         write_result(identity,reply)
         print('Asterion Control',identity,reply['status'],flush=True)
     return len(tasks)
