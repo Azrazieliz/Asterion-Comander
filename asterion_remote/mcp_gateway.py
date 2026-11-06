@@ -7,6 +7,7 @@ Android still needs an independent, stable HTTPS ingress before Windows can go.
 """
 from __future__ import annotations
 
+import asyncio
 import hmac
 import ipaddress
 import json
@@ -38,6 +39,8 @@ NATIVE_PHONE_PREFIXES = (
     "control_phone_continuation_",
     "control_phone_observation_",
     "control_phone_voice_",
+    "control_phone_cycle_",
+    "control_phone_network_status",
 )
 MAX_REQUEST = 2_000_000
 MAX_RESPONSE = 8_000_000
@@ -148,7 +151,8 @@ async def _preferred(payload: bytes, headers: dict, phone_first=True):
             pass
     else:
         try:
-            candidates.append(_windows_route())
+            if route := _windows_route():
+                candidates.append(route)
         except RuntimeError:
             pass
         if paired := _phone_route():
@@ -193,8 +197,41 @@ async def rpc(req: Request):
     method = message.get("method")
     name = (message.get("params") or {}).get("name") if isinstance(message.get("params"), dict) else ""
     if method == "tools/call":
-        # PC-only tools must never be routed to the phone's native-only MCP.
+        from . import phone_cloud_relay
+        params = message.get("params") or {}
+        if name == "control_phone_cloud_receipt":
+            args = params.get("arguments") or {}
+            if not isinstance(args, dict) or not isinstance(args.get("id"), str):
+                raise HTTPException(422, "A private Control receipt ID is required")
+            try:
+                answer = await phone_cloud_relay.receipt(args["id"], message.get("id"))
+            except (RuntimeError, ValueError, httpx.HTTPError):
+                raise HTTPException(503, "Private phone receipt is not accessible")
+            return Response(content=json.dumps(answer), media_type="application/json",
+                            headers={"Cache-Control":"no-store"})
         native = isinstance(name, str) and _tool_is_native(name)
+        if native:
+            # Try LAN/VPN briefly. Do not wait for a timeout against an address
+            # that the Samsung has left when it switched to cellular.
+            if paired := _phone_route():
+                try:
+                    direct = await asyncio.wait_for(
+                        _forward(paired,payload,req.headers),timeout=4.0)
+                    if direct.status_code == 200:
+                        parsed = json.loads(direct.content)
+                        if not parsed.get("error"):
+                            return _response(direct)
+                except (asyncio.TimeoutError,httpx.HTTPError,ValueError):
+                    pass
+            # The existing private GitHub bridge is outbound HTTPS from Android.
+            # It operates on mobile data with a separately authorized repo token.
+            try:
+                args = params.get("arguments") or {}
+                answer = await phone_cloud_relay.submit(name,args,message.get("id"))
+                return Response(content=json.dumps(answer),media_type="application/json",
+                                headers={"Cache-Control":"no-store"})
+            except (RuntimeError,ValueError,httpx.HTTPError):
+                pass
         upstream = await _preferred(payload, req.headers, phone_first=native)
         return _response(upstream)
     if method == "tools/list":
@@ -226,6 +263,12 @@ async def rpc(req: Request):
             for spec in item.get("result", {}).get("tools", []):
                 if isinstance(spec, dict) and isinstance(spec.get("name"), str):
                     merged[spec["name"]] = spec
+        merged["control_phone_cloud_receipt"]={
+            "name":"control_phone_cloud_receipt",
+            "description":"Retrieve a durable result for an offsite Android command using its pending ID",
+            "inputSchema":{"type":"object","properties":{"id":{"type":"string"}},
+                           "required":["id"]}
+        }
         response = {
             "jsonrpc": "2.0", "id": message.get("id"),
             "result": {"tools": list(merged.values())},
