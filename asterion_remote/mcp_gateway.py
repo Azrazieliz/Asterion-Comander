@@ -218,13 +218,20 @@ async def rpc(req: Request):
                     direct = await asyncio.wait_for(
                         _forward(paired,payload,req.headers),timeout=4.0)
                     if direct.status_code == 200:
-                        # MCP application errors are definitive results. Retrying
-                        # after one would duplicate a side-effecting operation.
+                        # Even an MCP application error may represent an executed
+                        # operation. Never send it a second time via cloud.
                         parsed = json.loads(direct.content)
                         if isinstance(parsed,dict) and parsed.get("jsonrpc")=="2.0":
                             return _response(direct)
-                    if direct.status_code not in (502,503,504):
-                        return _response(direct)
+                        raise HTTPException(502,"Invalid native MCP response; refusing replay")
+                    if direct.status_code not in (401,403,404,405,502,503,504):
+                        # Non-routing failures may occur after an operation ran.
+                        # Never resubmit a potentially executed phone command.
+                        raise HTTPException(504,
+                            "Native Control command outcome uncertain; will not replay")
+                    # Local pairing/authentication may be stale after leaving
+                    # home Wi-Fi. A rejection before command execution permits
+                    # the separately owner-authorized Android HTTPS cloud route.
                 except (httpx.ConnectError,httpx.ConnectTimeout):
                     # Failed before a connection was established: cloud retry safe.
                     pass
