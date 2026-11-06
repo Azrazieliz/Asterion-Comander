@@ -240,6 +240,12 @@ public final class AgentService extends Service {
       try{json(out,200,continuation.cancel());}
       catch(Exception e){json(out,400,error(e.getMessage()));}return;
     }
+    if(method.equals("POST")&&path.equals("/chat/new")){
+      ControlAccessibilityService control=ControlAccessibilityService.active;
+      if(control==null){json(out,503,error("Android Accessibility unavailable"));return;}
+      try{json(out,200,control.requestNewChat());}
+      catch(Exception e){json(out,400,error("ChatGPT navigation unavailable"));}return;
+    }
     if(method.equals("GET")&&path.equals("/continuation/status")){
       try { JSONObject state=continuation.status();state.remove("pending");json(out,200,state); }
       catch(Exception e){json(out,400,error("Continuation status unavailable"));}return;
