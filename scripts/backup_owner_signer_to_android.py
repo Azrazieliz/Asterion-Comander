@@ -45,8 +45,12 @@ def main() -> None:
     if not 500 <= len(data) <= 100000:
         raise RuntimeError("Owner signing keystore invalid size")
     expected = hashlib.sha256(data).hexdigest()
-    command = "umask 077; mkdir -p no_backup; cat > " + DESTINATION + "; chmod 600 " + DESTINATION
-    call(adb, ["-s", serial, "shell", "-T", "run-as", PACKAGE, "sh", "-c", command], data)
+    # ADB joins shell parameters; an unquoted sh -c script could run redirection
+    # outside the run-as app context. Direct dd avoids shell quoting and logs.
+    call(adb, ["-s", serial, "shell", "-T", "run-as", PACKAGE,
+               "dd", "of=" + DESTINATION, "bs=4096"], data)
+    call(adb, ["-s", serial, "shell", "-T", "run-as", PACKAGE,
+               "chmod", "600", DESTINATION])
     verified = call(adb, ["-s", serial, "shell", "-T", "run-as", PACKAGE, "sha256sum", DESTINATION])
     answer = verified.stdout.decode("utf8", "replace")
     digest = answer.split()[0] if answer.split() else ""
