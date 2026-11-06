@@ -43,6 +43,9 @@ public final class AgentService extends Service {
   private final ExecutorService clients=Executors.newFixedThreadPool(6);
   private TransferStore transfers;
   private ContinuationLedger continuation;
+  private ContinuationCycle cycles;
+  private final java.util.concurrent.ScheduledExecutorService cycleWorker =
+      java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
   private final java.util.concurrent.ScheduledExecutorService observer =
       java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
   private final java.util.concurrent.ScheduledExecutorService privateBridge =
@@ -52,6 +55,13 @@ public final class AgentService extends Service {
     transfers=new TransferStore(this);
     continuation=ContinuationLedger.get(this);
     try{continuation.recover();}catch(Exception ignored){}
+    cycles=ContinuationCycle.get(this);
+    try{cycles.recover();}catch(Exception ignored){}
+    cycleWorker.scheduleWithFixedDelay(()->{
+      try{cycles.tick();}catch(Exception e){
+        android.util.Log.w("AsterionCycles","Deferred cycle checkpoint",e);
+      }
+    },7,8,java.util.concurrent.TimeUnit.SECONDS);
     observer.scheduleWithFixedDelay(()->{
       try{AppObservation.sample(this);}catch(Exception ignored){}
     },3,3,java.util.concurrent.TimeUnit.SECONDS);
@@ -241,6 +251,26 @@ public final class AgentService extends Service {
       try{json(out,200,AppCatalog.requestLaunch(this,body.getString("package")));}
       catch(Exception e){json(out,400,error(e.getMessage()));}return;
     }
+    if(method.equals("GET")&&path.equals("/cycles/status")){
+      try{json(out,200,cycles.status());}catch(Exception e){json(out,400,error("Cycle status unavailable"));}
+      return;
+    }
+    if(method.equals("POST")&&path.equals("/cycles/start")){
+      try{json(out,200,cycles.start(body));}catch(Exception e){json(out,400,error(e.getMessage()));}
+      return;
+    }
+    if(method.equals("POST")&&path.equals("/cycles/pause")){
+      try{json(out,200,cycles.pause());}catch(Exception e){json(out,400,error(e.getMessage()));}
+      return;
+    }
+    if(method.equals("POST")&&path.equals("/cycles/resume")){
+      try{json(out,200,cycles.resume());}catch(Exception e){json(out,400,error(e.getMessage()));}
+      return;
+    }
+    if(method.equals("POST")&&path.equals("/cycles/stop")){
+      try{json(out,200,cycles.stop());}catch(Exception e){json(out,400,error(e.getMessage()));}
+      return;
+    }
     if(method.equals("POST")&&path.equals("/continuation/ack")){
       try{json(out,200,continuation.acknowledge(
         body.getString("checkpoint_id"),body.getString("response_receipt")));}
@@ -328,6 +358,6 @@ public final class AgentService extends Service {
       .put("thermals",thermals);
   }
   @Override public void onDestroy(){alive=false;running=false;try{if(server!=null)server.close();}catch(Exception ignored){}
-    clients.shutdownNow();observer.shutdownNow();privateBridge.shutdownNow();super.onDestroy();}
+    clients.shutdownNow();observer.shutdownNow();privateBridge.shutdownNow();cycleWorker.shutdownNow();super.onDestroy();}
   @Override public IBinder onBind(Intent i){return null;}
 }
