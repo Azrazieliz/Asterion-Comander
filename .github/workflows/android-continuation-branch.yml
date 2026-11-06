@@ -55,7 +55,7 @@ jobs:
       - name: Validate Android app identity and archive
         run: |
           test -s android/app/build/outputs/apk/debug/app-debug.apk
-          grep -q "versionName '0.8.7'" android/app/build.gradle
+          grep -q "versionName '0.8.8'" android/app/build.gradle
           sha256sum android/app/build/outputs/apk/debug/app-debug.apk
       - name: Audit debug APK signing identity versus installed v0.8.6 baseline
         shell: bash
@@ -83,6 +83,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: Asterion-Control-v0.8.7-CI-UNSIGNED-COMPATIBILITY-UNVERIFIED
+          name: Asterion-Control-v0.8.8-CI-SIGNER-UNVERIFIED
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
