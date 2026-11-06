@@ -44,6 +44,7 @@ def test_phone_primary_catalog_merge_and_tool_routing(monkeypatch):
         byname={s["name"]:s for s in catalog.json()["result"]["tools"]}
         assert byname["control_phone_status"]["description"]=="Android"
         assert byname["remote_pc_input"]["description"]=="Windows"
+        assert mcp_gateway._tool_is_native("control_phone_chat_new")
         phone=client.post("/mcp",headers=HEADERS,json={
             "jsonrpc":"2.0","id":1,"method":"tools/call",
             "params":{"name":"control_phone_apps","arguments":{}}})
