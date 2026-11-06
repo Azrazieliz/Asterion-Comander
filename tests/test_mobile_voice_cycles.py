@@ -15,8 +15,9 @@ def test_cloud_routes_are_allowlisted_and_are_private_phone_tools():
     assert phone_cloud_relay.route_for("control_phone_cycle_start")=="phone_cycle_start"
     assert phone_cloud_relay.route_for("control_phone_voice_ack")=="phone_voice_ack"
     assert phone_cloud_relay.route_for("control_phone_network_status")=="phone_network_status"
-    for name in ("control_phone_screen","control_phone_observation_frame",
-                 "control_phone_file_read","remote_pc_command",
+    assert phone_cloud_relay.route_for("control_phone_screen") == "phone_screen"
+    assert phone_cloud_relay.route_for("control_phone_observation_frame") == "phone_observation_frame"
+    for name in ("control_phone_file_read","remote_pc_command",
                  "control_phone_anything"):
         with pytest.raises(ValueError):
             phone_cloud_relay.route_for(name)
