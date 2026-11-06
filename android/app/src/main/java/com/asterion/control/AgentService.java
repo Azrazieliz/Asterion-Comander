@@ -45,7 +45,20 @@ public final class AgentService extends Service {
   private ContinuationLedger continuation;
   private final java.util.concurrent.ScheduledExecutorService observer =
       java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
-  @Override public void onCreate(){super.onCreate();transfers=new TransferStore(this);continuation=ContinuationLedger.get(this);try{continuation.recover();}catch(Exception ignored){} observer.scheduleWithFixedDelay(()->{try{AppObservation.sample(this);}catch(Exception ignored){}},3,3,java.util.concurrent.TimeUnit.SECONDS);}
+  private final java.util.concurrent.ScheduledExecutorService privateBridge =
+      java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
+  @Override public void onCreate(){
+    super.onCreate();
+    transfers=new TransferStore(this);
+    continuation=ContinuationLedger.get(this);
+    try{continuation.recover();}catch(Exception ignored){}
+    observer.scheduleWithFixedDelay(()->{
+      try{AppObservation.sample(this);}catch(Exception ignored){}
+    },3,3,java.util.concurrent.TimeUnit.SECONDS);
+    // Optional and owner-enabled. Never a model executor or an untrusted shell.
+    privateBridge.scheduleWithFixedDelay(()->PhoneGitBridge.poll(this),
+      5,15,java.util.concurrent.TimeUnit.SECONDS);
+  }
   public static final String PREF_REMOTE_ENABLED="remote_enabled";
   public static String token(Context c){
     SharedPreferences p=c.getSharedPreferences("agent",MODE_PRIVATE);
@@ -205,6 +218,11 @@ public final class AgentService extends Service {
       if(jpeg==null){json(out,503,error("No recorded frame available"));return;}
       write(out,200,"image/jpeg",jpeg);return;
     }
+    if(method.equals("GET")&&path.equals("/github-bridge/status")){
+      try{json(out,200,PhoneGitBridge.status(this));}
+      catch(Exception e){json(out,400,error("Private bridge status unavailable"));}
+      return;
+    }
     if(method.equals("GET")&&path.equals("/apps")){
       try{json(out,200,AppCatalog.list(this));}
       catch(Exception e){json(out,400,error("Application catalogue unavailable"));}return;
@@ -294,6 +312,6 @@ public final class AgentService extends Service {
       .put("thermals",thermals);
   }
   @Override public void onDestroy(){alive=false;running=false;try{if(server!=null)server.close();}catch(Exception ignored){}
-    clients.shutdownNow();observer.shutdownNow();super.onDestroy();}
+    clients.shutdownNow();observer.shutdownNow();privateBridge.shutdownNow();super.onDestroy();}
   @Override public IBinder onBind(Intent i){return null;}
 }
