@@ -33,6 +33,7 @@ jobs:
         run: |
           $scripts=@(
             'scripts/build_owner_signed_control_088.ps1',
+            'scripts/build_owner_signed_control_092.ps1',
             'scripts/start_git_bridge.ps1',
             'scripts/start_windows.ps1',
             'scripts/restart_control_worker.ps1'
