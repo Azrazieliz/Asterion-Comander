@@ -30,7 +30,6 @@ DB_PATH = ROOT / "mcp-oauth.sqlite3"
 GATEWAY_KEY = ROOT / "mcp-gateway-token.txt"
 router = APIRouter()
 _lock = threading.RLock()
-_pending: dict[str, dict] = {}
 _failed: dict[str, tuple[int, int]] = {}
 
 def _now() -> int:
@@ -46,6 +45,9 @@ def _db():
     db.execute("CREATE TABLE IF NOT EXISTS codes (digest TEXT PRIMARY KEY, client_id TEXT, redirect TEXT, challenge TEXT, resource TEXT, expires INTEGER)")
     db.execute("CREATE TABLE IF NOT EXISTS tokens (digest TEXT PRIMARY KEY, kind TEXT, client_id TEXT, resource TEXT, expires INTEGER)")
     db.execute("CREATE TABLE IF NOT EXISTS owner_approvals (digest TEXT PRIMARY KEY, expires INTEGER NOT NULL)")
+    # Persist the OAuth request across gateway process restarts.
+    # Only hashed request IDs are saved; never the owner's approval code or key.
+    db.execute("CREATE TABLE IF NOT EXISTS oauth_pending (digest TEXT PRIMARY KEY, client_id TEXT NOT NULL, redirect TEXT NOT NULL, challenge TEXT NOT NULL, state TEXT NOT NULL, expires INTEGER NOT NULL)")
     # Older releases called these columns hash/redirect_uri/redirect_uris.
     # SQLite CREATE IF NOT EXISTS does not change existing tables. Migrate
     # column names without dropping any client, authorization code or token.
@@ -211,12 +213,12 @@ def authorize(client_id: str = "", redirect_uri: str = "", response_type: str = 
         if not row or redirect_uri not in json.loads(row[0]):
             raise HTTPException(400, "ChatGPT client not registered")
         request_id = secrets.token_urlsafe(32)
-        _pending[request_id] = {"client_id": client_id, "redirect": redirect_uri,
-                                "challenge": code_challenge, "state": state,
-                                "expires": _now() + 600}
-        for key, value in list(_pending.items()):
-            if value["expires"] < _now():
-                _pending.pop(key, None)
+        db.execute("DELETE FROM oauth_pending WHERE expires <= ?", (_now(),))
+        if db.execute("SELECT COUNT(*) FROM oauth_pending").fetchone()[0] >= 100:
+            raise HTTPException(429, "Too many pending authorization sessions")
+        db.execute(
+            "INSERT INTO oauth_pending(digest,client_id,redirect,challenge,state,expires) VALUES (?,?,?,?,?,?)",
+            (_hash(request_id), client_id, redirect_uri, code_challenge, state, _now() + 1800))
     rid = html.escape(request_id, quote=True)
     page = ("<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
             "<title>Asterion Control authorization</title><style>body{font:16px system-ui;"
@@ -231,7 +233,8 @@ def authorize(client_id: str = "", redirect_uri: str = "", response_type: str = 
             "<label>One-time phone approval code (or existing gateway key)"
             "<input type='password' name='key' required autocomplete='off'></label>"
             "<button type='submit'>Authorize ChatGPT</button></form>"
-            "<p>The phone code expires after 10 minutes and is valid once. "
+            "<p>This authorization session is valid for 30 minutes. "
+            "The separate phone approval code expires after 10 minutes and is valid once. "
             "Never enter your code or gateway key in ChatGPT messages.</p></body></html>")
     return HTMLResponse(page, headers={"Cache-Control": "no-store", "X-Frame-Options": "DENY",
                                   "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'"})
@@ -245,21 +248,30 @@ async def approve(request: Request):
         attempts, blocked_until = _failed.get(remote, (0, 0))
         if attempts >= 5 and blocked_until > _now():
             raise HTTPException(429, "Too many authorization attempts")
-        pending = _pending.get(rid)
-        if not pending or pending["expires"] < _now():
-            raise HTTPException(400, "Authorization expired")
-        if not _owner_key_valid(form.get("key", "")):
-            _failed[remote] = (attempts + 1, _now() + 900)
-            raise HTTPException(403, "Owner approval rejected")
-        _failed.pop(remote, None)
-        _pending.pop(rid, None)
-        code = secrets.token_urlsafe(48)
         with _db() as db:
+            row = db.execute(
+                "SELECT client_id,redirect,challenge,state,expires FROM oauth_pending WHERE digest=?",
+                (_hash(rid),)).fetchone()
+            if not row or row[4] <= _now():
+                return HTMLResponse(
+                    "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
+                    "<title>Authorization expired</title></head><body style='font:16px system-ui;max-width:480px;margin:10vh auto;padding:18px'>"
+                    "<h2>Authorization session expired</h2><p>This request cannot be reused. "
+                    "Return to ChatGPT and restart Asterion Control authorization to get a new session. "
+                    "Your phone pairing and gateway key have not been changed.</p>"
+                    "<p><a href='https://chatgpt.com/plugins/plugins_6aecce96358081918d70cb54cdca5b00'>"
+                    "Return to Asterion Control</a></p></body></html>",
+                    status_code=400, headers={"Cache-Control":"no-store"})
+            if not _owner_key_valid(form.get("key", "")):
+                _failed[remote] = (attempts + 1, _now() + 900)
+                raise HTTPException(403, "Owner approval rejected")
+            _failed.pop(remote, None)
+            db.execute("DELETE FROM oauth_pending WHERE digest=?", (_hash(rid),))
+            code = secrets.token_urlsafe(48)
             db.execute("INSERT INTO codes VALUES (?,?,?,?,?,?)",
-                       (_hash(code), pending["client_id"], pending["redirect"],
-                        pending["challenge"], RESOURCE, _now() + 120))
-    return RedirectResponse(pending["redirect"] + "?" + urlencode(
-        {"code": code, "state": pending["state"], "iss": ORIGIN}),
+                       (_hash(code), row[0], row[1], row[2], RESOURCE, _now() + 300))
+    return RedirectResponse(row[1] + "?" + urlencode(
+        {"code": code, "state": row[3], "iss": ORIGIN}),
         status_code=302, headers={"Cache-Control": "no-store"})
 
 @router.post("/oauth/token")
