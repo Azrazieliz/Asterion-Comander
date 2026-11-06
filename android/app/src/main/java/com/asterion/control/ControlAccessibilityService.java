@@ -214,7 +214,7 @@ public final class ControlAccessibilityService extends AccessibilityService {
         int begin=text.indexOf(prefix);
         if(begin>=0){
           String candidate=text.substring(begin+prefix.length());
-          int end=candidate.indexOf('\\n');
+          int end=candidate.indexOf('\n');
           if(end>=0)candidate=candidate.substring(0,end);
           candidate=candidate.trim();
           if(candidate.length()>=2&&candidate.length()<=700)
