@@ -71,7 +71,7 @@ public final class AgentService extends Service {
       }
     },1,2,java.util.concurrent.TimeUnit.SECONDS);
     observer.scheduleWithFixedDelay(()->{
-      try{AppObservation.sample(this);}catch(Exception ignored){}
+      try{PerformanceManager.tick(this);AppObservation.sample(this);}catch(Exception ignored){}
     },3,3,java.util.concurrent.TimeUnit.SECONDS);
     // No GitHub polling: Control uses the phone's authenticated outbound TLS
     // socket over Wi-Fi and cellular. Start only after owner-enabled agent start.
@@ -347,6 +347,18 @@ public final class AgentService extends Service {
       try{json(out,200,transfers.cancel(path.substring("/transfer/cancel/".length())));}
       catch(Exception e){json(out,400,error(e.getMessage()));}return;
     }
+    if(method.equals("GET")&&path.equals("/performance/status")){
+      try{json(out,200,PerformanceManager.status(this));}
+      catch(Exception e){json(out,400,error("Performance status unavailable"));}return;
+    }
+    if(method.equals("POST")&&path.equals("/performance/mode")){
+      try{json(out,200,PerformanceManager.setMode(this,body.getString("mode")));}
+      catch(Exception e){json(out,400,error(e.getMessage()));}return;
+    }
+    if(method.equals("POST")&&path.equals("/performance/optimize")){
+      try{json(out,200,PerformanceManager.prioritizeForegroundNow(this));}
+      catch(Exception e){json(out,400,error(e.getMessage()));}return;
+    }
     if(method.equals("GET")&&path.equals("/health")){json(out,200,health());return;}
     if(method.equals("GET")&&path.equals("/ui")){
       ControlAccessibilityService a=ControlAccessibilityService.active;
@@ -392,7 +404,8 @@ public final class AgentService extends Service {
       .put("frame_width",CaptureService.width).put("frame_height",CaptureService.height)
       .put("battery",b).put("memory_available",mem.availMem).put("memory_total",mem.totalMem)
       .put("storage_available",disk.getAvailableBytes()).put("storage_total",disk.getTotalBytes())
-      .put("thermals",thermals).put("remote_transport",TransportConnectivity.report(this));
+      .put("thermals",thermals).put("performance",PerformanceManager.status(this))
+      .put("remote_transport",TransportConnectivity.report(this));
   }
   @Override public void onDestroy(){alive=false;running=false;try{if(server!=null)server.close();}catch(Exception ignored){}
     if(networkManager!=null&&networkCallback!=null){
