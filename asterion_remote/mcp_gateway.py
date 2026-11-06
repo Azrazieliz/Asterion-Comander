@@ -88,10 +88,10 @@ def _windows_route():
     if WINDOWS_UPSTREAM:
         url = _validate_windows_route(WINDOWS_UPSTREAM)
     else:
-        from .github_bridge_git import agent_host
         try:
-            url = _validate_windows_route(agent_host() + "/mcp")
-        except RuntimeError:
+            private_host = (ROOT / "agent-host.txt").read_text(encoding="utf-8").strip()
+            url = _validate_windows_route(private_host + "/mcp")
+        except (RuntimeError, OSError):
             return None
     try:
         token = _secret(WINDOWS_AGENT_KEY)
@@ -200,7 +200,6 @@ async def rpc(req: Request):
     method = message.get("method")
     name = (message.get("params") or {}).get("name") if isinstance(message.get("params"), dict) else ""
     if method == "tools/call":
-        from . import phone_cloud_relay
         params = message.get("params") or {}
         native = isinstance(name, str) and _tool_is_native(name)
         if native:
