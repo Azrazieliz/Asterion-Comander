@@ -318,7 +318,7 @@ public final class MainActivity extends Activity {
     gap(phone,12);phoneAddress=t("Checking phone access…",12,DesignSystem.MUTED,false);wide(phone,phoneAddress);
     gap(phone,16);button(phone,"Enable phone remote control","shield",true,this::enablePhoneControl);
     gap(phone,9);button(phone,"Share screen · Android permission","share",false,this::beginCapture);
-    gap(phone,9);button(phone,"Connect ChatGPT directly","check",false,this::showMcpConnection);
+    gap(phone,9);button(phone,"Authorize ChatGPT (one-time code)","check",false,this::showMcpConnection);
      gap(phone,9);button(phone,"Keep access active during long sessions","power",false,this::showBatterySetup);
      gap(phone,9);button(phone,"Disable phone access","power",false,()->{stopService(new Intent(this,CaptureService.class));stopAgent();});
     wide(devicesBody,phone);
@@ -844,8 +844,64 @@ public final class MainActivity extends Activity {
     clipboard.setPrimaryClip(clip);
     toast(label+" copied");
   }
+  /** The already connected Samsung owner requests a one-use approval code
+   * over the authenticated TLS gateway. No reusable gateway secret is copied.
+   */
+  private void showPhoneApproval(){
+    setPairingFeedback("Requesting a one-time ChatGPT approval code over direct cellular MCP…");
+    io.execute(()->{
+      HttpURLConnection request=null;
+      try{
+        request=(HttpURLConnection)new URL(
+          "https://wise-eagle-c8b55706.tunnl.gg/oauth/phone-approval").openConnection();
+        request.setRequestMethod("POST");request.setDoOutput(true);
+        request.setConnectTimeout(6000);request.setReadTimeout(9000);
+        request.setRequestProperty("Authorization","Bearer "+AgentService.token(this));
+        request.setRequestProperty("Content-Type","application/json");
+        try(OutputStream out=request.getOutputStream()){
+          out.write("{}".getBytes(StandardCharsets.UTF_8));
+        }
+        if(request.getResponseCode()!=200)
+          throw new IllegalStateException("Owner approval HTTP "+request.getResponseCode());
+        JSONObject result=new JSONObject(new String(
+          request.getInputStream().readNBytes(4096),StandardCharsets.UTF_8));
+        String code=result.getString("authorization_code");
+        String endpoint=result.getString("server_url");
+        if(code.length()<32||code.length()>256||
+            !"https://wise-eagle-c8b55706.tunnl.gg/mcp".equals(endpoint))
+          throw new IllegalStateException("Invalid signed Control approval response");
+        runOnUiThread(()->{
+          if(destroyed)return;
+          LinearLayout content=v();content.setPadding(dp(18),dp(12),dp(18),dp(7));
+          wide(content,t("Use this short-lived one-time code in the existing "
+            +"Authorize Asterion Control page. It expires in 10 minutes and "
+            +"works once. Do not paste it into a ChatGPT conversation.",
+            12,DesignSystem.MUTED,false));
+          gap(content,12);
+          button(content,"Copy one-time approval code","shield",true,
+            ()->copyPrivateConnection("One-time Control approval",code,true));
+          gap(content,9);
+          wide(content,t("Gateway: "+endpoint,11,DesignSystem.MUTED,false));
+          new AlertDialog.Builder(this).setTitle("Authorize ChatGPT securely")
+            .setView(content).setPositiveButton("Close",null).show();
+          setPairingFeedback("Owner approval ready; finish the ChatGPT authorization page.");
+        });
+      }catch(Exception failure){
+        String reason=failure.getMessage()==null?
+          failure.getClass().getSimpleName():failure.getMessage();
+        runOnUiThread(()->setPairingFeedback(
+          "One-time mobile approval unavailable: "+reason));
+      }finally{if(request!=null)request.disconnect();}
+    });
+  }
   /** Explicit owner action only. Credentials are never logged or sent to GitHub. */
   private void showMcpConnection(){
+    try{
+      if(PhoneDirectMcp.status().optBoolean("connected",false)){
+        showPhoneApproval();return;
+      }
+    }catch(Exception ignored){}
+
     final String url=prefs.getString("url","").replaceAll("/+$","");
     final String bearer=prefs.getString("token","");
     if(url.isEmpty()||bearer.isEmpty()){
@@ -869,7 +925,7 @@ public final class MainActivity extends Activity {
         if(!endpoint.startsWith("https://")||secret.length()<43)throw new IllegalArgumentException("Invalid connector details");
         runOnUiThread(()->{
           LinearLayout layout=v();layout.setPadding(dp(18),dp(12),dp(18),dp(7));
-          TextView desc=t("ChatGPT direct MCP trial. This is a temporary HTTPS address; connect once using Bearer API key authentication. The key remains on your phone.",12,DesignSystem.MUTED,false);
+          TextView desc=t("Fallback private-LAN setup. This is the stable HTTPS gateway address; its permanent bearer key must only be entered in the trusted connection UI, never in ChatGPT messages.",12,DesignSystem.MUTED,false);
           wide(layout,desc);gap(layout,15);
           EditText address=input(endpoint,false,"MCP server URL");
           address.setTextIsSelectable(true);wide(layout,address);

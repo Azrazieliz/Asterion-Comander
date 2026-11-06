@@ -45,6 +45,7 @@ def _db():
     db.execute("CREATE TABLE IF NOT EXISTS clients (client_id TEXT PRIMARY KEY, redirects TEXT NOT NULL, created INTEGER NOT NULL)")
     db.execute("CREATE TABLE IF NOT EXISTS codes (digest TEXT PRIMARY KEY, client_id TEXT, redirect TEXT, challenge TEXT, resource TEXT, expires INTEGER)")
     db.execute("CREATE TABLE IF NOT EXISTS tokens (digest TEXT PRIMARY KEY, kind TEXT, client_id TEXT, resource TEXT, expires INTEGER)")
+    db.execute("CREATE TABLE IF NOT EXISTS owner_approvals (digest TEXT PRIMARY KEY, expires INTEGER NOT NULL)")
     # Older releases called these columns hash/redirect_uri/redirect_uris.
     # SQLite CREATE IF NOT EXISTS does not change existing tables. Migrate
     # column names without dropping any client, authorization code or token.
@@ -83,11 +84,60 @@ def _form(body: bytes) -> dict:
         raise HTTPException(400, "Invalid OAuth form")
 
 def _owner_key_valid(candidate: str) -> bool:
+    if not isinstance(candidate, str) or not (32 <= len(candidate) <= 256):
+        return False
+    # Continue accepting the original owner's gateway key via the existing
+    # OAuth form; do not rotate it, disclose it, or change prior pairing.
     try:
         expected = GATEWAY_KEY.read_text(encoding="utf-8").strip()
     except OSError:
-        return False
-    return len(expected) >= 43 and hmac.compare_digest(candidate.encode(), expected.encode())
+        expected = ""
+    if len(expected) >= 43 and hmac.compare_digest(candidate.encode(), expected.encode()):
+        return True
+    # Owner-requested mobile approvals are one-use and expire after ten minutes.
+    # Store only the digest, not a reusable device or gateway credential.
+    with _lock, _db() as db:
+        now = _now()
+        db.execute("DELETE FROM owner_approvals WHERE expires <= ?", (now,))
+        digest = _hash(candidate)
+        row = db.execute("SELECT expires FROM owner_approvals WHERE digest=?", (digest,)).fetchone()
+        if row and row[0] > now:
+            db.execute("DELETE FROM owner_approvals WHERE digest=?", (digest,))
+            return True
+    return False
+
+
+@router.post("/oauth/phone-approval")
+def phone_approval(request: Request):
+    """Phone-owner-tapped bootstrap: mobile data works; no permanent secret leaves gateway."""
+    from .phone_live import connected
+    from .phone_bridge import load as load_registered_phone
+    bearer = request.headers.get("authorization", "")
+    candidate = bearer[7:] if bearer.startswith("Bearer ") else ""
+    record = load_registered_phone()
+    registered = record.get("token") if isinstance(record, dict) else None
+    if (not isinstance(registered, str) or len(registered) < 32 or
+            not isinstance(candidate, str) or len(candidate) != len(registered) or
+            not hmac.compare_digest(candidate.encode(), registered.encode()) or
+            not connected()):
+        raise HTTPException(401, "An actively connected registered Android owner is required")
+    code = secrets.token_urlsafe(32)
+    with _lock, _db() as db:
+        now = _now()
+        db.execute("DELETE FROM owner_approvals WHERE expires <= ?", (now,))
+        outstanding = db.execute("SELECT COUNT(*) FROM owner_approvals").fetchone()[0]
+        if outstanding >= 3:
+            raise HTTPException(429, "Too many outstanding owner approvals")
+        db.execute("INSERT INTO owner_approvals (digest,expires) VALUES (?,?)",
+                   (_hash(code), now + 600))
+    return JSONResponse({
+        "server_url": RESOURCE,
+        "authorization_code": code,
+        "expires_in": 600,
+        "one_time": True,
+    }, headers={"Cache-Control": "no-store", "Pragma": "no-cache"})
+
+
 
 def challenge() -> str:
     return f'Bearer resource_metadata="{ORIGIN}/.well-known/oauth-protected-resource", scope="{SCOPE}", error="invalid_token"'
@@ -173,12 +223,16 @@ def authorize(client_id: str = "", redirect_uri: str = "", response_type: str = 
             "max-width:480px;margin:7vh auto;padding:18px}input,button{box-sizing:border-box;"
             "width:100%;padding:12px;margin:12px 0}button{background:#4338ca;color:white}"
             "</style></head><body><h2>Authorize Asterion Control</h2>"
-            "<p>Approve ChatGPT access to your already-paired devices using your existing gateway key.</p>"
+            "<p>Approve ChatGPT access to your already-paired devices. "
+            "On your Samsung, open Asterion Control &gt; Devices &gt; "
+            "Authorize ChatGPT (one-time code), then copy the temporary code.</p>"
             "<form action='/oauth/approve' method='post'>"
             f"<input type='hidden' name='request_id' value='{rid}'>"
-            "<label>Owner's existing gateway key<input type='password' name='key' required autocomplete='off'></label>"
+            "<label>One-time phone approval code (or existing gateway key)"
+            "<input type='password' name='key' required autocomplete='off'></label>"
             "<button type='submit'>Authorize ChatGPT</button></form>"
-            "<p>Never enter the key in ChatGPT messages.</p></body></html>")
+            "<p>The phone code expires after 10 minutes and is valid once. "
+            "Never enter your code or gateway key in ChatGPT messages.</p></body></html>")
     return HTMLResponse(page, headers={"Cache-Control": "no-store", "X-Frame-Options": "DENY",
                                   "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'"})
 
