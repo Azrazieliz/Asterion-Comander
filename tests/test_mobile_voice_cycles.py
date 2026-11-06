@@ -103,12 +103,37 @@ def test_voice_routes_dispatch_directly_to_authorized_android(monkeypatch):
     assert visited[2][0]=="/network/status"
 
 
+def test_stale_local_auth_rejection_uses_owner_enabled_phone_cloud(monkeypatch):
+    monkeypatch.setattr(mcp_gateway,"_secret",lambda p:"K"*48)
+    monkeypatch.setattr(mcp_gateway,"_phone_route",
+                        lambda:("http://192.168.1.116:8973/mcp","X"*48))
+    monkeypatch.setattr(mcp_gateway,"_windows_route",lambda:None)
+    async def stale_auth(*args,**kwargs):
+        return httpx.Response(401,request=httpx.Request("POST","http://192.168.1.116:8973/mcp"))
+    monkeypatch.setattr(mcp_gateway,"_forward",stale_auth)
+    called=[]
+    async def remote(name,arguments,mid):
+        called.append(name)
+        return {"jsonrpc":"2.0","id":mid,"result":{"content":[{"type":"text","text":"{\"ok\":true}"}]}}
+    monkeypatch.setattr(phone_cloud_relay,"submit",remote)
+    with TestClient(mcp_gateway.app) as client:
+        result=client.post("/mcp",headers={
+            "Authorization":"Bearer "+"K"*48,
+            "Accept":"application/json, text/event-stream"},json={
+            "jsonrpc":"2.0","id":47,"method":"tools/call",
+            "params":{"name":"control_phone_cycle_status","arguments":{}}})
+    assert result.status_code==200
+    assert called==["control_phone_cycle_status"]
+
+
 def test_android_source_enforces_cellular_https_and_expiring_commands():
     root=Path(__file__).resolve().parents[1]
     a=(root/"android/app/src/main/java/com/asterion/control/PhoneGitBridge.java").read_text()
     n=(root/"android/app/src/main/java/com/asterion/control/TransportConnectivity.java").read_text()
     c=(root/"android/app/src/main/java/com/asterion/control/ContinuationCycle.java").read_text()
     assert "HttpsURLConnection" in a
+    assert '"bridge_status"' in a
+    assert "if(!TransportConnectivity.usable(owner))" not in a
     assert "expires_at_ms" in a and "status\",\"expired" in a
     assert "TRANSPORT_CELLULAR" in n and "TRANSPORT_VPN" in n
     assert "allowAutomaticDispatch" in c
