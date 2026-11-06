@@ -35,12 +35,12 @@ $endpoint='http://'+$bind+':8911'
 )
 Write-Host ('Asterion Control Windows agent '+$endpoint)
 $pinFile=Join-Path $settings 'pairing-code.txt'
-$bridge=Join-Path $PSScriptRoot 'start_git_bridge.ps1'
-if($env:ASTERION_DISABLE_GIT_BRIDGE -ne '1' -and (Test-Path $bridge)){
-  Start-Process -FilePath 'powershell.exe' -ArgumentList @(
-    '-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass',
-    '-File',('"' + $bridge + '"')
-  ) -WorkingDirectory $root -WindowStyle Hidden | Out-Null
+# No GitHub-based remote-control relay is started in normal operation.
+# Historical bridge scripts remain preserved for explicit migration only.
+$stableSshFlag=Join-Path $settings 'mcp-stable-ssh-enabled.flag'
+$stableSshScript=Join-Path $PSScriptRoot 'start_persistent_ssh_mcp.py'
+if((Test-Path $stableSshFlag) -and (Test-Path $stableSshScript)){
+  Start-Process -FilePath $venv -ArgumentList @($stableSshScript) -WorkingDirectory $root -WindowStyle Hidden | Out-Null
 }
 # When the owner has explicitly enabled a stable MCP Funnel, restore the
 # authenticated loopback gateway at Windows login. Tailscale itself keeps the
