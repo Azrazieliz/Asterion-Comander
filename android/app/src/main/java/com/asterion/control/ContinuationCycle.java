@@ -65,6 +65,8 @@ final class ContinuationCycle {
        !("same".equals(conversation)||"new".equals(conversation))||
        maximum<0||maximum>1000000)
       throw new IllegalArgumentException("Invalid canonical Control cycle parameters");
+    if(id.equals(state.optString("cycle_id","")))
+      throw new IllegalStateException("Reusing a prior cycle ID could replay checkpoint history");
     JSONObject current=ledger.status();
     String previous=current.optString("state","idle");
     if(!("idle".equals(previous)||"acknowledged".equals(previous)||
@@ -82,7 +84,8 @@ final class ContinuationCycle {
     return status();
   }
   synchronized JSONObject pause()throws Exception {
-    if(state.optBoolean("active",false)) {
+    if(state.optBoolean("active",false)&&!"paused".equals(state.optString("state"))) {
+      state.put("paused_previous_state",state.optString("state","ready"));
       state.put("state","paused");
       save();
     }
@@ -94,19 +97,33 @@ final class ContinuationCycle {
        !"needs_review".equals(state.optString("state")))
       return status();
     String current=ledger.status().optString("state");
-    // Never requeue a potentially sent checkpoint after process death.
-    if("dispatching".equals(current)||"submitted_unverified".equals(current)||
-       "requires_manual_review".equals(current))
-      throw new IllegalStateException("Previous ChatGPT turn may have been sent; verify it first");
-    state.put("state","ready").put("last_error","");
-    save();
-    return status();
+    String previous=state.optString("paused_previous_state","ready");
+    if("dispatching".equals(current)||"requires_manual_review".equals(current))
+      throw new IllegalStateException("Previous ChatGPT send is uncertain; review required");
+    if("submitted_unverified".equals(current)){
+      if(!"waiting_ack".equals(previous)&&!"queued".equals(previous))
+        throw new IllegalStateException("A potentially sent checkpoint cannot be requeued");
+      previous="waiting_ack";
+    }
+    if(!("ready".equals(previous)||"queued".equals(previous)||
+         "waiting_ack".equals(previous)||"awaiting_new_chat".equals(previous)))
+      throw new IllegalStateException("Cycle recovery requires an operator review");
+    state.put("state",previous).put("last_error","");
+    state.remove("paused_previous_state");
+    save();return status();
   }
   synchronized JSONObject stop()throws Exception {
+    JSONObject current=ledger.status();
+    String checkpoint=state.optString("checkpoint","");
+    if(checkpoint.equals(current.optString("last_checkpoint",""))&&
+       "queued".equals(current.optString("state",""))){
+      // A turn that was never sent can be cancelled safely.
+      ledger.cancel();
+    }
     state.put("active",false).put("state","stopped")
       .put("stopped_at_ms",System.currentTimeMillis());
     save();
-    // Deliberately do not cancel in-flight ChatGPT messages.
+    // Never cancel a turn already submitted to ChatGPT.
     return status();
   }
   synchronized JSONObject tick()throws Exception {
@@ -144,7 +161,8 @@ final class ContinuationCycle {
       }
       if("queued".equals(current)&&"queued".equals(phase)) {
         // Do not send to any other foreground application.
-        if(ControlAccessibilityService.active!=null){
+        ControlAccessibilityService access=ControlAccessibilityService.active;
+        if(access!=null&&"com.openai.chatgpt".equals(access.currentPackage())){
           try{ledger.dispatch();}catch(Exception ignored){}
         }
       }
@@ -153,10 +171,25 @@ final class ContinuationCycle {
       }
       return status();
     }
+    if("awaiting_new_chat".equals(phase)) {
+      // Request navigation once only. The external operator must verify the
+      // new conversation, because an Accessibility click is not proof.
+      if(!state.optBoolean("new_chat_requested",false)){
+        ControlAccessibilityService view=ControlAccessibilityService.active;
+        if(view!=null&&"com.openai.chatgpt".equals(view.currentPackage())){
+          JSONObject nav=view.requestNewChat();
+          if(nav.optBoolean("requested",false)){
+            state.put("new_chat_requested",true);
+            save();
+          }
+        }
+      }
+      return status();
+    }
     if(!"ready".equals(phase))return status();
     if("new".equals(state.optString("conversation")) &&
        state.optInt("new_chat_verified_index",0)!=index) {
-      state.put("state","awaiting_new_chat")
+      state.put("state","awaiting_new_chat").put("new_chat_requested",false)
         .put("last_error","Wait for external operator to verify New chat navigation");
       save();return status();
     }
@@ -187,12 +220,20 @@ final class ContinuationCycle {
     }
     return status();
   }
+  synchronized boolean allowAutomaticDispatch(String checkpoint){
+    if(!state.optBoolean("active",false))return true;
+    if(!checkpoint.equals(state.optString("checkpoint","")))return true;
+    String phase=state.optString("state","");
+    return "queued".equals(phase)||"waiting_ack".equals(phase);
+  }
   synchronized JSONObject confirmNewChat(String verification)throws Exception {
     if(!state.optBoolean("active",false)||
        !"awaiting_new_chat".equals(state.optString("state")))
       throw new IllegalStateException("No pending New chat verification");
     if(verification==null||verification.length()<8||verification.length()>512)
       throw new IllegalArgumentException("Observed new-chat verification required");
+    if(!state.optBoolean("new_chat_requested",false))
+      throw new IllegalStateException("New chat control has not been requested yet");
     state.put("new_chat_verified_index",state.optInt("index",1))
       .put("new_chat_receipt",verification).put("state","ready")
       .put("last_error","");
