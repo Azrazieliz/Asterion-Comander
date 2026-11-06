@@ -1,3 +1,31 @@
+# 2026-11-06 — Continuation improvements, isolated phone command queue, Android observation history (latest)
+
+**Canonical:** Asterion Control remains Android-primary, shared deterministic device-control infrastructure. ChatGPT is the external AI operator. No new AI service, paid model API, embedded game engine or alteration to `7STAR_FROZEN_MASTER.md`.
+
+## Implemented in Commander PR #1
+
+- Native phone bridge now consumes **`commands/android/phone-<id>.json`** and writes `results/android/phone-<id>.json` in the existing PRIVATE `Azrazieliz/Asterion-Control-Bridge` repository. The previous `commands/android-<id>.json` / `results/android-<id>.json` namespace remains supported for issued legacy commands. Separate ETags, strict operation allowlist, Android Keystore credential protection, local idempotency and durable crash-uncertainty receipts remain in place. The private directories exist; a read-only `phone-control-smoke-20261106` request is queued but NOT executed.
+- ChatGPT's operator can request **New chat** navigation through Android Accessibility / MCP / native REST / optional phone-only bridge. It never erases a populated composer, only clicks a specifically labeled visible control, and explicitly reports `verified_new_chat:false`. A real ChatGPT operator must inspect the resulting screen before sending its next checkpoint. This is NOT a tested autonomous conversation loop.
+- Added an installed-app searchable native picker for user-selected observation rather than requiring manual Android package names.
+- Long-run gameplay observation caps frame storage at 256 MiB, rotates JSONL timelines before unbounded growth, rechecks foreground package before recording, and exposes the recent retained frame timeline plus authenticated per-frame retrieval to the external AI operator. No AI analysis or user-game manipulation is built into Control.
+- The Windows owner-signed deployment script now fails if local source differs from remote approved branch, verifies v0.8.6's exact signing certificate against the new build and refuses mismatches, and optionally delivers an accepted matching-signer APK over private authenticated Wi-Fi into Android Downloads with SHA-256 receipt. It NEVER installs silently, uninstalls, wipes data or sends APK bytes through GitHub. Its syntax is checked by CI, but it has NOT run on the original Windows worker.
+- Private ChatGPT Asterion Control plugin updated successfully to **v1.6.1**, preserving the existing MCP server declaration and providing the new phone queue and observation methods as instructions.
+
+## Evidence
+
+- [GitHub Actions run 42139069606](https://github.com/Azrazieliz/Asterion-Comander/actions/runs/42139069606) **PASSED** at source commit `5b4465a9176c785bc69f910e3f4ed28c543e4e18`: **37 Python tests passed**, PowerShell original-signer script parser passed, **Gradle Android build passed**, CI APK uploaded (artifact `13467206029`). This CI output is NOT signed with the original owner's certificate.
+- CI signer check still reports **`SIGNER_COMPATIBLE_WITH_V086_BASELINE=false`**. The user-confirmed installed version remains **v0.8.6**; the source version is **v0.8.8**. Do NOT recommend the CI APK as an in-place update.
+- The previously queued owner-signed Windows build and private phone smoke commands still have no result receipts. No Android device install, live direct MCP authentication, ChatGPT next-turn continuation, voice recognition or long-idle acceptance is claimed from CI alone.
+
+## Unresolved production dependencies
+
+1. The original Windows signing worker must process the queued matching-certificate build once reachable; verify output SHA-256 and transfer receipt. The Android package installer requires owner approval.
+2. Connect a stable authenticated HTTPS route to phone-owned MCP and make the actual ChatGPT plugin tool namespace available in the conversation. The original temporary Cloudflare Quick Tunnel is not a durable endpoint. The phone-owned private GitHub bridge is an explicitly enabled fallback and does not replace direct low-latency access.
+3. Demonstrate ChatGPT sent checkpoint → new actual model response → inspected receipt → next checkpoint; verify new-conversation UI and no duplicate/incorrect-chat sends.
+4. Verify Android real gameplay observation/voice and app permissions, long idle, interrupted transfers, and battery behavior. Keep Pilot/Game and all other project engines separate.
+
+---
+
 # 2026-11-06 — Control v0.8.8, phone-only private fallback and confirmed signer blocker
 
 **Canonical scope unchanged:** Control is shared Android-primary deterministic execution infrastructure for all separate Asterion applications. ChatGPT is the external AI. No embedded AI, paid model API, merged engines, user-data reset or routine ADB.
