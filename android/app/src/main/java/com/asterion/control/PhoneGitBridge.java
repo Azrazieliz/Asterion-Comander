@@ -250,6 +250,14 @@ final class PhoneGitBridge {
           .put("jpeg_b64",first.optString("data"));
       }
     }
+    // A valid MCP transport reply can still contain a refused Android action.
+    // The private GitHub receipt must reflect the device's actual result.
+    if(output.has("ok") && !output.optBoolean("ok",true)){
+      String detail=output.optString("error",output.optString("reason","Android action refused"));
+      return new JSONObject().put("id",id).put("ok",false)
+        .put("status","failed").put("error",detail.length()>250?detail.substring(0,250):detail)
+        .put("result",output);
+    }
     return new JSONObject().put("id",id).put("ok",true)
       .put("status","complete").put("result",output);
   }
