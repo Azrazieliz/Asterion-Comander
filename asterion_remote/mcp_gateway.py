@@ -31,6 +31,8 @@ WINDOWS_AGENT_KEY = ROOT / "control-token.txt"
 WINDOWS_UPSTREAM = os.environ.get("ASTERION_CONTROL_UPSTREAM", "")
 NATIVE_PHONE_PREFIXES = (
     "control_phone_status",
+    "control_phone_direct_status",
+    "control_phone_bridge_status",
     "control_phone_health",
     "control_phone_screen",
     "control_phone_ui",
