@@ -48,9 +48,7 @@ public final class AgentService extends Service {
       java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
   private final java.util.concurrent.ScheduledExecutorService observer =
       java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
-  private final java.util.concurrent.ScheduledExecutorService privateBridge =
-      java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
-  private android.net.ConnectivityManager networkManager;
+   private android.net.ConnectivityManager networkManager;
   private android.net.ConnectivityManager.NetworkCallback networkCallback;
   private final java.util.concurrent.atomic.AtomicLong lastNetworkWake =
       new java.util.concurrent.atomic.AtomicLong(0);
@@ -58,8 +56,7 @@ public final class AgentService extends Service {
     long now=android.os.SystemClock.elapsedRealtime();
     long previous=lastNetworkWake.get();
     if(now-previous<5000L||!lastNetworkWake.compareAndSet(previous,now))return;
-    try{privateBridge.execute(()->PhoneGitBridge.poll(this));}
-    catch(java.util.concurrent.RejectedExecutionException ignored){}
+    PhoneDirectMcp.networkChanged();
   }
   @Override public void onCreate(){
     super.onCreate();
@@ -76,9 +73,8 @@ public final class AgentService extends Service {
     observer.scheduleWithFixedDelay(()->{
       try{AppObservation.sample(this);}catch(Exception ignored){}
     },3,3,java.util.concurrent.TimeUnit.SECONDS);
-    // Optional and owner-enabled. Never a model executor or an untrusted shell.
-    privateBridge.scheduleWithFixedDelay(()->PhoneGitBridge.poll(this),
-      2,4,java.util.concurrent.TimeUnit.SECONDS);
+    // No GitHub polling: Control uses the phone's authenticated outbound TLS
+    // socket over Wi-Fi and cellular. Start only after owner-enabled agent start.
     try{
       networkManager=(android.net.ConnectivityManager)getSystemService(CONNECTIVITY_SERVICE);
       networkCallback=new android.net.ConnectivityManager.NetworkCallback(){
@@ -137,7 +133,7 @@ public final class AgentService extends Service {
       alive=true;acceptThread=new Thread(this::serve,"asterion-agent");
       acceptThread.start();
     }
-    running=true;return START_STICKY;
+    running=true;PhoneDirectMcp.start(this);return START_STICKY;
   }
   /** Recover from a transient socket failure; do not silently disable the owner's session. */
   private boolean privatePeer(java.net.InetAddress peer){
@@ -272,7 +268,7 @@ public final class AgentService extends Service {
       write(out,200,"image/jpeg",jpeg);return;
     }
     if(method.equals("GET")&&path.equals("/github-bridge/status")){
-      try{json(out,200,PhoneGitBridge.status(this));}
+      try{json(out,200,PhoneDirectMcp.status());}
       catch(Exception e){json(out,400,error("Private bridge status unavailable"));}
       return;
     }
@@ -402,6 +398,6 @@ public final class AgentService extends Service {
     if(networkManager!=null&&networkCallback!=null){
       try{networkManager.unregisterNetworkCallback(networkCallback);}catch(Exception ignored){}
     }
-    clients.shutdownNow();observer.shutdownNow();privateBridge.shutdownNow();cycleWorker.shutdownNow();super.onDestroy();}
+    PhoneDirectMcp.stop();clients.shutdownNow();observer.shutdownNow();cycleWorker.shutdownNow();super.onDestroy();}
   @Override public IBinder onBind(Intent i){return null;}
 }
