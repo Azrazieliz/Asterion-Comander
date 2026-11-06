@@ -124,8 +124,8 @@ jobs:
         if: github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'release:')
         run: |
           test -s android/app/build/outputs/apk/release/app-release.apk
-          grep -q "versionName '0.9.1'" android/app/build.gradle
-          grep -q "versionCode 901" android/app/build.gradle
+          grep -q "versionName '0.9.2'" android/app/build.gradle
+          grep -q "versionCode 902" android/app/build.gradle
           test -s android/app/src/main/java/com/asterion/control/PhoneGitBridge.java
           test -s android/app/src/main/java/com/asterion/control/AndroidMcp.java
           sha256sum android/app/build/outputs/apk/release/app-release.apk
@@ -166,7 +166,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: success() && (github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'release:'))
         with:
-          name: Asterion-Control-v0.9.1-OWNER-SIGNED-RELEASE
+          name: Asterion-Control-v0.9.2-OWNER-SIGNED-RELEASE
           path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
 
@@ -176,7 +176,7 @@ jobs:
         run: |
           set -euo pipefail
           VERSION='0.9.0'
-          PKG='Asterion-Control-v0.9.1-release.apk'
+          PKG='Asterion-Control-v0.9.2-release.apk'
           ROOT="${RUNNER_TEMP}/asterion-release-feed"
           git fetch --no-tags origin main
           git worktree add --detach "$ROOT" origin/main
@@ -184,19 +184,19 @@ jobs:
           cp android/app/build/outputs/apk/release/app-release.apk "$ROOT/dist/$PKG"
           # Compatibility filename ONLY: exact same non-debuggable release APK.
           # Required because v0.8.8 validates this historical suffix.
-          cp "$ROOT/dist/$PKG" "$ROOT/dist/Asterion-Control-v0.9.1-debug.apk"
+          cp "$ROOT/dist/$PKG" "$ROOT/dist/Asterion-Control-v0.9.2-debug.apk"
           (
             cd "$ROOT/dist"
-            sha256sum "$PKG" > 'SHA256SUMS-v0.9.1.txt'
+            sha256sum "$PKG" > 'SHA256SUMS-v0.9.2.txt'
           )
           python - "$ROOT/dist" <<'PY'
           import hashlib,json,pathlib,sys
           root=pathlib.Path(sys.argv[1])
-          source=root/'Asterion-Control-v0.9.1-release.apk'
+          source=root/'Asterion-Control-v0.9.2-release.apk'
           data={
-            "version_code":901,
-            "version_name":"0.9.1",
-            "apk_url":"https://raw.githubusercontent.com/Azrazieliz/Asterion-Comander/main/dist/Asterion-Control-v0.9.1-release.apk",
+            "version_code":902,
+            "version_name":"0.9.2",
+            "apk_url":"https://raw.githubusercontent.com/Azrazieliz/Asterion-Comander/main/dist/Asterion-Control-v0.9.2-release.apk",
             "sha256":hashlib.file_digest(source.open('rb'),'sha256').hexdigest(),
             "size_bytes":source.stat().st_size,
           }
@@ -209,8 +209,8 @@ jobs:
           print("UPDATE_SHA256="+data["sha256"])
           PY
           git -C "$ROOT" add dist/latest.json dist/latest-release.json "dist/$PKG" \
-            dist/Asterion-Control-v0.9.1-debug.apk dist/SHA256SUMS-v0.9.1.txt
+            dist/Asterion-Control-v0.9.2-debug.apk dist/SHA256SUMS-v0.9.2.txt
           if ! git -C "$ROOT" diff --cached --quiet; then
-            git -C "$ROOT" -c user.name='asterion-control-actions' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m "Publish owner-signed Control v0.9.1 verified release update"
+            git -C "$ROOT" -c user.name='asterion-control-actions' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m "Publish owner-signed Control v0.9.2 verified release update"
             git -C "$ROOT" push origin HEAD:main
           fi
