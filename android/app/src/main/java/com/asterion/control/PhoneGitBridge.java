@@ -43,7 +43,7 @@ final class PhoneGitBridge {
   private static final int MAX_BYTES=2_000_000, MAX_ITEMS=1000;
   private static final Map<String,String> OPS=new HashMap<>();
   static {
-    String[] names={"status","health","screen","ui","input","apps","app_launch",
+    String[] names={"status","bridge_status","health","screen","ui","input","apps","app_launch",
       "continuation_status","continuation_queue","continuation_dispatch",
       "continuation_ack","continuation_cancel","chat_new","observation_status",
       "observation_events","observation_frame",
@@ -270,10 +270,9 @@ final class PhoneGitBridge {
   }
   static void poll(AgentService owner){
     if(!enabled(owner)||busy)return;
-    if(!TransportConnectivity.usable(owner)){
-      lastError="No validated Internet; waiting for Wi-Fi, cellular or VPN";
-      return;
-    }
+    // Android validation flags may lag behind an already working cellular or
+    // VPN HTTPS route. Attempt the bounded outbound request instead of blocking
+    // the phone-owned bridge merely because NET_CAPABILITY_VALIDATED is late.
     busy=true;lastPollMs=System.currentTimeMillis();
     try{
       String pat=token(owner);
