@@ -302,15 +302,13 @@ async def rpc(req: Request):
                     catalogs.append(json.loads(response.content))
         except (RuntimeError, httpx.HTTPError, ValueError):
             pass
-        if not catalogs:
-            # Discovery must remain available on cellular when the phone is
-            # temporarily unreachable or the Windows worker is switched off.
-            # This is a STATIC tool schema, NOT a false availability claim:
-            # each tool still returns an explicit pending/offline result.
-            from .mcp_protocol import TOOLS
-            catalogs=[{"result":{"tools":TOOLS}}]
+        # Canonical tools are discoverable even while Android or a subordinate
+        # Windows agent is older/offline. Native tools override their schemas.
+        # Discovery is NOT evidence that a device command can execute.
+        from .mcp_protocol import TOOLS
+        catalogs.append({"result":{"tools":TOOLS}})
         merged = {}
-        # Reverse so the first/native catalogue wins.
+        # Reverse so live native catalogues win over the static baseline.
         for item in reversed(catalogs):
             for spec in item.get("result", {}).get("tools", []):
                 if isinstance(spec, dict) and isinstance(spec.get("name"), str):
