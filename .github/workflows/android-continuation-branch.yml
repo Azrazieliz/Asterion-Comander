@@ -7,6 +7,7 @@ on:
       - 'android/**'
       - 'asterion_remote/**'
       - 'tests/**'
+      - 'scripts/build_owner_signed_control_088.ps1'
       - '.github/workflows/android-continuation-branch.yml'
   workflow_dispatch:
 permissions:
@@ -27,6 +28,19 @@ jobs:
         run: |
           python -m pip install -r requirements.txt pytest
           python -m pytest -q tests --basetemp=${{ runner.temp }}/asterion-pytest
+      - name: Parse owner-signed Windows deployment script without executing it
+        shell: pwsh
+        run: |
+          $errorsFound=$null
+          $parsedTokens=$null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path (Get-Location) 'scripts/build_owner_signed_control_088.ps1'),
+            [ref]$parsedTokens,[ref]$errorsFound) | Out-Null
+          if($errorsFound.Count -gt 0){
+            $errorsFound | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+          Write-Host 'Owner-signed deployment script PowerShell syntax valid'
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
