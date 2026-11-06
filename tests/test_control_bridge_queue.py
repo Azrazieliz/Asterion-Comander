@@ -57,3 +57,48 @@ def test_explicit_reauthorization_prevents_initial_skip(tmp_path, monkeypatch):
     bridge.migrate()
     assert not (tmp_path / "results" / "owner-approved-update.json").exists()
     assert [p.stem for p in bridge.entries()] == ["owner-approved-update"]
+
+
+def test_running_receipt_is_durable_local_only_then_one_publication(tmp_path, monkeypatch):
+    monkeypatch.setattr(bridge, "ROOT", tmp_path)
+    sent=[]
+    monkeypatch.setattr(bridge,"publish",lambda files:sent.extend(files))
+    identity="owner-fast-control-command"
+    assert bridge.write_result(identity,{"id":identity,"status":"running"},
+                               publish_now=False)
+    assert sent==[]
+    assert json.loads((tmp_path/"results"/(identity+".json")).read_text())["status"]=="running"
+    assert bridge.write_result(identity,{"id":identity,"status":"complete","ok":True})
+    assert sent==[Path("results")/(identity+".json")]
+    assert json.loads((tmp_path/"results"/(identity+".json")).read_text())["ok"]
+    assert not (tmp_path/"results"/(identity+".pending")).exists()
+
+
+def test_failed_publication_recovers_finished_result_without_reexecution(tmp_path, monkeypatch):
+    monkeypatch.setattr(bridge,"ROOT",tmp_path)
+    results=tmp_path/"results"
+    results.mkdir()
+    (results/"finished-unique.json").write_text(
+        '{"id":"finished-unique","status":"complete","ok":true}',encoding="utf8")
+    (results/"uncertain-inflight.json").write_text(
+        '{"id":"uncertain-inflight","status":"running","ok":false}',encoding="utf8")
+    (results/"not-a-command.txt").write_text("ignored",encoding="utf8")
+    monkeypatch.setattr(bridge,"git",lambda *args:
+        "?? results/finished-unique.json\n?? results/uncertain-inflight.json\n?? results/not-a-command.txt")
+    published=[]
+    monkeypatch.setattr(bridge,"publish",lambda paths: published.extend(paths))
+    assert bridge.recover_unpublished()==1
+    assert published==[Path("results/finished-unique.json")]
+
+
+def test_pending_receipt_prevents_command_replay(tmp_path, monkeypatch):
+    monkeypatch.setattr(bridge,"ROOT",tmp_path)
+    commands=tmp_path/"commands"/"active"
+    commands.mkdir(parents=True)
+    task=commands/"unique-write-intent.json"
+    task.write_text('{"id":"unique-write-intent","op":"pc_status"}',encoding="utf8")
+    assert len(bridge.entries())==1
+    bridge.write_result("unique-write-intent",
+                        {"id":"unique-write-intent","status":"running"},
+                        publish_now=False)
+    assert bridge.entries()==[]
