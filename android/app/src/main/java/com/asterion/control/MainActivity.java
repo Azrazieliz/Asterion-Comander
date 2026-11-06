@@ -1168,9 +1168,21 @@ public final class MainActivity extends Activity {
     }
   }
   @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results){super.onRequestPermissionsResult(request,permissions,results);
-    if(request==MICROPHONE_REQUEST&&results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED){
-      if(runVoiceTestAfterPermission){runVoiceTestAfterPermission=false;testVoiceDialogue();}
-      else startVoiceQuestions();
+    if(request==MICROPHONE_REQUEST){
+      if(results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED){
+        if(runVoiceTestAfterPermission){runVoiceTestAfterPermission=false;testVoiceDialogue();}
+        else startVoiceQuestions();
+      }else{
+        runVoiceTestAfterPermission=false;
+        if(voiceTestStatus!=null)
+          voiceTestStatus.setText("Voice test blocked: Android microphone permission denied");
+        new AlertDialog.Builder(this).setTitle("Microphone permission required")
+          .setMessage("Android did not grant microphone access. The speaker can run separately, but no spoken answer can be captured until microphone access is granted.")
+          .setPositiveButton("App permissions",(dialog,which)->{
+            startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+              Uri.parse("package:"+getPackageName())));
+          }).setNegativeButton("Close",null).show();
+      }
       return;
     }
     if(request==NOTIFICATION_REQUEST&&results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED){
