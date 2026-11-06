@@ -95,7 +95,8 @@ def test_authorized_phone_pairing_token_required_for_public_websocket(tmp_path, 
     file.write_text(json.dumps([
         {"device": "Samsung", "hash": hashlib.sha256(credential.encode()).hexdigest()}
     ]), encoding="utf-8")
-    monkeypatch.setattr(phone_live, "AUTHORIZED", file)
+    from asterion_remote import pairing
+    monkeypatch.setattr(pairing, "PAIRED", file)
     assert phone_live._authorized(credential)
     assert not phone_live._authorized(credential[:-1] + "x")
     assert not phone_live._authorized("")
@@ -109,3 +110,26 @@ def test_public_mcp_requires_authentication(monkeypatch):
     with TestClient(mcp_gateway.app) as client:
         assert client.post("/mcp", headers={"Accept": AUTH["Accept"]},
                            json=RPC).status_code == 401
+
+def test_performance_mcp_uses_native_phone_cellular_route(monkeypatch):
+    _authorize(monkeypatch)
+    monkeypatch.setattr(mcp_gateway, "phone_live_connected", lambda: True)
+    names=[]
+    async def android(rpc, timeout=22):
+        names.append(rpc["params"]["name"])
+        return {"jsonrpc":"2.0","id":rpc["id"],
+                "result":{"content":[{"type":"text","text":"ok"}]}}
+    monkeypatch.setattr(mcp_gateway, "phone_live_invoke", android)
+    with TestClient(mcp_gateway.app) as client:
+        for tool in ("control_phone_performance_status",
+                     "control_phone_performance_mode",
+                     "control_phone_performance_optimize"):
+            response=client.post("/mcp",headers=AUTH,json={
+                "jsonrpc":"2.0","id":901,"method":"tools/call",
+                "params":{"name":tool,"arguments":{"mode":"automatic"}}})
+            assert response.status_code==200
+    assert names==[
+        "control_phone_performance_status",
+        "control_phone_performance_mode",
+        "control_phone_performance_optimize",
+    ]
