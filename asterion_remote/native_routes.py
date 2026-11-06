@@ -87,6 +87,116 @@ def phone_continuation_dispatch():
 class CycleRequest(ContinuationRequest):
     cycle_id: str = Field(min_length=3,max_length=66)
     conversation: Literal['same','new'] = 'same'
+    voice_locale: str = Field(default='en-US',pattern=r'^[a-z]{2}(-[A-Z]{2})? = Field(default=0,ge=0,le=1000000)
+
+class NewChatVerification(BaseModel):
+    verification: str = Field(min_length=8,max_length=512)
+
+@router.get('/phone/network/status')
+def phone_network_status():
+    return request('/network/status').json()
+
+@router.get('/phone/cycles/status')
+def phone_cycle_status():
+    return request('/cycles/status').json()
+
+@router.post('/phone/cycles/start')
+def phone_cycle_start(data: CycleRequest):
+    return request('/cycles/start','POST',data.model_dump(),timeout=6).json()
+
+@router.post('/phone/cycles/pause')
+def phone_cycle_pause():
+    return request('/cycles/pause','POST',{},timeout=6).json()
+
+@router.post('/phone/cycles/resume')
+def phone_cycle_resume():
+    return request('/cycles/resume','POST',{},timeout=6).json()
+
+@router.post('/phone/cycles/stop')
+def phone_cycle_stop():
+    return request('/cycles/stop','POST',{},timeout=6).json()
+
+@router.post('/phone/cycles/confirm-new-chat')
+def phone_cycle_confirm_new_chat(data: NewChatVerification):
+    return request('/cycles/confirm-new-chat','POST',data.model_dump(),timeout=6).json()
+
+@router.get('/phone/observation/status')
+def phone_observation_status():
+    return request('/observation/status').json()
+
+@router.get('/phone/observation/events')
+def phone_observation_events():
+    return request('/observation/events').json()
+
+@router.get('/phone/observation/frame')
+def phone_observation_frame():
+    return Response(request('/observation/frame').content,media_type='image/jpeg',
+                    headers={'Cache-Control':'no-store'})
+
+class VoiceQuestion(BaseModel):
+    text: str = Field(min_length=1,max_length=700)
+    question_id: str = Field(default='',max_length=100)
+    locale: str = Field(default='en-US',pattern=r'^[a-z]{2}(-[A-Z]{2})?$')
+
+class VoiceAcknowledgment(BaseModel):
+    question_id: str = Field(min_length=3,max_length=100)
+
+@router.post('/phone/voice/ack')
+def phone_voice_ack(data: VoiceAcknowledgment):
+    return request('/voice/ack','POST',data.model_dump(),timeout=7).json()
+
+@router.get('/phone/voice/status')
+def phone_voice_status():
+    return request('/voice/status').json()
+
+@router.post('/phone/voice/question')
+def phone_voice_question(data:VoiceQuestion):
+    return request('/voice/question','POST',data.model_dump(),timeout=10.0).json()
+
+# Generic application transport for authorized Asterion projects.
+# The Android app must be foreground before dispatching launch intents.
+class AppLaunch(BaseModel):
+    package: str = Field(min_length=3,max_length=180,pattern=r'^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*){1,12}$')
+
+@router.get('/phone/apps')
+def phone_apps():
+    return request('/apps').json()
+
+@router.post('/phone/apps/launch')
+def phone_app_launch(data:AppLaunch):
+    return request('/apps/launch','POST',data.model_dump(),timeout=7.0).json()
+
+class CheckpointAcknowledgment(BaseModel):
+    checkpoint_id: str = Field(min_length=3,max_length=100,pattern=r'^[A-Za-z0-9_.-]+$')
+    response_receipt: str = Field(min_length=8,max_length=512)
+
+@router.post('/phone/continuation/ack')
+def phone_continuation_ack(data:CheckpointAcknowledgment):
+    return request('/continuation/ack','POST',data.model_dump(),timeout=6.0).json()
+
+@router.post('/phone/continuation/cancel')
+def phone_continuation_cancel():
+    return request('/continuation/cancel','POST',{},timeout=6.0).json()
+
+@router.get('/phone/bridge/status')
+def phone_bridge_status():
+    return request('/github-bridge/status').json()
+
+@router.post('/phone/chat/new')
+def phone_chat_new():
+    """Request a new ChatGPT conversation; this does not prove navigation."""
+    return request('/chat/new','POST',{},timeout=12.0).json()
+
+@router.get('/phone/observation/timeline')
+def phone_observation_timeline():
+    return request('/observation/timeline').json()
+
+@router.get('/phone/observation/frames/{frame_id}')
+def phone_observation_get_frame(frame_id: str):
+    # phone_bridge validates the entire URL suffix; no path traversal allowed.
+    return Response(request('/observation/frame/'+frame_id).content,
+                    media_type='image/jpeg',headers={'Cache-Control':'no-store'})
+)
     max_cycles: int = Field(default=0,ge=0,le=1000000)
 
 class NewChatVerification(BaseModel):

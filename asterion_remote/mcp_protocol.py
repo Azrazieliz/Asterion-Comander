@@ -57,7 +57,7 @@ TOOLS = [
     spec('control_phone_cycle_status','Read checkpoint cycle status'),
     spec('control_phone_cycle_start','Start ACK-gated canonical checkpoint sequence',
          {'cycle_id':STR,'project':STR,'priority_tier':STR,'spec_reference':STR,'message':STR,
-          'conversation':STR,'max_cycles':INT},
+          'conversation':STR,'voice_locale':STR,'max_cycles':INT},
          ['cycle_id','project','priority_tier','spec_reference','message']),
     spec('control_phone_cycle_pause','Pause future checkpoint turns'),
     spec('control_phone_cycle_resume','Resume reviewed checkpoint sequence'),

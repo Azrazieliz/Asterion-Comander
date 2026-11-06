@@ -68,7 +68,8 @@ final class AndroidMcp {
     tools.put(tool("control_phone_cycle_status","Read durable ChatGPT checkpoint cycle state",null));
     tools.put(tool("control_phone_cycle_start","Start ACK-gated canonical checkpoint cycles",
       args("cycle_id","string","project","string","priority_tier","string",
-        "spec_reference","string","message","string","conversation","string","max_cycles","integer"),
+        "spec_reference","string","message","string","conversation","string",
+        "voice_locale","string","max_cycles","integer"),
       "cycle_id","project","priority_tier","spec_reference","message"));
     tools.put(tool("control_phone_cycle_pause","Pause checkpoint cycles",null));
     tools.put(tool("control_phone_cycle_resume","Resume verified checkpoint cycles",null));
