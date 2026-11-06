@@ -13,7 +13,8 @@ import httpx
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
-STATE = Path(os.getenv('ASTERION_CONTROL_STATE', str(Path.home() / '.asterion-control'))).expanduser() / 'phone-pairing.json'
+_DEFAULT_STATE=(Path(os.getenv('LOCALAPPDATA',str(Path.home()))) / 'AsterionControl' if os.name=='nt' else Path.home()/'.asterion-control')
+STATE = Path(os.getenv('ASTERION_CONTROL_STATE', str(_DEFAULT_STATE))).expanduser() / 'phone-pairing.json'
 _lock = threading.RLock()
 
 class PairPhone(BaseModel):
