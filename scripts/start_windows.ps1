@@ -19,6 +19,18 @@ if (-not (Test-Path $secret)) {
 $env:ASTERION_API_TOKEN=(Get-Content $secret -Raw).Trim()
 $env:ASTERION_CONTROL_STATE=$settings
 $env:ASTERION_ENABLE_DISCOVERY='1'
+# Asterion Control supervises its own authenticated ChatGPT fallback.
+# This starts the existing Control Git worker, not another remote-control app.
+# The bridge script has an owner-scoped mutex and refuses competing workers.
+if ($env:ASTERION_DISABLE_GIT_BRIDGE -ne '1') {
+  $bridge = Join-Path $PSScriptRoot 'start_git_bridge.ps1'
+  if (Test-Path $bridge) {
+    Start-Process -FilePath 'powershell.exe' -ArgumentList @(
+      '-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-WindowStyle','Hidden',
+      '-File',('"' + $bridge + '"')
+    ) -WorkingDirectory (Resolve-Path (Join-Path $PSScriptRoot '..')).Path -WindowStyle Hidden | Out-Null
+  }
+}
 if (-not $env:ASTERION_REMOTE_ROOT) {$env:ASTERION_REMOTE_ROOT=$HOME}
 $env:ASTERION_ALLOW_SHELL='1'
 $addresses=Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object {
