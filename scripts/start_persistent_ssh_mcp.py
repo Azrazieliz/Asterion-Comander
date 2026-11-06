@@ -173,13 +173,13 @@ def run() -> None:
     backoff = 3
     known = STATE / "mcp-stable-known-hosts"
     while FLAG.exists():
-        cmd = [ssh, "-v", "-n", "-T", "-i", str(SSH_KEY),
+        cmd = [ssh, "-v", "-n", "-tt", "-i", str(SSH_KEY),
                "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes",
                "-o", "StrictHostKeyChecking=yes",
                "-o", "UserKnownHostsFile=" + str(known),
                "-o", "ServerAliveInterval=25", "-o", "ServerAliveCountMax=3",
                "-o", "ExitOnForwardFailure=yes",
-               "-R", "80:127.0.0.1:8995", "stable@" + HOST, "output=json"]
+               "-R", "80:127.0.0.1:8995", "stable@" + HOST]
         emit("CONTROL_STABLE_SSH_CONNECTING")
         proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
