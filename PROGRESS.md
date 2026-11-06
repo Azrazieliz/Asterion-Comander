@@ -1,3 +1,13 @@
+# 2026-11-06 — Android speaker/microphone and cycle repair release v0.9.4
+
+- Native source changes for failed on-device tests: independent speaker self-test, explicit microphone permission failure reporting, cycle preflight/status improvements, and actual installed Android version display. Source tests and Android release Java compile passed at CI run [42268429711](https://github.com/Azrazieliz/Asterion-Comander/actions/runs/42268429711), commit `cc83f93b270c02e805ea86b2ace76051fec9c197`.
+- Built actual optimized, non-debuggable APK `Asterion-Control-v0.9.4-release.apk` using the original compatible Android certificate (SHA-256 certificate `9bc439712a0a460cc4703ebf254aaaf9bf3cc6e67b0ced6fc12162ed3ca3b9ad`) from the authorized Windows development machine; build succeeded in 41 seconds.
+- APK SHA-256: `a4c2cb0eb0a008271c223ec08912c957218c3a464ea12dd134395db93a728f6a`; size 256844 bytes. Development release commit `2fbe5ac`.
+- Published the verified owner-signed APK to the existing `main` update feed, commit `fc1b634`; `dist/latest-release.json` now announces code `904`, version `0.9.4` and the exact checksum. No ADB or forced installation.
+- **On-device outcome remains unverified** until owner-approved APK upgrade and actual speaker→microphone turn and two-turn cycle are observed. A successful build is not successful functional testing; ChatGPT's Asterion MCP tools remain unavailable to this chat.
+
+---
+
 # 2026-11-06 — Plugin and cellular integration continuation (v0.9.3)
 
 - **Asterion Control** private primary plugin updated in-place to **v1.6.8**, preserving its exact existing `asterion_control_direct` App SDK binding, and documenting native performance/voice/cycles tools and explicit @activation. No third plugin created.
