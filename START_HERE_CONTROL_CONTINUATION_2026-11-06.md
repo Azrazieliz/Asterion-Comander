@@ -20,6 +20,13 @@
 - Last automated tests: **124 passed, 0 failed** (7 nonblocking deprecation warnings). These are source/protocol tests, not a native ChatGPT plugin attachment test.
 - Latest implementation commits include `04749ed` OAuth persistence; `11dc3ce` owner code exchange; `3c1d002` MCP handshake; `419c1bb` fallback transport. See `PROGRESS.md` for follow-up commits and checks.
 
+## Continuity plugin created (2026-11-06)
+
+- Separate private **Asterion Continuity v1.0.0** plugin (not a second device controller): `plugins_6aee4f1ef6a88191adce01e0e1c972c8`, https://chatgpt.com/plugins/plugins_6aee4f1ef6a88191adce01e0e1c972c8 .
+- It bundles a self-contained Asterion Control handoff, the previously verified Windows-relayed authenticated phone-control commands, and a cross-project index for NoWorld, Adaptive Study, Core, Downloader and the Character Knowledge Database.
+- **No MCP server, App SDK dependency, or secret is bundled.** The existing `Asterion Control` v1.7.4 plugin ID and gateway are unchanged. Never confuse the context plugin with authenticated device-control tool access.
+- Plugin Creator verified its v1.0.0 published package. **Plugin activation in ChatGPT not proven**: new plugin skill was not listed in this existing chat; plugin-manager services have historically disagreed on install state. The GitHub handoff and this reference remain independent of plugin activation. If the continuity plugin does not surface in a new chat, load this GitHub document instead, without asking the owner to reconstruct past work.
+
 ## WORKING CONTROL PATH (already verified in the actual chat)
 When the native plugin has no tools, **the user can still control the phone** through the already authorized Remote Desktop Commander connection to the Windows worker, which sends MCP commands to the **same native Samsung execution gateway**. This is an explicit fallback, not the native plugin and not a substitute for fixing it.
 
