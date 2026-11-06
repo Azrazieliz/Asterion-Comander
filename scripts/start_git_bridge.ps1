@@ -28,9 +28,36 @@ try {
         Start-Sleep -Seconds 20
         continue
       }
-      $env:ASTERION_CONTROL_HOST = if ($env:ASTERION_CONTROL_HOST) {
-        $env:ASTERION_CONTROL_HOST
-      } else { 'http://192.168.1.133:8911' }
+      $hostFile=Join-Path $state 'agent-host.txt'
+      if(-not(Test-Path $hostFile)){
+        Add-Content -Path $log -Value 'WAIT Control agent endpoint unavailable'
+        Start-Sleep -Seconds 5
+        continue
+      }
+      $selected=(Get-Content $hostFile -Raw).Trim()
+      if($selected -notmatch '^http://[0-9.]+:8911      $worker = Start-Process -FilePath $python -ArgumentList '-m','asterion_remote.github_bridge_git' -WorkingDirectory $root -WindowStyle Hidden -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+      if (-not $worker) { throw 'Native Control transport failed to launch' }
+      Add-Content -Path $log -Value ("START " + (Get-Date -Format 'o') + " PID=" + $worker.Id)
+      $worker.WaitForExit()
+      Add-Content -Path $log -Value ("EXIT " + (Get-Date -Format 'o') + " CODE=" + $worker.ExitCode)
+    } catch {
+      Add-Content -Path $log -Value ("ERROR " + (Get-Date -Format 'o') + " " + $_.Exception.GetType().Name)
+    }
+    # Stop log accumulation if the process repeatedly fails over multiple days.
+    if ((Test-Path $log) -and (Get-Item $log).Length -gt 1048576) {
+      Get-Content $log -Tail 1000 | Set-Content $log -Encoding ASCII
+    }
+    Start-Sleep -Seconds $backoff
+    $backoff = [Math]::Min($backoff + 5, 45)
+  }
+} finally {
+  if ($owned) { $mutex.ReleaseMutex() }
+  $mutex.Dispose()
+}
+){
+        throw 'Control endpoint state is invalid'
+      }
+      $env:ASTERION_CONTROL_HOST=$selected
       $worker = Start-Process -FilePath $python -ArgumentList '-m','asterion_remote.github_bridge_git' -WorkingDirectory $root -WindowStyle Hidden -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
       if (-not $worker) { throw 'Native Control transport failed to launch' }
       Add-Content -Path $log -Value ("START " + (Get-Date -Format 'o') + " PID=" + $worker.Id)
