@@ -1,4 +1,4 @@
-# Asterion Control 0.8.8 — owner-signed non-destructive Android update package.
+# Asterion Control 0.8.8 - owner-signed non-destructive Android update package.
 # Use the SAME Windows debug keystore used for the installed 0.8.6 APK.
 # No ADB, uninstall, wipe, second package name, paid API or separate AI model.
 $ErrorActionPreference='Stop'
@@ -56,7 +56,7 @@ $source=Join-Path $root 'android\app\build\outputs\apk\debug\app-debug.apk'
 if(-not (Test-Path $source)){throw 'Gradle did not generate APK'}
 $new=Get-SignerDigest $source
 if($new -ne $original){
-  throw "CERTIFICATE_MISMATCH: old=$original new=$new — update cannot replace installed 0.8.6"
+  throw "CERTIFICATE_MISMATCH: old=$original new=$new - update cannot replace installed 0.8.6"
 }
 $target=Join-Path $root 'dist\Asterion-Control-v0.8.8-debug.apk'
 Copy-Item $source $target -Force
