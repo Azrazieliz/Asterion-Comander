@@ -44,6 +44,7 @@ final class AndroidMcp {
     tools.put(tool("control_phone_apps","Discover launchable installed Android apps",null));
     tools.put(tool("control_phone_app_launch","Request app launch when Control is foreground",
       args("package","string"),"package"));
+    tools.put(tool("control_phone_chat_new","Request New chat navigation; requires external visual confirmation",null));
     tools.put(tool("control_phone_continuation_status","Inspect owner-enabled checkpoint lifecycle",null));
     tools.put(tool("control_phone_continuation_queue","Queue canonical-project-referenced ChatGPT continuation",
       args("project","string","checkpoint_id","string","priority_tier","string",
@@ -94,6 +95,11 @@ final class AndroidMcp {
       }
       case "control_phone_apps":return textContent(AppCatalog.list(owner));
       case "control_phone_app_launch":return textContent(AppCatalog.requestLaunch(owner,args.getString("package")));
+      case "control_phone_chat_new":{
+        ControlAccessibilityService service=ControlAccessibilityService.active;
+        if(service==null)throw new IllegalStateException("Accessibility not enabled");
+        return textContent(service.requestNewChat());
+      }
       case "control_phone_continuation_status":{
         JSONObject state=ledger.status();state.remove("pending");return textContent(state);
       }
