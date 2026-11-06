@@ -71,6 +71,17 @@ def test_mcp_uses_native_authorized_routes(monkeypatch):
                         lambda:{"enabled":True,"target":"com.asterion.game"})
     assert mcp_protocol.invoke_tool("control_phone_observation_status",{})["enabled"]
 
+def test_new_chat_route_requires_auth_and_does_not_assert_verified_navigation(monkeypatch):
+    with TestClient(app) as client:
+        response=client.post("/api/v1/phone/chat/new",json={})
+        assert response.status_code == 401
+    monkeypatch.setattr(native_routes,"phone_chat_new",
+        lambda: {"requested":True,"verified_new_chat":False})
+    result=mcp_protocol.invoke_tool("control_phone_chat_new",{})
+    assert result["requested"]
+    assert result["verified_new_chat"] is False
+
+
 def test_generic_phone_app_catalog_launch_and_receipt_contract(monkeypatch):
     from asterion_remote import native_routes
     with pytest.raises(ValidationError):
