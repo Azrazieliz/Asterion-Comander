@@ -161,6 +161,60 @@ public final class ControlAccessibilityService extends AccessibilityService {
     }catch(Exception ignored){}
     return result;
   }
+  /**
+   * Observe an explicit, unique terminal receipt in the assistant's visible
+   * ChatGPT reply. A Send tap and a still-generating reply are NOT completion.
+   *
+   * The receipt token never occurs verbatim in the outgoing prompt (the model
+   * constructs it from its checkpoint ID), so observing it is independent
+   * evidence that an actual assistant reply reached the UI.
+   */
+  JSONObject observeCycleResponse(String checkpoint) {
+    final JSONObject[] result={new JSONObject()};
+    final CountDownLatch finished=new CountDownLatch(1);
+    main.post(()->{
+      try {
+        JSONObject evidence=new JSONObject().put("visible",false)
+          .put("generating",false).put("finished",false);
+        AccessibilityNodeInfo root=getRootInActiveWindow();
+        if(root==null||root.getPackageName()==null||
+           !"com.openai.chatgpt".contentEquals(root.getPackageName())) {
+          result[0]=evidence;return;
+        }
+        String accepted="ASTERION-CYCLE-ACK:"+checkpoint;
+        String complete="ASTERION-CYCLE-DONE:"+checkpoint;
+        boolean[] flags=new boolean[3]; // ack, done, generating
+        observeMarkers(root,accepted,complete,flags,0,new int[]{0});
+        evidence.put("visible",flags[0]||flags[1])
+          .put("generating",flags[2]).put("finished",flags[1]);
+        result[0]=evidence;
+      }catch(Exception ignored){}finally{finished.countDown();}
+    });
+    try{if(!finished.await(3,TimeUnit.SECONDS))return new JSONObject();}
+    catch(InterruptedException e){Thread.currentThread().interrupt();return new JSONObject();}
+    return result[0];
+  }
+  private void observeMarkers(AccessibilityNodeInfo node,String accepted,String complete,
+       boolean[] flags,int depth,int[] seen) {
+    if(node==null||depth>28||seen[0]++>=450||!node.isVisibleToUser())return;
+    CharSequence value=node.getText(),description=node.getContentDescription();
+    if(!node.isEditable()) {
+      for(CharSequence item:new CharSequence[]{value,description}) {
+        if(item==null)continue;
+        String text=item.toString();
+        if(text.length()>25000)continue;
+        if(text.contains(accepted))flags[0]=true;
+        if(text.contains(complete))flags[1]=true;
+        String label=text.trim().toLowerCase(java.util.Locale.ROOT);
+        if(label.equals("stop generating")||label.equals("stop responding")||
+           label.equals("stop response")||label.equals("arrêter la génération")||
+           label.equals("arrêter la réponse"))flags[2]=true;
+      }
+    }
+    for(int i=0;i<node.getChildCount()&&seen[0]<450;i++)
+      observeMarkers(node.getChild(i),accepted,complete,flags,depth+1,seen);
+  }
+
   JSONObject sendChatMessage(String message) {
     final CountDownLatch done=new CountDownLatch(1);
     final JSONObject[] output={chatOutcome(false,true,"UI dispatch did not finish")};
