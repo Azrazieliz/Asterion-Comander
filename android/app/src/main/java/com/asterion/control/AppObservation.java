@@ -6,6 +6,7 @@ import android.view.accessibility.AccessibilityEvent;
 import org.json.JSONObject;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Arrays;
@@ -21,6 +22,7 @@ import java.util.concurrent.Executors;
 final class AppObservation {
   private static final ExecutorService IO=Executors.newSingleThreadExecutor();
   private static final long MIN_FRAME_MS=5000L, MAX_FRAMES_BYTES=256L*1024*1024;
+  private static final long MAX_LOG_BYTES=8L*1024*1024;
   private static volatile String foreground="";
   private static volatile long lastEventMs=0L, lastFrameMs=0L;
   private static volatile String latestFrame="";
@@ -46,11 +48,13 @@ final class AppObservation {
     if(!enabled)packageName=target(c);
     prefs(c).edit().putBoolean("enabled",enabled).putString("target",packageName)
       .putLong("started_ms",System.currentTimeMillis()).apply();
-    latestFrame="";lastFrameMs=0;eventCount=0;frameCount=0;
+    latestFrame="";lastFrameMs=0;lastEventMs=0;eventCount=0;frameCount=0;
     return status(c);
   }
   private static File folder(Context c){
-    File base=new File(c.getExternalFilesDir(null),"observations");
+    File location=c.getExternalFilesDir(null);
+    if(location==null)location=c.getFilesDir();
+    File base=new File(location,"observations");
     File dir=new File(base,target(c).replace('.','_'));
     if(!dir.exists())dir.mkdirs();
     return dir;
@@ -68,6 +72,28 @@ final class AppObservation {
     try (FileOutputStream stream=new FileOutputStream(file,true)) {
       stream.write((item.toString()+"\n").getBytes(StandardCharsets.UTF_8));
     }catch(Exception ignored){}
+    // Long-running observation must not grow unbounded when the owner leaves
+    // game recording enabled for days. IO is serialized by a single executor.
+    if(file.length()>MAX_LOG_BYTES)rotateLog(file);
+  }
+  private static void rotateLog(File file){
+    File staged=new File(file.getParentFile(),file.getName()+".rotating");
+    try(RandomAccessFile input=new RandomAccessFile(file,"r")){
+      long skip=Math.max(0L,input.length()-MAX_LOG_BYTES/2L);
+      input.seek(skip);
+      if(skip>0L)input.readLine(); // skip the partial JSONL record
+      try(FileOutputStream output=new FileOutputStream(staged,false)){
+        byte[] buffer=new byte[8192];int count;
+        while((count=input.read(buffer))!=-1)output.write(buffer,0,count);
+        output.getFD().sync();
+      }
+      if(!staged.renameTo(file)){
+        staged.delete();
+        throw new IllegalStateException("Cannot rotate observation record");
+      }
+    }catch(Exception error){
+      staged.delete();
+    }
   }
   static void event(Context c,AccessibilityEvent e) {
     if(e==null)return;
@@ -98,8 +124,10 @@ final class AppObservation {
     if(now-CaptureService.latestAtMs>1200L || CaptureService.latestAtMs<=0L)return;
     byte[] frame=CaptureService.latest;
     if(frame==null||frame.length<2048)return;
-    lastFrameMs=now;
     byte[] bytes=frame.clone();
+    // Recheck before storing to reduce cross-app frame mix-ups at app switches.
+    if(!target(c).equals(access.currentPackage()))return;
+    lastFrameMs=now;
     IO.execute(()->{
       try {
         File dir=folder(c);
