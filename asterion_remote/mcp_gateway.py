@@ -35,6 +35,7 @@ NATIVE_PHONE_PREFIXES = (
     "control_phone_direct_status",
     "control_phone_bridge_status",
     "control_phone_health",
+    "control_phone_performance_",
     "control_phone_screen",
     "control_phone_ui",
     "control_phone_input",
