@@ -137,3 +137,8 @@ def phone_continuation_cancel():
 @router.get('/phone/bridge/status')
 def phone_bridge_status():
     return request('/github-bridge/status').json()
+
+@router.post('/phone/chat/new')
+def phone_chat_new():
+    """Request a new ChatGPT conversation; this does not prove navigation."""
+    return request('/chat/new','POST',{},timeout=12.0).json()
