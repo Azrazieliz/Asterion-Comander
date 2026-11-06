@@ -45,6 +45,7 @@ TOOLS = [
           'x':INT,'y':INT,'to_x':INT,'to_y':INT,'text':STR,'keys':{'type':'array','items':STR},'amount':INT, 'monitor':INT}, ['action']),
     spec('control_phone_status','Read paired native Android agent status; requires no ADB'),
     spec('control_phone_bridge_status','Legacy alias for direct Android TLS connection state'),
+    spec('control_phone_direct_status','Inspect phone-initiated authenticated WSS MCP readiness'),
     spec('control_phone_health','Read native Android CPU, memory, battery and thermal indicators'),
     spec('control_phone_screen','Capture a single current native Android MediaProjection frame'),
     spec('control_phone_ui','Read native Android accessibility UI hierarchy'),
