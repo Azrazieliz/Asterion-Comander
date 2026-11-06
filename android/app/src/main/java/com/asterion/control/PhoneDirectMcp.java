@@ -144,7 +144,8 @@ final class PhoneDirectMcp {
       out.write((payload.length>>8)&255);out.write(payload.length&255);
     }else{
       out.write(0x80|127);
-      for(int b=7;b>=0;b--)out.write((payload.length>>(b*8))&255);
+      long length=payload.length;
+      for(int b=7;b>=0;b--)out.write((int)(length>>>(b*8))&255);
     }
     byte[] mask=new byte[4];RANDOM.nextBytes(mask);out.write(mask);
     for(int i=0;i<payload.length;i++)out.write(payload[i]^mask[i%4]);
