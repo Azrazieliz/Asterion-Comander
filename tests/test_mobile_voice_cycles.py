@@ -66,6 +66,8 @@ def test_phone_source_uses_direct_tls_and_phone_owned_cycles():
     assert "setEndpointIdentificationAlgorithm(\"HTTPS\")" in direct
     assert "sec-websocket-accept" in direct.lower()
     assert "Authorization: Bearer " in direct
+    assert "String key=AgentService.token(owner)" in direct
+    assert 'getSharedPreferences("control"' not in direct
     assert "TRANSPORT_CELLULAR" in net and "TRANSPORT_VPN" in net
     assert "scheduleWithFixedDelay" in agent and "cycles.tick()" in agent
     assert "allowAutomaticDispatch" in cycles
