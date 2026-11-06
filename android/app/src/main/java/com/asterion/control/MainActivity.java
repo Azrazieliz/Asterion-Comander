@@ -40,6 +40,8 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.EditText;
+import android.widget.ArrayAdapter;
+import android.widget.ListView;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -58,6 +60,10 @@ import java.net.DatagramSocket;
 import java.net.DatagramPacket;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Comparator;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -826,19 +832,66 @@ public final class MainActivity extends Activity {
     catch(Exception e){toast("Android could not start the voice session");}
   }
   private void startAsterionObservation(){
-    EditText targetApp=input(getSharedPreferences("asterion_observation",MODE_PRIVATE)
-      .getString("target",""),false,"Installed application package name");
-    LinearLayout layout=v();pad(layout,18,12);
-    wide(layout,targetApp);
-    gap(layout,12);wide(layout,t("Only the selected foreground app is observed. Android permissions and protected surfaces remain respected.",12,DesignSystem.MUTED,false));
-    new AlertDialog.Builder(this).setTitle("Observe selected application")
-      .setView(layout).setPositiveButton("Start observation",(d,w)->{
-        try{
-          AppObservation.configure(this,true,targetApp.getText().toString().trim());
-          toast("Observation enabled for the selected app");
-          if(!CaptureService.active)beginCapture();
-        }catch(Exception e){toast("Enter the installed application package");}
-      }).setNegativeButton("Cancel",null).show();
+    // The user selects an installed app by its actual label, not by typing
+    // implementation package identifiers. Control remains a tool interface.
+    List<Map.Entry<String,String>> all=new ArrayList<>();
+    for(Map.Entry<String,String> item:AppCatalog.launchable(this).entrySet()){
+      String pkg=item.getKey();
+      if(pkg.equals("com.openai.chatgpt")||pkg.equals("com.asterion.control")
+        ||pkg.startsWith("com.android.")||pkg.startsWith("com.google.android.")
+        ||pkg.startsWith("com.samsung.android.")||pkg.startsWith("com.sec.android."))
+        continue;
+      all.add(item);
+    }
+    all.sort(Comparator.comparing(x->x.getValue().toLowerCase(Locale.ROOT)));
+    if(all.isEmpty()){toast("No eligible installed applications found");return;}
+    LinearLayout container=v();pad(container,12,10);
+    EditText search=input("",false,"Search installed applications");
+    wide(container,search);
+    gap(container,9);
+    ListView selection=new ListView(this);
+    selection.setFastScrollEnabled(true);
+    container.addView(selection,new LinearLayout.LayoutParams(-1,dp(370)));
+    List<Map.Entry<String,String>> visible=new ArrayList<>(all);
+    List<String> names=new ArrayList<>();
+    for(Map.Entry<String,String> item:visible)names.add(item.getValue());
+    ArrayAdapter<String> adapter=new ArrayAdapter<>(this,
+      android.R.layout.simple_list_item_1,names);
+    selection.setAdapter(adapter);
+    search.addTextChangedListener(new android.text.TextWatcher(){
+      @Override public void beforeTextChanged(CharSequence s,int start,int count,int after){}
+      @Override public void onTextChanged(CharSequence s,int start,int before,int count){
+        String term=s.toString().trim().toLowerCase(Locale.ROOT);
+        visible.clear();
+        adapter.clear();
+        for(Map.Entry<String,String> item:all){
+          if(term.isEmpty()||item.getValue().toLowerCase(Locale.ROOT).contains(term)){
+            visible.add(item);
+            adapter.add(item.getValue());
+          }
+        }
+        adapter.notifyDataSetChanged();
+      }
+      @Override public void afterTextChanged(android.text.Editable editable){}
+    });
+    AlertDialog browse=new AlertDialog.Builder(this)
+      .setTitle("Select application to observe").setView(container)
+      .setNegativeButton("Cancel",null).create();
+    selection.setOnItemClickListener((parent,view,position,id)->{
+      if(position<0||position>=visible.size())return;
+      Map.Entry<String,String> chosen=visible.get(position);
+      browse.dismiss();
+      new AlertDialog.Builder(this).setTitle("Observe "+chosen.getValue())
+        .setMessage("Record this application only while it is foreground. Android will request screen capture approval if needed. Protected screens remain protected.")
+        .setPositiveButton("Start",(d,w)->{
+          try{
+            AppObservation.configure(this,true,chosen.getKey());
+            toast("Observation enabled for "+chosen.getValue());
+            if(!CaptureService.active)beginCapture();
+          }catch(Exception e){toast("Could not enable selected app observation");}
+        }).setNegativeButton("Cancel",null).show();
+    });
+    browse.show();
   }
   private void stopAsterionObservation(){
     try{AppObservation.configure(this,false,"");toast("Observation stopped");}
