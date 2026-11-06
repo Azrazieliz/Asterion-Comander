@@ -61,8 +61,10 @@ final class PhoneDirectMcp {
   private static void loop(AgentService owner){
     try{
       while(!stop){
-        SharedPreferences p=owner.getSharedPreferences("control",Context.MODE_PRIVATE);
-        String key=p.getString("token","");
+        // Same Android-owned bearer credential registered with the Windows
+        // Control gateway through /api/v1/phone/register. Do not require the
+        // unrelated PC pairing preference for phone-first cellular access.
+        String key=AgentService.token(owner);
         if(key==null||key.length()<32){
           phase="unpaired";sleep(7000);continue;
         }
