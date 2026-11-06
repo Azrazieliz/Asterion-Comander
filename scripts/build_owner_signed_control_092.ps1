@@ -66,7 +66,7 @@ $log=Join-Path $root 'ANDROID_BUILD_v092.log'
 Push-Location (Join-Path $root 'android')
 try{
   $ErrorActionPreference='Continue'
-  & $gradle[0].FullName :app:assembleRelease --offline --no-daemon --console=plain *> $log
+  & $gradle[0].FullName :app:assembleRelease --no-daemon --console=plain *> $log
   $result=$LASTEXITCODE
   $ErrorActionPreference='Stop'
 }finally{Pop-Location}
