@@ -36,9 +36,8 @@ public final class ControlAccessibilityService extends AccessibilityService {
       try {
         ContinuationLedger ledger = ContinuationLedger.get(getApplicationContext());
         if ("queued".equals(ledger.recover().optString("state"))
-            && ledger.status().optBoolean("enabled")
-            && ContinuationCycle.get(getApplicationContext()).allowAutomaticDispatch(
-                ledger.status().optString("last_checkpoint",""))) {
+            && ledger.status().optBoolean("enabled")) {
+          // Send only the operator-queued checkpoint; never generate the next turn.
           // Delay: allow ChatGPT's chat composer and navigation to settle.
           Thread.sleep(1600);
           ledger.dispatch();

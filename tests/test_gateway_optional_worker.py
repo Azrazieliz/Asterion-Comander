@@ -22,8 +22,9 @@ def test_invalid_windows_routes_rejected(url):
         mcp_gateway._validate_windows_route(url)
 
 
-def test_optional_windows_agent_not_needed_for_gateway(monkeypatch):
+def test_optional_windows_agent_not_needed_for_gateway(monkeypatch,tmp_path):
     monkeypatch.setattr(mcp_gateway,"WINDOWS_UPSTREAM","")
+    monkeypatch.setattr(mcp_gateway,"ROOT",tmp_path)
     monkeypatch.setattr(github_bridge_git,"agent_host",
                         lambda: (_ for _ in ()).throw(RuntimeError("PC offline")))
     assert mcp_gateway._windows_route() is None

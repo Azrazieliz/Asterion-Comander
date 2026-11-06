@@ -63,15 +63,6 @@ TOOLS = [
     spec('control_phone_voice_ack','Acknowledge spoken answer and erase local transcript',
          {'question_id':STR},['question_id']),
     spec('control_phone_cycle_status','Read checkpoint cycle status'),
-    spec('control_phone_cycle_start','Start ACK-gated canonical checkpoint sequence',
-         {'cycle_id':STR,'project':STR,'priority_tier':STR,'spec_reference':STR,'message':STR,
-          'conversation':STR,'voice_locale':STR,'max_cycles':INT},
-         ['cycle_id','project','priority_tier','spec_reference','message']),
-    spec('control_phone_cycle_pause','Pause future checkpoint turns'),
-    spec('control_phone_cycle_resume','Resume reviewed checkpoint sequence'),
-    spec('control_phone_cycle_stop','Stop future checkpoint turns'),
-    spec('control_phone_cycle_confirm_new_chat','Confirm operator-observed ChatGPT navigation',
-         {'verification':STR},['verification']),
     spec('control_phone_voice_status','Read permissioned Android foreground voice dialogue state and transcript'),
     spec('control_phone_voice_question','Speak a bounded question on Samsung, then listen once using on-device recognition',
          {'text':STR,'locale':STR},['text']),
@@ -189,18 +180,11 @@ def invoke_tool(name: str, args: dict):
     if name == 'control_phone_voice_ack':
         from .native_routes import phone_voice_ack, VoiceAcknowledgment
         return phone_voice_ack(VoiceAcknowledgment(**args))
+    if name == 'control_phone_cycle_status':
+        from .native_routes import phone_cycle_status
+        return phone_cycle_status()
     if name.startswith('control_phone_cycle_'):
-        from . import native_routes as nr
-        operations={
-            'control_phone_cycle_status': lambda: nr.phone_cycle_status(),
-            'control_phone_cycle_start': lambda: nr.phone_cycle_start(nr.CycleRequest(**args)),
-            'control_phone_cycle_pause': lambda: nr.phone_cycle_pause(),
-            'control_phone_cycle_resume': lambda: nr.phone_cycle_resume(),
-            'control_phone_cycle_stop': lambda: nr.phone_cycle_stop(),
-            'control_phone_cycle_confirm_new_chat': lambda: nr.phone_cycle_confirm_new_chat(nr.NewChatVerification(**args)),
-        }
-        if name in operations:
-            return operations[name]()
+        raise ValueError('Android-owned cycles retired; ChatGPT must queue, dispatch and acknowledge each checkpoint')
     if name == 'control_phone_observation_status':
         from .native_routes import phone_observation_status
         return phone_observation_status()

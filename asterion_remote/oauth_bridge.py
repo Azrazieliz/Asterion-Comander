@@ -45,6 +45,18 @@ def _db():
     db.execute("CREATE TABLE IF NOT EXISTS clients (client_id TEXT PRIMARY KEY, redirects TEXT NOT NULL, created INTEGER NOT NULL)")
     db.execute("CREATE TABLE IF NOT EXISTS codes (digest TEXT PRIMARY KEY, client_id TEXT, redirect TEXT, challenge TEXT, resource TEXT, expires INTEGER)")
     db.execute("CREATE TABLE IF NOT EXISTS tokens (digest TEXT PRIMARY KEY, kind TEXT, client_id TEXT, resource TEXT, expires INTEGER)")
+    # Older releases called these columns hash/redirect_uri/redirect_uris.
+    # SQLite CREATE IF NOT EXISTS does not change existing tables. Migrate
+    # column names without dropping any client, authorization code or token.
+    for table, legacy, canonical in (
+        ("clients","redirect_uris","redirects"),
+        ("codes","hash","digest"),
+        ("codes","redirect_uri","redirect"),
+        ("tokens","hash","digest"),
+    ):
+        columns={row[1] for row in db.execute("PRAGMA table_info("+table+")")}
+        if legacy in columns and canonical not in columns:
+            db.execute("ALTER TABLE "+table+" RENAME COLUMN "+legacy+" TO "+canonical)
     db.commit()
     return db
 

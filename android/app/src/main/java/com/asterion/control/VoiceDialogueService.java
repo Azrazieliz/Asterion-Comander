@@ -46,6 +46,7 @@ public final class VoiceDialogueService extends Service {
   private volatile boolean speakerPlaybackStarted=false;
   private volatile boolean speakerPlaybackCompleted=false;
   private volatile boolean pendingLocalTest=false;
+  private volatile String recognizerBackend="none";
   private void localVoiceTest(){
     if(active!=this)return;
     try{
@@ -53,7 +54,8 @@ public final class VoiceDialogueService extends Service {
       String id="selftest-"+System.currentTimeMillis();
       // Even without an installed offline speech pack, TEST must exercise the
       // speaker and then report the *specific* missing microphone prerequisite.
-      if(Build.VERSION.SDK_INT>=31 && SpeechRecognizer.isOnDeviceRecognitionAvailable(this)){
+      if((Build.VERSION.SDK_INT>=31 && SpeechRecognizer.isOnDeviceRecognitionAvailable(this))
+          || SpeechRecognizer.isRecognitionAvailable(this)){
         ask(prompt,"en-US",id);
       }else{
         question=prompt;questionId=id;transcript="";consumed=true;
@@ -147,8 +149,9 @@ public final class VoiceDialogueService extends Service {
       throw new IllegalStateException("Another voice exchange is active");
     if("answered".equals(phase)&&!consumed)
       throw new IllegalStateException("Previous voice answer has not been acknowledged");
-    if(Build.VERSION.SDK_INT<31||!SpeechRecognizer.isOnDeviceRecognitionAvailable(this))
-      throw new IllegalStateException("Android on-device speech recognition is unavailable");
+    if(!(Build.VERSION.SDK_INT>=31 && SpeechRecognizer.isOnDeviceRecognitionAvailable(this))
+        && !SpeechRecognizer.isRecognitionAvailable(this))
+      throw new IllegalStateException("No Android speech recognition engine is available");
     if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)
       throw new IllegalStateException("Android microphone consent is missing");
     question=text;transcript="";consumed=false;
@@ -204,54 +207,91 @@ public final class VoiceDialogueService extends Service {
   }
   private void startListening(String locale,String id){
     if(active!=this||!id.equals(questionId))return;
-    if(Build.VERSION.SDK_INT<31||!SpeechRecognizer.isOnDeviceRecognitionAvailable(this)){
-      clearDeadline();
-      microphoneActive=false;
-      state("failed","Speaker playback completed; Android offline speech recognition is not installed or enabled");
+    boolean offline=Build.VERSION.SDK_INT>=31
+      && SpeechRecognizer.isOnDeviceRecognitionAvailable(this);
+    boolean standard=SpeechRecognizer.isRecognitionAvailable(this);
+    if(!offline&&!standard){
+      clearDeadline();microphoneActive=false;
+      state("failed","Speaker completed; no Android speech recognition service available");
       return;
     }
-    try {
-      if(listener!=null){listener.destroy();listener=null;}
-      listener=SpeechRecognizer.createOnDeviceSpeechRecognizer(this);
-      scheduleDeadline(id,ANSWER_TIMEOUT_MS);
-      listener.setRecognitionListener(new RecognitionListener(){
-        @Override public void onReadyForSpeech(Bundle extras){
+    try{beginRecognition(locale,id,offline);}
+    catch(Exception e){
+      if(offline&&standard){
+        try{beginRecognition(locale,id,false);return;}
+        catch(Exception fallback){e=fallback;}
+      }
+      clearDeadline();microphoneActive=false;
+      state("failed","Android speech recognition could not start: "+
+        e.getClass().getSimpleName());
+    }
+  }
+  /** The Android system recognizer is a one-time fallback when the offline
+   * language model is missing (error 13). It may use Android's network speech
+   * service; the app never uploads audio to Asterion servers or embeds AI.
+   */
+  private void beginRecognition(String locale,String id,boolean offline)throws Exception {
+    if(active!=this||!id.equals(questionId))return;
+    if(listener!=null){listener.cancel();listener.destroy();listener=null;}
+    recognizerBackend=offline?"on_device":"android_system";
+    listener=offline?SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
+      :SpeechRecognizer.createSpeechRecognizer(this);
+    scheduleDeadline(id,ANSWER_TIMEOUT_MS);
+    final String backend=recognizerBackend;
+    listener.setRecognitionListener(new RecognitionListener(){
+      @Override public void onReadyForSpeech(Bundle extras){
+        if(id.equals(questionId)&&backend.equals(recognizerBackend)){
           microphoneActive=true;state("listening","");
         }
-        @Override public void onBeginningOfSpeech(){}
-        @Override public void onRmsChanged(float rmsdB){}
-        @Override public void onBufferReceived(byte[] data){}
-        @Override public void onEndOfSpeech(){state("processing","");}
-        @Override public void onError(int code){
-          if(!id.equals(questionId))return;
-          microphoneActive=false;clearDeadline();
-          state("failed",speechError(code));
-          ui.post(()->{if(listener!=null){listener.destroy();listener=null;}});
+      }
+      @Override public void onBeginningOfSpeech(){}
+      @Override public void onRmsChanged(float rmsdB){}
+      @Override public void onBufferReceived(byte[] data){}
+      @Override public void onEndOfSpeech(){
+        if(id.equals(questionId)&&backend.equals(recognizerBackend))
+          state("processing","");
+      }
+      @Override public void onError(int code){
+        if(!id.equals(questionId)||!backend.equals(recognizerBackend))return;
+        microphoneActive=false;
+        if(offline && (code==SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE
+            || code==SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED)
+            && SpeechRecognizer.isRecognitionAvailable(VoiceDialogueService.this)){
+          state("fallback","Offline recognition language missing; using Android system speech");
+          ui.post(()->{
+            if(active!=VoiceDialogueService.this||!id.equals(questionId))return;
+            try{beginRecognition(locale,id,false);}
+            catch(Exception failure){
+              clearDeadline();
+              state("failed","Android system speech fallback unavailable: "+
+                failure.getClass().getSimpleName());
+            }
+          });
+          return;
         }
-        @Override public void onResults(Bundle results){
-          if(!id.equals(questionId))return;
-          microphoneActive=false;clearDeadline();
-          ArrayList<String> phrases=results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-          transcript=phrases==null||phrases.isEmpty()?"":phrases.get(0);
-          state(transcript.isEmpty()?"failed":"answered",
-                transcript.isEmpty()?"No recognized speech":"");
-          ui.post(()->{if(listener!=null){listener.destroy();listener=null;}});
-        }
-        @Override public void onPartialResults(Bundle results){}
-        @Override public void onEvent(int type,Bundle params){}
-      });
-      Intent request=new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-      request.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-          RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-      request.putExtra(RecognizerIntent.EXTRA_LANGUAGE,locale);
-      request.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS,1);
-      state("listening","");
-      listener.startListening(request);
-    } catch(Exception e){
-      clearDeadline();microphoneActive=false;
-      if(listener!=null){listener.destroy();listener=null;}
-      state("failed",e.getClass().getSimpleName());
-    }
+        clearDeadline();state("failed",speechError(code));
+        ui.post(()->{if(listener!=null){listener.destroy();listener=null;}});
+      }
+      @Override public void onResults(Bundle results){
+        if(!id.equals(questionId)||!backend.equals(recognizerBackend))return;
+        microphoneActive=false;clearDeadline();
+        ArrayList<String> phrases=results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+        transcript=phrases==null||phrases.isEmpty()?"":phrases.get(0);
+        state(transcript.isEmpty()?"failed":"answered",
+          transcript.isEmpty()?"No recognized speech":"");
+        ui.post(()->{if(listener!=null){listener.destroy();listener=null;}});
+      }
+      @Override public void onPartialResults(Bundle results){}
+      @Override public void onEvent(int type,Bundle params){}
+    });
+    Intent request=new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+    request.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+        RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+    request.putExtra(RecognizerIntent.EXTRA_LANGUAGE,locale);
+    request.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS,1);
+    if(offline)request.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE,true);
+    state("listening","");
+    listener.startListening(request);
   }
   private static String speechError(int code){
     switch(code){
@@ -260,7 +300,7 @@ public final class VoiceDialogueService extends Service {
       case SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED:
         return "Offline recognition does not support the requested language";
       case SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE:
-        return "Offline speech language pack is not installed";
+        return "Android speech language is unavailable; install or enable its language model";
       case SpeechRecognizer.ERROR_RECOGNIZER_BUSY:
         return "Android speech recognizer is busy";
       case SpeechRecognizer.ERROR_NO_MATCH:
@@ -283,7 +323,9 @@ public final class VoiceDialogueService extends Service {
       .put("answer_pending_ack","answered".equals(phase)&&!consumed)
       .put("error",error).put("updated_at_ms",updatedAt)
       .put("on_device_recognition",Build.VERSION.SDK_INT>=31
-         && SpeechRecognizer.isOnDeviceRecognitionAvailable(this));
+         && SpeechRecognizer.isOnDeviceRecognitionAvailable(this))
+       .put("android_system_recognition",SpeechRecognizer.isRecognitionAvailable(this))
+       .put("recognizer_backend",recognizerBackend);
   }
   @Override public void onDestroy(){
     active=null;

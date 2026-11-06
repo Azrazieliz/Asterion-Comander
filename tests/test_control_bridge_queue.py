@@ -35,7 +35,7 @@ def test_private_active_queue_deduplicates_legacy_name(tmp_path, monkeypatch):
     (commands / "active").mkdir(parents=True)
     (commands / "active" / "same-id.json").write_text("{}", encoding="utf8")
     (commands / "same-id.json").write_text("{}", encoding="utf8")
-    assert [str(p.relative_to(commands)) for p in bridge.entries()] == [
+    assert [p.relative_to(commands).as_posix() for p in bridge.entries()] == [
         "active/same-id.json"
     ]
     (tmp_path / "results" / "same-id.json").write_text(

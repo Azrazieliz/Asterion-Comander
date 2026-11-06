@@ -39,7 +39,8 @@ def test_mcp_discovery_works_without_phone_and_pc(monkeypatch):
         assert listed.status_code == 200
         names = {x["name"] for x in listed.json()["result"]["tools"]}
         assert "control_phone_voice_ack" in names
-        assert "control_phone_cycle_start" in names
+        assert "control_phone_continuation_queue" in names
+        assert "control_phone_cycle_start" not in names
         assert "control_phone_cloud_receipt" not in names
 
 
@@ -157,7 +158,8 @@ def test_canonical_tools_survive_stale_subordinate_agent(monkeypatch):
         tools = {t["name"] for t in reply.json()["result"]["tools"]}
         assert "control_phone_performance_optimize" in tools
         assert "control_pc_performance_mode" in tools
-        assert "control_phone_cycle_start" in tools
+        assert "control_phone_continuation_dispatch" in tools
+        assert "control_phone_cycle_start" not in tools
         assert "remote_system" in tools
 
 

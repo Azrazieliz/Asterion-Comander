@@ -17,17 +17,18 @@ def test_owner_can_run_local_voice_test_without_remote_plugin():
     assert 'SpeechRecognizer.createOnDeviceSpeechRecognizer' in voice
     assert '"answered".equals(phase)' in activity
 
-def test_two_turn_cycles_are_locally_started_and_bounded():
+def test_chatgpt_is_the_operator_and_android_does_not_start_local_cycles():
     activity=java("MainActivity.java")
     agent=java("AgentService.java")
-    cycle=java("ContinuationCycle.java")
-    assert '"Run two-turn phone cycle test"' in activity
-    assert 'this::startPhoneCycleTest' in activity
-    assert '.put("max_cycles",2)' in activity
-    assert 'ContinuationCycle.get(this).tick()' in activity
-    assert '},1,2,java.util.concurrent.TimeUnit.SECONDS);' in agent
-    assert 'ASTERION-CYCLE-ACK:' in cycle
-    assert 'ASTERION-CYCLE-DONE:' in cycle
+    native=java("AndroidMcp.java")
+    assert '"ChatGPT-operated checkpoints"' in activity
+    assert '"Run two-turn phone cycle test"' not in activity
+    assert 'this::startPhoneCycleTest' not in activity
+    assert 'cycles.tick()' not in agent
+    assert 'cycleWorker' not in agent
+    assert 'control_phone_continuation_queue' in native
+    assert 'control_phone_continuation_dispatch' in native
+    assert 'control_phone_continuation_ack' in native
 
 def test_mobile_data_is_allowed_but_requires_real_authorization():
     bridge=java("PhoneGitBridge.java")
@@ -40,10 +41,10 @@ def test_mobile_data_is_allowed_but_requires_real_authorization():
 def test_release_is_a_real_optimized_owner_signed_apk():
     gradle=(ROOT/"android/app/build.gradle").read_text()
     workflow=(ROOT/".github/workflows/android-continuation-branch.yml").read_text()
-    assert "versionCode 904" in gradle
-    assert "versionName '0.9.4'" in gradle
+    assert "versionCode 905" in gradle
+    assert "versionName '0.9.5'" in gradle
     assert "debuggable false" in gradle
     assert "minifyEnabled true" in gradle
     assert "signingConfig signingConfigs.ownerRelease" in gradle
     assert ":app:assembleRelease" in workflow
-    assert "Asterion-Control-v0.9.4-release.apk" in workflow
+    assert "Asterion-Control-v0.9.5-release.apk" in workflow

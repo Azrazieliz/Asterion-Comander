@@ -2,6 +2,8 @@ package com.asterion.control;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.net.ConnectivityManager;
+import android.net.Network;
 import android.util.Base64;
 import android.util.Log;
 import org.json.JSONObject;
@@ -9,6 +11,10 @@ import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.SocketTimeoutException;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.Socket;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
@@ -31,19 +37,29 @@ final class PhoneDirectMcp {
   private static final AtomicBoolean STARTED=new AtomicBoolean(false);
   private static volatile boolean stop=false,connected=false;
   private static volatile SSLSocket active;
-  private static volatile String phase="stopped",lastError="";
+  private static volatile String phase="stopped",lastError="",lastStage="idle",lastErrorDetail="";
+  private static volatile Network socketNetwork;
+  private static volatile Context appContext;
   private static volatile long lastSuccess=0;
   private static Thread worker;
   private PhoneDirectMcp(){}
 
   static synchronized void start(AgentService owner){
     if(!STARTED.compareAndSet(false,true))return;
-    stop=false;
+    stop=false;appContext=owner.getApplicationContext();
     worker=new Thread(()->loop(owner),"asterion-direct-mcp");
     worker.setDaemon(true);
     worker.start();
   }
   static void networkChanged(){
+    // Ignore repeated capability callbacks for the currently bound network.
+    Context context=appContext;
+    if(context!=null){
+      ConnectivityManager manager=(ConnectivityManager)context.getSystemService(
+        Context.CONNECTIVITY_SERVICE);
+      Network current=manager==null?null:manager.getActiveNetwork();
+      if(current!=null&&current.equals(socketNetwork))return;
+    }
     SSLSocket sock=active;
     if(sock!=null)try{sock.close();}catch(Exception ignored){}
   }
@@ -56,6 +72,7 @@ final class PhoneDirectMcp {
     return new JSONObject().put("transport","direct_wss")
       .put("connected",connected).put("phase",phase)
       .put("last_success_ms",lastSuccess).put("last_error",lastError)
+      .put("last_stage",lastStage).put("last_error_detail",lastErrorDetail)
       .put("requires_github",false).put("phone_outbound_tls",true);
   }
   private static void loop(AgentService owner){
@@ -71,11 +88,13 @@ final class PhoneDirectMcp {
         try{
           phase="connecting";
           session(owner,key);
-          lastError=""; 
+          lastError="";lastErrorDetail="";
         }catch(Exception e){
           if(!stop){
             String name=e.getClass().getSimpleName();
             lastError=name;
+            String message=e.getMessage()==null?"":e.getMessage();
+            lastErrorDetail=message.replaceAll("[\\r\\n\\t]"," ").substring(0,Math.min(160,message.length()));
             phase="reconnecting";
             Log.w("AsterionDirectMcp","Direct cellular relay disconnected: "+name);
           }
@@ -177,17 +196,45 @@ final class PhoneDirectMcp {
     if(data.length!=(int)len)throw new java.io.EOFException("Truncated WebSocket payload");
     return new Frame(opcode,data);
   }
+  private static SSLSocket openBoundTlsSocket(Context owner)throws Exception{
+    ConnectivityManager manager=(ConnectivityManager)owner.getSystemService(
+      Context.CONNECTIVITY_SERVICE);
+    Network network=manager==null?null:manager.getActiveNetwork();
+    lastStage="dns";
+    InetAddress[] addresses=network!=null?network.getAllByName(HOST)
+      :InetAddress.getAllByName(HOST);
+    IOException failure=null;
+    for(InetAddress address:addresses){
+      Socket plain=null;
+      try{
+        lastStage="tcp";
+        plain=network!=null?network.getSocketFactory().createSocket():new Socket();
+        plain.setTcpNoDelay(true);plain.setKeepAlive(true);
+        plain.connect(new InetSocketAddress(address,443),10000);
+        lastStage="tls";
+        SSLSocket tls=(SSLSocket)((SSLSocketFactory)SSLSocketFactory.getDefault())
+          .createSocket(plain,HOST,443,true);
+        socketNetwork=network;
+        return tls;
+      }catch(IOException e){
+        failure=e;
+        if(plain!=null)try{plain.close();}catch(Exception ignored){}
+      }
+    }
+    if(failure!=null)throw failure;
+    throw new IOException("No route to the authenticated Control endpoint");
+  }
   private static void session(AgentService owner,String pairedToken)throws Exception{
-    SSLSocket socket=(SSLSocket)SSLSocketFactory.getDefault().createSocket(HOST,443);
+    SSLSocket socket=openBoundTlsSocket(owner);
     active=socket;
     try(SSLSocket sock=socket){
       SSLParameters options=sock.getSSLParameters();
       options.setEndpointIdentificationAlgorithm("HTTPS");
       sock.setSSLParameters(options);
-      sock.setSoTimeout(40000);
-      sock.startHandshake();
-      handshake(sock,pairedToken);
-      connected=true;phase="connected";lastError="";lastSuccess=System.currentTimeMillis();
+      sock.setSoTimeout(20000);
+      lastStage="tls_handshake";sock.startHandshake();
+      lastStage="wss_upgrade";handshake(sock,pairedToken);
+      connected=true;phase="connected";lastStage="connected";lastError="";lastErrorDetail="";lastSuccess=System.currentTimeMillis();
       InputStream in=sock.getInputStream();OutputStream out=sock.getOutputStream();
       while(!stop){
         Frame frame;

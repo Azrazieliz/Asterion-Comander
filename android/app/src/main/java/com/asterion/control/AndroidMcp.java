@@ -71,16 +71,6 @@ final class AndroidMcp {
     tools.put(tool("control_phone_voice_ack","Acknowledge completed speech answer and erase transcript",
       args("question_id","string"),"question_id"));
     tools.put(tool("control_phone_cycle_status","Read durable ChatGPT checkpoint cycle state",null));
-    tools.put(tool("control_phone_cycle_start","Start ACK-gated canonical checkpoint cycles",
-      args("cycle_id","string","project","string","priority_tier","string",
-        "spec_reference","string","message","string","conversation","string",
-        "voice_locale","string","max_cycles","integer"),
-      "cycle_id","project","priority_tier","spec_reference","message"));
-    tools.put(tool("control_phone_cycle_pause","Pause checkpoint cycles",null));
-    tools.put(tool("control_phone_cycle_resume","Resume verified checkpoint cycles",null));
-    tools.put(tool("control_phone_cycle_stop","Stop future checkpoint cycles",null));
-    tools.put(tool("control_phone_cycle_confirm_new_chat","Operator confirms a new ChatGPT conversation was actually observed",
-      args("verification","string"),"verification"));
     tools.put(tool("control_phone_network_status","Inspect mobile-data, VPN and authenticated relay readiness",null));
     return new JSONObject().put("tools",tools);
   }
@@ -143,13 +133,16 @@ final class AndroidMcp {
       case "control_phone_observation_get_frame":
         return imageContent(AppObservation.recordedFrame(owner,args.getString("frame_id")));
       case "control_phone_network_status":return textContent(TransportConnectivity.report(owner));
-      case "control_phone_cycle_status":return textContent(ContinuationCycle.get(owner).status());
-      case "control_phone_cycle_start":return textContent(ContinuationCycle.get(owner).start(args));
-      case "control_phone_cycle_pause":return textContent(ContinuationCycle.get(owner).pause());
-      case "control_phone_cycle_resume":return textContent(ContinuationCycle.get(owner).resume());
-      case "control_phone_cycle_stop":return textContent(ContinuationCycle.get(owner).stop());
-      case "control_phone_cycle_confirm_new_chat":return textContent(
-        ContinuationCycle.get(owner).confirmNewChat(args.getString("verification")));
+      case "control_phone_cycle_status":return textContent(new JSONObject()
+        .put("controller","chatgpt").put("android_autonomous_cycle",false)
+        .put("checkpoint",ledger.status()));
+      case "control_phone_cycle_start":
+      case "control_phone_cycle_pause":
+      case "control_phone_cycle_resume":
+      case "control_phone_cycle_stop":
+      case "control_phone_cycle_confirm_new_chat":
+        throw new IllegalStateException("Android-owned cycles are disabled. "+
+          "Use ChatGPT-operated control_phone_continuation_queue, dispatch, status and ack.");
       case "control_phone_voice_status":{
         VoiceDialogueService voice=VoiceDialogueService.active;
         return textContent(voice==null?new JSONObject().put("enabled",false)

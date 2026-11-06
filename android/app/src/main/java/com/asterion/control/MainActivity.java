@@ -335,21 +335,15 @@ public final class MainActivity extends Activity {
     wide(devicesBody,handoff);
 
     gap(devicesBody,12);LinearLayout cycles=card();
-    rowTitle(cycles,"Continuation cycles",
-      "Phone-owned checkpoints; ChatGPT verifies every actual reply",
+    rowTitle(cycles,"ChatGPT-operated checkpoints",
+      "ChatGPT decides every step; Control transports commands and receipts",
       icon("refresh",DesignSystem.TEAL,22));
     gap(cycles,12);
-    button(cycles,"Run two-turn phone cycle test","refresh",true,
-      this::startPhoneCycleTest);
+    button(cycles,"Inspect operator checkpoint","activity",true,this::showCycleStatus);
     gap(cycles,8);
-    button(cycles,"Inspect cycle status","activity",false,this::showCycleStatus);
-    gap(cycles,8);button(cycles,"Pause cycle","power",false,()->changeCycle("pause"));
-    gap(cycles,8);button(cycles,"Resume reviewed cycle","check",false,()->changeCycle("resume"));
-    gap(cycles,8);button(cycles,"Stop cycle","power",false,()->changeCycle("stop"));
-    gap(cycles,8);
-    wide(cycles,t("ChatGPT starts cycles through authenticated Control commands. "
-      +"Each cycle waits for a verified response acknowledgment; it never silently "
-      +"replays a submitted message or overwrites your draft.",
+    wide(cycles,t("Control does not create ChatGPT turns or run independent cycles. "
+      +"The connected ChatGPT operator queues one authorized checkpoint, "
+      +"receives the result and explicitly decides the next operation.",
       11,DesignSystem.MUTED,false));
     wide(devicesBody,cycles);
 
@@ -907,87 +901,20 @@ public final class MainActivity extends Activity {
         .setMessage(report).setPositiveButton("Close",null).show();
     }catch(Exception e){toast("Direct connection status unavailable");}
   }
-  private void startPhoneCycleTest(){
-    try {
-      // A selftest must not silently queue something the phone cannot send.
-      // These checks do not alter the user's ChatGPT draft or existing ledger.
-      if(ControlAccessibilityService.active==null){
-        new AlertDialog.Builder(this)
-          .setTitle("Continuation cannot send")
-          .setMessage("Asterion Control Accessibility is not enabled. The two-turn test needs it to read the ChatGPT composer and detect actual reply markers. Enable Asterion Control in Android Accessibility settings, then retry.")
-          .setPositiveButton("Accessibility settings",(dialog,which)->{
-            startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
-          })
-          .setNegativeButton("Cancel",null).show();
-        return;
-      }
-      Intent chat=getPackageManager().getLaunchIntentForPackage("com.openai.chatgpt");
-      if(chat==null){
-        new AlertDialog.Builder(this).setTitle("ChatGPT not found")
-          .setMessage("The on-device cycle test requires the installed ChatGPT Android application.")
-          .setPositiveButton("Close",null).show();
-        return;
-      }
-      JSONObject old=ContinuationCycle.get(this).status();
-      if(old.optBoolean("active",false)){
-        showCycleStatus();
-        return;
-      }
-      // All work remains phone-owned; the Windows worker is never involved.
-      ContinuationLedger.get(this).configure(true);
-      if(!AgentService.running)
-        startForegroundService(new Intent(this,AgentService.class));
-      JSONObject input=new JSONObject()
-        .put("cycle_id","phone-selftest-"+System.currentTimeMillis())
-        .put("project","Asterion-Control").put("priority_tier","7*")
-        .put("spec_reference","7STAR_FROZEN_MASTER.md")
-        .put("conversation","same").put("voice_locale","en-US")
-        .put("max_cycles",2)
-        .put("message","Phone-only cycle test. Do not change repositories, files or "+
-             "device settings. First response: give one short factual statement "+
-             "and the exact checkpoint ACK marker. Second response: confirm "+
-             "the two-turn test and print the exact checkpoint DONE marker.");
-      ContinuationCycle.get(this).start(input);
-      ContinuationCycle.get(this).tick();
-      startActivity(chat);
-      // Do not report completion: a queued turn still requires a distinct
-      // ChatGPT response with its own ACK/DONE marker.
-    }catch(Exception e){
-      new AlertDialog.Builder(this).setTitle("Continuation test did not start")
-        .setMessage(String.valueOf(e.getMessage())+
-          "\n\nNo pending ChatGPT message was overwritten. Inspect cycle status before retrying.")
-        .setPositiveButton("Inspect state",(dialog,which)->showCycleStatus())
-        .setNegativeButton("Close",null).show();
-    }
-  }
   private void showCycleStatus(){
     try{
-      JSONObject cycle=ContinuationCycle.get(this).status();
       JSONObject ledger=ContinuationLedger.get(this).status();
-      String info="Accessibility active: "+(ControlAccessibilityService.active!=null)+
-        "\nAgent service active: "+AgentService.running+
-        "\nContinuation enabled: "+ledger.optBoolean("enabled")+
-        "\nCycle active: "+cycle.optBoolean("active")+
-        "\nCycle phase: "+cycle.optString("state","idle")+
-        "\nCheckpoint phase: "+ledger.optString("state","idle")+
-        "\nProject: "+cycle.optString("project","none")+
-        "\nCycle index: "+cycle.optInt("index",0)+
-        "\nAcknowledged: "+cycle.optInt("ack_count",0)+
-        "\nCycle error: "+cycle.optString("last_error","none")+
-        "\nDispatch error: "+ledger.optString("last_error","none");
-      new AlertDialog.Builder(this).setTitle("Checkpoint cycle status")
+      String info="Controller: ChatGPT (external)"
+        +"\nAndroid-owned automatic cycles: disabled"
+        +"\nAccessibility active: "+(ControlAccessibilityService.active!=null)
+        +"\nAgent service active: "+AgentService.running
+        +"\nContinuation enabled: "+ledger.optBoolean("enabled")
+        +"\nCheckpoint phase: "+ledger.optString("state","idle")
+        +"\nLast checkpoint: "+ledger.optString("last_checkpoint","none")
+        +"\nLast dispatch error: "+ledger.optString("last_error","none");
+      new AlertDialog.Builder(this).setTitle("ChatGPT operator checkpoint status")
         .setMessage(info).setPositiveButton("Close",null).show();
-    }catch(Exception e){toast("Cycle status unavailable");}
-  }
-  private void changeCycle(String operation){
-    try{
-      ContinuationCycle cycle=ContinuationCycle.get(this);
-      if("pause".equals(operation))cycle.pause();
-      else if("resume".equals(operation))cycle.resume();
-      else if("stop".equals(operation))cycle.stop();
-      else throw new IllegalArgumentException("Unknown cycle operation");
-      showCycleStatus();
-    }catch(Exception e){toast("Cycle action unavailable: "+e.getClass().getSimpleName());}
+    }catch(Exception e){toast("Checkpoint status unavailable");}
   }
   private void testVoiceDialogue(){
     if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){
@@ -1014,10 +941,11 @@ public final class MainActivity extends Activity {
           String phase=report.optString("phase","initializing");
           String answer=report.optString("transcript","");
           String problem=report.optString("error","");
+          String backend=report.optString("recognizer_backend","none");
           String speaker=report.optBoolean("speaker_finished")?
             "Speaker completed":report.optBoolean("speaker_started")?
             "Speaker started":"Speaker not confirmed";
-          voiceTestStatus.setText("Voice test: "+phase+" | "+speaker+
+          voiceTestStatus.setText("Voice test: "+phase+" | "+speaker+" | speech: "+backend+
             (answer.isEmpty()?"":" — heard: "+answer)+
             (problem.isEmpty()?"":" — "+problem));
           if("answered".equals(phase)||"failed".equals(phase)||

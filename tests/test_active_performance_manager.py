@@ -45,7 +45,7 @@ def test_governor_never_force_stops_unrelated_apps_or_disables_cycles():
     assert "setprop" not in manager
     assert "forceStopPackage" not in manager
     assert "PhoneDirectMcp.start(this)" in agent
-    assert "cycles.tick()" in agent
+    assert "cycles.tick()" not in agent
     assert '"system_clock_control",false' in manager
     assert '"other_app_process_control",false' in manager
 

@@ -9,22 +9,24 @@ def text(path):
 def test_android_manifest_and_version_match_signed_update_contract():
     gradle=text("android/app/build.gradle")
     manager=text("android/app/src/main/java/com/asterion/control/UpdateManager.java")
-    assert "versionCode 904" in gradle
-    assert "versionName '0.9.4'" in gradle
+    assert "versionCode 905" in gradle
+    assert "versionName '0.9.5'" in gradle
     assert "ASTERION_OWNER_KEYSTORE_PATH" in gradle
     assert "canRequestPackageInstalls()" in manager
     assert "MessageDigest.isEqual" in manager
 
-def test_cycle_includes_real_response_and_spoken_answer():
-    cycle=text("android/app/src/main/java/com/asterion/control/ContinuationCycle.java")
-    access=text("android/app/src/main/java/com/asterion/control/ControlAccessibilityService.java")
-    for requirement in (
-        "ASTERION-CYCLE-ACK:", "ASTERION-CYCLE-DONE:",
-        "ASTERION-VOICE-ASK:", "awaiting_voice_answer",
-        "voice_answer_recorded", "observed_voice_question",
-        "marker_first_seen_ms", "allowAutomaticDispatch"):
-        assert requirement in cycle or requirement in access
-    assert "voice.acknowledge(" not in cycle or "voice_answer" in cycle
+def test_chatgpt_controls_execution_and_android_returns_checkpoint_receipts():
+    agent=text("android/app/src/main/java/com/asterion/control/AgentService.java")
+    main=text("android/app/src/main/java/com/asterion/control/MainActivity.java")
+    native=text("android/app/src/main/java/com/asterion/control/AndroidMcp.java")
+    ledger=text("android/app/src/main/java/com/asterion/control/ContinuationLedger.java")
+    assert "cycles.tick()" not in agent
+    assert "ChatGPT-operated checkpoints" in main
+    assert "control_phone_continuation_queue" in native
+    assert "control_phone_continuation_dispatch" in native
+    assert "control_phone_continuation_ack" in native
+    assert "submitted_unverified" in ledger
+    assert "response_receipt" in ledger
 
 def test_phone_controls_remain_in_private_https_and_no_pc_required():
     agent=text("android/app/src/main/java/com/asterion/control/AgentService.java")
@@ -42,7 +44,7 @@ def test_phone_controls_remain_in_private_https_and_no_pc_required():
 
 def test_release_requires_exact_owner_signer_and_uses_existing_update_feed():
     workflow=text(".github/workflows/android-continuation-branch.yml")
-    assert "Asterion-Control-v0.9.4-release.apk" in workflow
+    assert "Asterion-Control-v0.9.5-release.apk" in workflow
     assert "ASTERION_ANDROID_DEBUG_KEYSTORE_B64" in workflow
     assert "SIGNER_COMPATIBLE_WITH_V086_BASELINE=true" in workflow
     assert "dist/latest.json" in workflow
@@ -59,5 +61,5 @@ def test_release_requires_exact_owner_signer_and_uses_existing_update_feed():
     assert "debuggable false" in text("android/app/build.gradle")
     assert "signingConfigs.ownerRelease" in text("android/app/build.gradle")
     assert "latest-release.json" in text("android/app/src/main/java/com/asterion/control/UpdateManager.java")
-    assert "Asterion-Control-v0.9.4-debug.apk" in workflow  # backwards-compatible alias only
-    assert "cp \"$ROOT/dist/$PKG\" \"$ROOT/dist/Asterion-Control-v0.9.4-debug.apk\"" in workflow
+    assert "Asterion-Control-v0.9.5-debug.apk" in workflow  # backwards-compatible alias only
+    assert "cp \"$ROOT/dist/$PKG\" \"$ROOT/dist/Asterion-Control-v0.9.5-debug.apk\"" in workflow

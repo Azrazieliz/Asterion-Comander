@@ -28,15 +28,14 @@ def test_voice_and_cycle_requests_remain_bounded():
         native_routes.VoiceQuestion(text="z" * 701)
 
 
-def test_catalog_lists_phone_voice_and_cycles():
-    catalog = {spec["name"] for spec in mcp_protocol.TOOLS}
+def test_catalog_lists_phone_voice_and_operator_checkpoint_tools():
+    catalog={spec["name"] for spec in mcp_protocol.TOOLS}
     assert {
         "control_phone_network_status", "control_phone_voice_ack",
-        "control_phone_cycle_status", "control_phone_cycle_start",
-        "control_phone_cycle_pause", "control_phone_cycle_resume",
-        "control_phone_cycle_stop", "control_phone_cycle_confirm_new_chat",
+        "control_phone_cycle_status", "control_phone_continuation_queue",
+        "control_phone_continuation_dispatch", "control_phone_continuation_ack",
     }.issubset(catalog)
-
+    assert "control_phone_cycle_start" not in catalog
 
 def test_existing_native_voice_and_cycles_dispatch_to_phone(monkeypatch):
     visited = []
@@ -69,7 +68,7 @@ def test_phone_source_uses_direct_tls_and_phone_owned_cycles():
     assert "String key=AgentService.token(owner)" in direct
     assert 'getSharedPreferences("control"' not in direct
     assert "TRANSPORT_CELLULAR" in net and "TRANSPORT_VPN" in net
-    assert "scheduleWithFixedDelay" in agent and "cycles.tick()" in agent
+    assert "cycles.tick()" not in agent and "cycleWorker" not in agent
     assert "allowAutomaticDispatch" in cycles
     assert "confirmNewChat" in cycles
     assert "speaker.speak" in voice and "SpeechRecognizer" in voice
