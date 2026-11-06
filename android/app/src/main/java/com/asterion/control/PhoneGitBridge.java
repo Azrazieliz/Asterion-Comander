@@ -14,7 +14,7 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.net.HttpsURLConnection;
+import javax.net.ssl.HttpsURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
@@ -175,8 +175,10 @@ final class PhoneGitBridge {
   private static void markHandled(Context ctx,String id){
     String[] prior=previous(ctx);
     StringBuilder out=new StringBuilder();
-    for(int i=Math.max(0,prior.length-255);i<prior.length;i++)
-      if(!prior[i].isEmpty())out.append(prior[i]).append(',');
+    for(String earlier:prior)
+      if(!earlier.isEmpty())out.append(earlier).append(',');
+    if(out.length()>500_000)
+      throw new IllegalStateException("Local bridge receipt history is full; archive before continuing");
     out.append(id);
     if(!pref(ctx).edit().putString("handled",out.toString()).commit())
       throw new IllegalStateException("Cannot durably mark command as handled");
@@ -255,9 +257,7 @@ final class PhoneGitBridge {
       flush(owner,pat);
       // Only android-* commands are executed here. Existing PC-owned bridge
       // commands and their results remain untouched.
-      JSONObject listing=getFile("commands",pat);
-      // GitHub Contents folders return arrays, so request the directory using
-      // the same bounded JSON-only HTTPS helper below.
+      // GitHub Contents directories are arrays, not JSON objects.
       JSONArray files=directory(pat);
       if(files==null){lastSuccessMs=System.currentTimeMillis();return;}
       int examined=0;
@@ -269,6 +269,11 @@ final class PhoneGitBridge {
         examined++;
         String id=name.substring(0,name.length()-5);
         if(handled(owner,id))continue;
+        // GitHub result records survive app reinstalls and local cache resets.
+        // A completed remote command must NEVER be replayed.
+        if(getFile("results/"+id+".json",pat)!=null){
+          markHandled(owner,id);continue;
+        }
         JSONObject raw=getFile("commands/"+name,pat);
         if(raw==null)continue;
         String content=raw.optString("content","").replace("\n","");
