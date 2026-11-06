@@ -28,6 +28,7 @@ MAX_RESULT=1000000
 MAX_WAIT_SECONDS=39
 ALLOW={
     "status","bridge_status","health","network_status","ui","input",
+    "screen","observation_frame","observation_get_frame",
     "apps","app_launch","chat_new","continuation_status",
     "continuation_queue","continuation_dispatch","continuation_ack",
     "continuation_cancel","cycle_status","cycle_start","cycle_pause",
@@ -78,6 +79,8 @@ def wrap_result(identifier,receipt):
     if receipt.get("id")!=identifier:
         raise RuntimeError("Private Control response ID does not match")
     status=receipt.get("status")
+    if status=="complete" and receipt.get("ok") is False:
+        status="failed"
     if status in ("uncertain","failed","error","expired","cancelled"):
         message=str(receipt.get("error","Native Android operation not completed"))[:250]
         return {"jsonrpc":"2.0","id":identifier,
@@ -124,9 +127,13 @@ async def submit(name:str, arguments:dict, response_id, *, timeout=MAX_WAIT_SECO
                 wrapped["id"]=response_id
                 return wrapped
             await asyncio.sleep(2.0)
+    # Preserve an immutable cloud command ID in a typed result. This is
+    # pending, NEVER claim that an Android action succeeded without a receipt.
     return {"jsonrpc":"2.0","id":response_id,
-            "error":{"code":-32010,
-                     "message":"Phone operation pending, not confirmed: "+identifier}}
+            "result":{"content":[{"type":"text",
+                "text":json.dumps({"status":"pending","id":identifier,
+                  "executed":False,"next_action":"control_phone_cloud_receipt"},
+                  separators=(",",":"))}]}}
 
 async def receipt(identity:str,response_id):
     if not identity.startswith(PREFIX):
