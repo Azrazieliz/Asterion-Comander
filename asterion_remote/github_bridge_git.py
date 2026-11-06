@@ -51,16 +51,34 @@ def write_result(identity,response):
     publish([Path('results')/(identity+'.json')])
     return True
 
+def pending_in(folder):
+    """Return only unknown commands; never replay a recorded running/error receipt."""
+    results=ROOT/'results'
+    results.mkdir(exist_ok=True)
+    if not folder.is_dir():return []
+    return [p for p in sorted(folder.glob('*.json'))
+            if NAME.fullmatch(p.stem) and not (results/p.name).exists()]
+
 def entries():
-    commands=ROOT/'commands';results=ROOT/'results';results.mkdir(exist_ok=True)
-    if not commands.is_dir():return []
-    return [p for p in sorted(commands.glob('*.json')) if NAME.fullmatch(p.stem) and not (results/p.name).exists()]
+    """Explicit active queue survives first-start legacy-command migration.
+
+    An older REST relay may have left ambiguous root-level commands. New,
+    explicitly authorized Control commands use commands/active and are never
+    preemptively classified as a pre-migration replay.
+    """
+    commands=ROOT/'commands'
+    chosen=[];seen=set()
+    for file in pending_in(commands/'active')+pending_in(commands):
+        if file.stem in seen:continue
+        chosen.append(file)
+        seen.add(file.stem)
+    return chosen
 
 def migrate():
     if STAMP.exists():return
     # Never replay unknown previous jobs left by the failing REST relay.
     paths=[]
-    for request in entries():
+    for request in pending_in(ROOT/'commands'):
         target=ROOT/'results'/request.name
         target.write_text(json.dumps({'id':request.stem,'ok':False,'status':'skipped',
             'error':'Previous relay stalled; resubmit this command.'}),encoding='utf8')
