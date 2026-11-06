@@ -142,3 +142,13 @@ def phone_bridge_status():
 def phone_chat_new():
     """Request a new ChatGPT conversation; this does not prove navigation."""
     return request('/chat/new','POST',{},timeout=12.0).json()
+
+@router.get('/phone/observation/timeline')
+def phone_observation_timeline():
+    return request('/observation/timeline').json()
+
+@router.get('/phone/observation/frames/{frame_id}')
+def phone_observation_get_frame(frame_id: str):
+    # phone_bridge validates the entire URL suffix; no path traversal allowed.
+    return Response(request('/observation/frame/'+frame_id).content,
+                    media_type='image/jpeg',headers={'Cache-Control':'no-store'})
