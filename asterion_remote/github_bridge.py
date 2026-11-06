@@ -40,6 +40,14 @@ ALLOWED={
  'phone_observation_timeline':('GET','/api/v1/phone/observation/timeline'),
  'phone_voice_status':('GET','/api/v1/phone/voice/status'),
  'phone_voice_question':('POST','/api/v1/phone/voice/question'),
+ 'phone_voice_ack':('POST','/api/v1/phone/voice/ack'),
+ 'phone_network_status':('GET','/api/v1/phone/network/status'),
+ 'phone_cycle_status':('GET','/api/v1/phone/cycles/status'),
+ 'phone_cycle_start':('POST','/api/v1/phone/cycles/start'),
+ 'phone_cycle_pause':('POST','/api/v1/phone/cycles/pause'),
+ 'phone_cycle_resume':('POST','/api/v1/phone/cycles/resume'),
+ 'phone_cycle_stop':('POST','/api/v1/phone/cycles/stop'),
+ 'phone_cycle_confirm_new_chat':('POST','/api/v1/phone/cycles/confirm-new-chat'),
 }
 
 def git_token():
