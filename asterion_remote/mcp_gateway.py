@@ -19,6 +19,7 @@ import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response
 
+from .oauth_bridge import router as oauth_router, valid_access, challenge, SCOPE
 from .phone_bridge import load as load_phone
 from .phone_live import (router as phone_live_router, connected as phone_live_connected,
                          invoke as phone_live_invoke, DirectPhoneUncertain)
@@ -53,6 +54,7 @@ app = FastAPI(
     redoc_url=None, openapi_url=None
 )
 app.include_router(phone_live_router)
+app.include_router(oauth_router)
 
 def _secret(path: Path) -> str:
     try:
@@ -174,12 +176,14 @@ async def _preferred(payload: bytes, headers: dict, phone_first=True):
 @app.post("/mcp")
 async def rpc(req: Request):
     bearer = req.headers.get("authorization", "")
-    if not bearer.startswith("Bearer ") or not hmac.compare_digest(
-        bearer[7:].encode(), _secret(GATEWAY_KEY).encode()
+    token = bearer[7:] if bearer.startswith("Bearer ") else ""
+    if not token or not (
+        hmac.compare_digest(token.encode(), _secret(GATEWAY_KEY).encode())
+        or valid_access(token)
     ):
         raise HTTPException(
             401, "Asterion Control authorization required",
-            headers={"WWW-Authenticate": "Bearer"},
+            headers={"WWW-Authenticate": challenge()},
         )
     accepted = req.headers.get("accept", "")
     if "application/json" not in accepted or "text/event-stream" not in accepted:
@@ -275,9 +279,19 @@ async def rpc(req: Request):
             for spec in item.get("result", {}).get("tools", []):
                 if isinstance(spec, dict) and isinstance(spec.get("name"), str):
                     merged[spec["name"]] = spec
+        # OAuth discovery for ChatGPT, while preserving the original tool
+        # catalogues, names, argument schemas, and native routing behavior.
+        tools = []
+        for spec in merged.values():
+            tagged = dict(spec)
+            tagged["_meta"] = {
+                **(tagged.get("_meta") or {}),
+                "securitySchemes": [{"type": "oauth2", "scopes": [SCOPE]}],
+            }
+            tools.append(tagged)
         response = {
             "jsonrpc": "2.0", "id": message.get("id"),
-            "result": {"tools": list(merged.values())},
+            "result": {"tools": tools},
         }
         return Response(content=json.dumps(response), media_type="application/json",
                         headers={"Cache-Control": "no-store"})
