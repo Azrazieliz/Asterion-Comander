@@ -17,7 +17,8 @@ import java.nio.charset.StandardCharsets;
 final class ContinuationLedger {
   private static final String FILE = "continuation-state.json";
   private static final int MAX_PROMPT = 3800;
-  private static final long COOLDOWN_MS = 60_000L;
+  // Every new automated turn requires an actual observed response receipt.
+  private static final long COOLDOWN_MS = 3500L;
   private static volatile ContinuationLedger singleton;
   static synchronized ContinuationLedger get(Context context) {
     if (singleton == null) singleton = new ContinuationLedger(context.getApplicationContext());

@@ -105,6 +105,8 @@ public final class MainActivity extends Activity {
   private boolean webStarted=false,hostRefreshing=false;
   private long lastHostRefresh=0;
   private boolean destroyed=false;
+  private boolean runVoiceTestAfterPermission=false;
+  private TextView voiceTestStatus;
   private final Runnable ticker=new Runnable(){@Override public void run(){if(destroyed)return;updateHealth();handler.postDelayed(this,3500);}};
 
   private int dp(float x){return DesignSystem.dp(this,x);}
@@ -305,7 +307,10 @@ public final class MainActivity extends Activity {
       "Phone-owned checkpoints; ChatGPT verifies every actual reply",
       icon("refresh",DesignSystem.TEAL,22));
     gap(cycles,12);
-    button(cycles,"Inspect cycle status","activity",true,this::showCycleStatus);
+    button(cycles,"Run two-turn phone cycle test","refresh",true,
+      this::startPhoneCycleTest);
+    gap(cycles,8);
+    button(cycles,"Inspect cycle status","activity",false,this::showCycleStatus);
     gap(cycles,8);button(cycles,"Pause cycle","power",false,()->changeCycle("pause"));
     gap(cycles,8);button(cycles,"Resume reviewed cycle","check",false,()->changeCycle("resume"));
     gap(cycles,8);button(cycles,"Stop cycle","power",false,()->changeCycle("stop"));
@@ -357,6 +362,10 @@ public final class MainActivity extends Activity {
     rowTitle(voice,"Spoken questions during gameplay",
       "Android speaker → on-device recognition → transcript",icon("activity",DesignSystem.PURPLE,22));
     gap(voice,12);button(voice,"Enable spoken questions","check",true,this::startVoiceQuestions);
+    gap(voice,9);button(voice,"Test speaker and microphone now","activity",true,
+      this::testVoiceDialogue);
+    gap(voice,8);voiceTestStatus=t("Not tested on this device",12,DesignSystem.MUTED,false);
+    wide(voice,voiceTestStatus);
     gap(voice,9);button(voice,"Stop microphone session","power",false,()->{
       stopService(new Intent(this,VoiceDialogueService.class));
       toast("Voice question session stopped");
@@ -855,6 +864,29 @@ public final class MainActivity extends Activity {
         .setMessage(report).setPositiveButton("Close",null).show();
     }catch(Exception e){toast("Remote readiness unavailable");}
   }
+  private void startPhoneCycleTest(){
+    try {
+      // All work remains phone-owned; the Windows worker is never involved.
+      ContinuationLedger.get(this).configure(true);
+      if(!AgentService.running)
+        startForegroundService(new Intent(this,AgentService.class));
+      JSONObject input=new JSONObject()
+        .put("cycle_id","phone-selftest-"+System.currentTimeMillis())
+        .put("project","Asterion-Control").put("priority_tier","7*")
+        .put("spec_reference","7STAR_FROZEN_MASTER.md")
+        .put("conversation","same").put("voice_locale","en-US")
+        .put("max_cycles",2)
+        .put("message","Phone-only cycle test. Do not change repositories, files or "+
+             "device settings. First response: give one short factual statement "+
+             "and the exact checkpoint ACK marker. Second response: confirm "+
+             "the two-turn test and print the exact checkpoint DONE marker.");
+      ContinuationCycle.get(this).start(input);
+      ContinuationCycle.get(this).tick();
+      Intent launch=getPackageManager().getLaunchIntentForPackage("com.openai.chatgpt");
+      if(launch==null){toast("ChatGPT not installed: test queued but not sent");return;}
+      startActivity(launch);
+    }catch(Exception e){toast("Cycle test: "+String.valueOf(e.getMessage()));}
+  }
   private void showCycleStatus(){
     try{
       JSONObject cycle=ContinuationCycle.get(this).status();
@@ -898,6 +930,42 @@ public final class MainActivity extends Activity {
           runOnUiThread(()->toast("Android private bridge disabled"));}
         catch(Exception e){runOnUiThread(()->toast("Bridge could not be disabled"));}
       })).setNegativeButton("Cancel",null).show();
+  }
+  private void testVoiceDialogue(){
+    if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){
+      runVoiceTestAfterPermission=true;
+      requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},MICROPHONE_REQUEST);
+      return;
+    }
+    try {
+      Intent test=new Intent(this,VoiceDialogueService.class).setAction("TEST");
+      startForegroundService(test);
+      if(voiceTestStatus!=null)voiceTestStatus.setText("Starting audible test question…");
+      monitorVoiceTest(System.currentTimeMillis()+65000L);
+    }catch(Exception e){
+      if(voiceTestStatus!=null)voiceTestStatus.setText("Test start failed: "+e.getClass().getSimpleName());
+    }
+  }
+  private void monitorVoiceTest(long until){
+    handler.postDelayed(()->{
+      if(destroyed||voiceTestStatus==null)return;
+      VoiceDialogueService service=VoiceDialogueService.active;
+      try {
+        if(service!=null){
+          JSONObject report=service.report();
+          String phase=report.optString("phase","initializing");
+          String answer=report.optString("transcript","");
+          String problem=report.optString("error","");
+          voiceTestStatus.setText("Voice test: "+phase+
+            (answer.isEmpty()?"":" — heard: "+answer)+
+            (problem.isEmpty()?"":" — "+problem));
+          if("answered".equals(phase)||"failed".equals(phase)||
+             "unavailable".equals(phase))return;
+        }
+      }catch(Exception ignored){}
+      if(System.currentTimeMillis()<until)monitorVoiceTest(until);
+      else voiceTestStatus.setText("Voice test timed out; no successful transcript");
+    },350);
   }
   private void showVoiceAnswerStatus(){
     try{
@@ -1037,7 +1105,9 @@ public final class MainActivity extends Activity {
   }
   @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results){super.onRequestPermissionsResult(request,permissions,results);
     if(request==MICROPHONE_REQUEST&&results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED){
-      startVoiceQuestions();return;
+      if(runVoiceTestAfterPermission){runVoiceTestAfterPermission=false;testVoiceDialogue();}
+      else startVoiceQuestions();
+      return;
     }
     if(request==NOTIFICATION_REQUEST&&results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED){
       startAgent();

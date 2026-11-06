@@ -43,6 +43,14 @@ public final class VoiceDialogueService extends Service {
   private static final long ANSWER_TIMEOUT_MS=45000L;
   private volatile boolean consumed=true;
   private volatile boolean microphoneActive=false;
+  private volatile boolean pendingLocalTest=false;
+  private void localVoiceTest(){
+    if(active!=this)return;
+    try{
+      ask("Asterion Control speaker test. Please answer aloud: test one two three.",
+        "en-US","selftest-"+System.currentTimeMillis());
+    }catch(Exception e){state("failed","Test question failed: "+e.getClass().getSimpleName());}
+  }
   private Runnable deadline;
   private void clearDeadline(){
     if(deadline!=null){ui.removeCallbacks(deadline);deadline=null;}
@@ -67,6 +75,10 @@ public final class VoiceDialogueService extends Service {
       speakerReady=status==TextToSpeech.SUCCESS;
       state(speakerReady?"ready":"unavailable",
         speakerReady?"":"Android text-to-speech engine unavailable");
+      if(speakerReady&&pendingLocalTest&&active==this){
+        pendingLocalTest=false;
+        ui.post(this::localVoiceTest);
+      }
     });
   }
   private Notification notification(){
@@ -93,7 +105,11 @@ public final class VoiceDialogueService extends Service {
     startForeground(NOTIFICATION_ID,notification(),
       ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
     active=this;
-    if(!speakerReady)state("initializing","");
+    if(intent!=null&&"TEST".equals(intent.getAction())){
+      pendingLocalTest=true;
+      if(speakerReady){pendingLocalTest=false;ui.post(this::localVoiceTest);}
+      else state("initializing","Awaiting Android text-to-speech startup");
+    }else if(!speakerReady)state("initializing","");
     return START_NOT_STICKY;
   }
   synchronized JSONObject ask(String text,String locale)throws Exception {
@@ -144,6 +160,9 @@ public final class VoiceDialogueService extends Service {
   private void speakNow(String text,String locale,String id){
     if(active!=this)return;
     Locale language=Locale.forLanguageTag(locale);
+    speaker.setAudioAttributes(new android.media.AudioAttributes.Builder()
+      .setUsage(android.media.AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
+      .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH).build());
     int languageResult=speaker.setLanguage(language);
     if(languageResult==TextToSpeech.LANG_MISSING_DATA || languageResult==TextToSpeech.LANG_NOT_SUPPORTED){
       clearDeadline();state("failed","Requested speech voice data is unavailable");return;

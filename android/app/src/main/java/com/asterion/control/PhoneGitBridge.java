@@ -151,7 +151,7 @@ final class PhoneGitBridge {
   private static JSONObject connect(String url,String token,String method,JSONObject payload)throws Exception{
     if(!url.startsWith(API)||url.indexOf('#')>=0)throw new SecurityException("Non-bridge API URL");
     HttpsURLConnection c=(HttpsURLConnection)new URL(url).openConnection();
-    c.setRequestMethod(method);c.setConnectTimeout(5500);c.setReadTimeout(8000);
+    c.setRequestMethod(method);c.setConnectTimeout(2500);c.setReadTimeout(2500);
     c.setInstanceFollowRedirects(false);
     c.setRequestProperty("Authorization","Bearer "+token);
     c.setRequestProperty("Accept","application/vnd.github+json");
@@ -382,7 +382,7 @@ final class PhoneGitBridge {
   private static JSONArray directory(String pat,String folder,boolean isolated)throws Exception{
     String url=API+folder.substring(0,folder.length()-1)+"?ref=main";
     HttpsURLConnection c=(HttpsURLConnection)new URL(url).openConnection();
-    c.setConnectTimeout(5500);c.setReadTimeout(8000);
+    c.setConnectTimeout(2500);c.setReadTimeout(2500);
     c.setInstanceFollowRedirects(false);
     c.setRequestProperty("Authorization","Bearer "+pat);
     c.setRequestProperty("Accept","application/vnd.github+json");

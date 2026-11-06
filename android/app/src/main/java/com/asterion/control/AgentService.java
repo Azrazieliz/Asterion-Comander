@@ -72,13 +72,13 @@ public final class AgentService extends Service {
       try{cycles.tick();}catch(Exception e){
         android.util.Log.w("AsterionCycles","Deferred cycle checkpoint",e);
       }
-    },7,8,java.util.concurrent.TimeUnit.SECONDS);
+    },1,2,java.util.concurrent.TimeUnit.SECONDS);
     observer.scheduleWithFixedDelay(()->{
       try{AppObservation.sample(this);}catch(Exception ignored){}
     },3,3,java.util.concurrent.TimeUnit.SECONDS);
     // Optional and owner-enabled. Never a model executor or an untrusted shell.
     privateBridge.scheduleWithFixedDelay(()->PhoneGitBridge.poll(this),
-      5,15,java.util.concurrent.TimeUnit.SECONDS);
+      2,4,java.util.concurrent.TimeUnit.SECONDS);
     try{
       networkManager=(android.net.ConnectivityManager)getSystemService(CONNECTIVITY_SERVICE);
       networkCallback=new android.net.ConnectivityManager.NetworkCallback(){
