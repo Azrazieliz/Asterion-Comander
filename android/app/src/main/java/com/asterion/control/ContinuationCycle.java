@@ -345,8 +345,7 @@ final class ContinuationCycle {
       "single concise question (no more than 700 characters). Only do so "+
       "when the speaker/microphone session was enabled by the owner. "+
       "Asterion Control speaks your question first, then listens once for "+
-      "the owner\u0027s spoken answer and continues with its transcription. "+
-      "owner's transcription in the next cycle. "+
+      "the owner's spoken answer and carries the transcription to the next cycle. "+
       "The Control app verifies the actual visible response and stable "+
       "speech input before proceeding; do not duplicate or reset work.";
     JSONObject body=new JSONObject()
