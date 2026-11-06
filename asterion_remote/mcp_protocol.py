@@ -29,6 +29,9 @@ TOOLS = [
     spec('remote_health', 'Inspect the Asterion Remote agent and its capabilities'),
     spec('remote_system', 'Read PC CPU, memory, disk and uptime metrics'),
     spec('remote_processes', 'List processes running on the connected PC'),
+    spec('control_pc_performance_status','Read currently active Control-managed Windows jobs and priority state'),
+    spec('control_pc_performance_mode','Lower or restore priority for Control-managed Windows jobs only',
+         {'mode':{'type':'string','enum':['favor_foreground','restore']}},['mode']),
     spec('remote_list_files', 'Browse files inside the configured PC root', {'path': STR}),
     spec('remote_search_files', 'Search filenames inside the PC root', {'q': STR, 'path': STR}, ['q']),
     spec('remote_read_file', 'Read a UTF-8 file inside the allowed PC root', {'path': STR}, ['path']),
@@ -131,6 +134,9 @@ def invoke_tool(name: str, args: dict):
     if name == 'remote_health': return remote.health()
     if name == 'remote_system': return remote.system()
     if name == 'remote_processes': return remote.processes(100)
+    if name == 'control_pc_performance_status': return remote.managed_performance_status()
+    if name == 'control_pc_performance_mode':
+        return remote.manage_performance_priority(remote.ManagedJobPriority(**args))
     if name == 'remote_list_files': return remote.list_files(args.get('path', '.'))
     if name == 'remote_search_files': return remote.search_files(args['q'],args.get('path','.'),100)
     if name == 'remote_read_file': return remote.read_file(args['path'])
