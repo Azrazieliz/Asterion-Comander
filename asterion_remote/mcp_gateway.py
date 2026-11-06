@@ -20,6 +20,8 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response
 
 from .phone_bridge import load as load_phone
+from .phone_live import (router as phone_live_router, connected as phone_live_connected,
+                         invoke as phone_live_invoke, DirectPhoneUncertain)
 
 ROOT = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "AsterionControl"
 GATEWAY_KEY = ROOT / "mcp-gateway-token.txt"
@@ -48,6 +50,7 @@ app = FastAPI(
     title="Asterion Control MCP-only gateway", docs_url=None,
     redoc_url=None, openapi_url=None
 )
+app.include_router(phone_live_router)
 
 def _secret(path: Path) -> str:
     try:
@@ -199,68 +202,49 @@ async def rpc(req: Request):
     if method == "tools/call":
         from . import phone_cloud_relay
         params = message.get("params") or {}
-        if name == "control_phone_cloud_receipt":
-            args = params.get("arguments") or {}
-            if not isinstance(args, dict) or not isinstance(args.get("id"), str):
-                raise HTTPException(422, "A private Control receipt ID is required")
-            try:
-                answer = await phone_cloud_relay.receipt(args["id"], message.get("id"))
-            except (RuntimeError, ValueError, httpx.HTTPError):
-                raise HTTPException(503, "Private phone receipt is not accessible")
-            return Response(content=json.dumps(answer), media_type="application/json",
-                            headers={"Cache-Control":"no-store"})
         native = isinstance(name, str) and _tool_is_native(name)
         if native:
-            # Try LAN/VPN briefly. Do not wait for a timeout against an address
-            # that the Samsung has left when it switched to cellular.
+            if phone_live_connected():
+                try:
+                    # A dispatched WSS call is never silently repeated after
+                    # timeout/disconnect, even if the phone's final result is lost.
+                    answer = await phone_live_invoke(message)
+                    return Response(content=json.dumps(answer), media_type="application/json",
+                                    headers={"Cache-Control": "no-store"})
+                except (DirectPhoneUncertain, asyncio.TimeoutError):
+                    raise HTTPException(504, "Direct Android MCP outcome uncertain; never replay")
+                except (ConnectionError, RuntimeError, ValueError):
+                    raise HTTPException(503, "Direct Android MCP session unavailable")
+            # When both devices are on trusted private Wi-Fi, use the existing
+            # native Android MCP route directly. No GitHub cloud polling.
             if paired := _phone_route():
                 try:
-                    direct = await asyncio.wait_for(
-                        _forward(paired,payload,req.headers),timeout=4.0)
+                    direct = await asyncio.wait_for(_forward(paired, payload, req.headers),
+                                                    timeout=4.0)
                     if direct.status_code == 200:
-                        # Even an MCP application error may represent an executed
-                        # operation. Never send it a second time via cloud.
-                        parsed = json.loads(direct.content)
-                        if isinstance(parsed,dict) and parsed.get("jsonrpc")=="2.0":
-                            return _response(direct)
-                        raise HTTPException(502,"Invalid native MCP response; refusing replay")
-                    if direct.status_code not in (401,403,404,405,502,503,504):
-                        # Non-routing failures may occur after an operation ran.
-                        # Never resubmit a potentially executed phone command.
-                        raise HTTPException(504,
-                            "Native Control command outcome uncertain; will not replay")
-                    # Local pairing/authentication may be stale after leaving
-                    # home Wi-Fi. A rejection before command execution permits
-                    # the separately owner-authorized Android HTTPS cloud route.
-                except (httpx.ConnectError,httpx.ConnectTimeout):
-                    # Failed before a connection was established: cloud retry safe.
-                    pass
-                except (asyncio.TimeoutError,httpx.ReadTimeout,httpx.RemoteProtocolError):
+                        return _response(direct)
+                    if direct.status_code in (401, 403):
+                        raise HTTPException(503, "Native Android pairing rejected")
                     raise HTTPException(504,
-                        "Native Control command outcome uncertain; will not replay")
-                except (ValueError,):
-                    raise HTTPException(502,"Native Control returned invalid MCP JSON")
-            # The existing private GitHub bridge is outbound HTTPS from Android.
-            # It operates on mobile data with a separately authorized repo token.
-            try:
-                args = params.get("arguments") or {}
-                answer = await phone_cloud_relay.submit(name,args,message.get("id"))
-                return Response(content=json.dumps(answer),media_type="application/json",
-                                headers={"Cache-Control":"no-store"})
-            except (RuntimeError,ValueError,httpx.HTTPError) as exc:
-                # A GitHub PUT can succeed even if the response is lost.
-                # Never replay a possibly queued side-effecting phone command
-                # through a second transport.
-                raise HTTPException(503,
-                    "Phone cloud receipt uncertain or transport unavailable; "+
-                    "inspect the private command ledger before reissuing") from exc
+                        "Native Android MCP returned uncertain status; no replay")
+                except (httpx.ConnectError, httpx.ConnectTimeout):
+                    raise HTTPException(503, "Android direct route unavailable")
+                except (asyncio.TimeoutError, httpx.ReadTimeout, httpx.RemoteProtocolError):
+                    raise HTTPException(504, "Android command outcome uncertain; no replay")
+            raise HTTPException(503,
+                "Android direct TLS connection not attached; enable Control on the phone")
         upstream = await _preferred(payload, req.headers, phone_first=False)
         return _response(upstream)
     if method == "tools/list":
         # Merge the phone and optional Windows tool catalogues. A phone-owned
         # tool name wins over its older Windows proxy with the same name.
         catalogs = []
-        for route in (_phone_route(),):
+        if phone_live_connected():
+            try:
+                catalogs.append(await phone_live_invoke(message, timeout=10.0))
+            except (DirectPhoneUncertain, ConnectionError, RuntimeError, ValueError):
+                pass
+        for route in (() if catalogs else (_phone_route(),)):
             if route is None:
                 continue
             try:
@@ -290,12 +274,6 @@ async def rpc(req: Request):
             for spec in item.get("result", {}).get("tools", []):
                 if isinstance(spec, dict) and isinstance(spec.get("name"), str):
                     merged[spec["name"]] = spec
-        merged["control_phone_cloud_receipt"]={
-            "name":"control_phone_cloud_receipt",
-            "description":"Retrieve a durable result for an offsite Android command using its pending ID",
-            "inputSchema":{"type":"object","properties":{"id":{"type":"string"}},
-                           "required":["id"]}
-        }
         response = {
             "jsonrpc": "2.0", "id": message.get("id"),
             "result": {"tools": list(merged.values())},
