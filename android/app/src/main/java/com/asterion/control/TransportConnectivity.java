@@ -14,7 +14,8 @@ final class TransportConnectivity {
     JSONObject out=new JSONObject().put("network","offline")
       .put("connected",false).put("validated",false).put("metered",true)
       .put("https_outbound_only",true).put("requires_home_wifi",false)
-      .put("requires_pc_for_phone_commands",false);
+      .put("requires_pc_for_phone_commands",true)
+      .put("direct_mcp",PhoneDirectMcp.status());
     if(cm==null)return out;
     Network current=cm.getActiveNetwork();
     NetworkCapabilities caps=current==null?null:cm.getNetworkCapabilities(current);
