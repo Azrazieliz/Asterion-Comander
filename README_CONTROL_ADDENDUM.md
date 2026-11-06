@@ -1,3 +1,11 @@
+# Historical reference — 0.3.0 prototype (superseded)
+
+This document is preserved as the original 0.3.0 development record. Its statements about using ADB and the absence of a standalone Android agent are **historical, not current**. The owner-confirmed installed release is native Android **0.8.6**, and **0.8.8** is compiled development source pending the owner's matching-key Android update and actual on-device acceptance.
+
+For the current architecture and evidence, read [README](README.md), [7* frozen master](7STAR_FROZEN_MASTER.md), and [PROGRESS](PROGRESS.md). No changes to frozen specifications are implied.
+
+---
+
 # Asterion Control 0.3.0 — source prototype
 
 Continuation of the fully included Asterion Remote 0.2.0 source, renamed and extended to Asterion Control. The existing README.md explains the current baseline, which still relies on ADB for Android control and snapshot capture.
