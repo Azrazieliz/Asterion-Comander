@@ -54,7 +54,6 @@ jobs:
             Write-Host "Control PowerShell syntax valid: $path"
           }
       - uses: actions/setup-java@v4
-        if: github.event_name == 'workflow_dispatch'
         with:
           distribution: temurin
           java-version: '21'
@@ -96,7 +95,6 @@ jobs:
               output.write('ASTERION_OWNER_KEYSTORE_PATH='+str(target)+'\n')
           PY
       - name: Provision Android SDK 35 using available cmdline-tools
-        if: github.event_name == 'workflow_dispatch'
         shell: bash
         run: |
           SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
@@ -112,9 +110,12 @@ jobs:
           test -f "$SDK/platforms/android-35/android.jar"
           test -d "$SDK/build-tools/35.0.0"
       - uses: gradle/actions/setup-gradle@v4
-        if: github.event_name == 'workflow_dispatch'
         with:
           gradle-version: '8.13'
+      - name: Compile native Android source without APK packaging
+        if: github.event_name == 'push'
+        working-directory: android
+        run: gradle --no-daemon --console=plain :app:compileDebugJavaWithJavac
       - name: Build owner-compatible native APK entirely on GitHub Actions
         if: github.event_name == 'workflow_dispatch'
         working-directory: android
