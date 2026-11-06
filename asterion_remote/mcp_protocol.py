@@ -51,6 +51,19 @@ TOOLS = [
     spec('control_phone_input','Send action to the authorized Android agent without ADB',
          {'action': {'type':'string','enum':['tap','swipe','long_press','back','home','recents','notifications','type','click_text']},
           'x':INT,'y':INT,'x2':INT,'y2':INT,'duration_ms':INT,'text':STR},['action']),
+    spec('control_phone_network_status','Read Android cellular, VPN and remote transport status'),
+    spec('control_phone_voice_ack','Acknowledge spoken answer and erase local transcript',
+         {'question_id':STR},['question_id']),
+    spec('control_phone_cycle_status','Read checkpoint cycle status'),
+    spec('control_phone_cycle_start','Start ACK-gated canonical checkpoint sequence',
+         {'cycle_id':STR,'project':STR,'priority_tier':STR,'spec_reference':STR,'message':STR,
+          'conversation':STR,'max_cycles':INT},
+         ['cycle_id','project','priority_tier','spec_reference','message']),
+    spec('control_phone_cycle_pause','Pause future checkpoint turns'),
+    spec('control_phone_cycle_resume','Resume reviewed checkpoint sequence'),
+    spec('control_phone_cycle_stop','Stop future checkpoint turns'),
+    spec('control_phone_cycle_confirm_new_chat','Confirm operator-observed ChatGPT navigation',
+         {'verification':STR},['verification']),
     spec('control_phone_voice_status','Read permissioned Android foreground voice dialogue state and transcript'),
     spec('control_phone_voice_question','Speak a bounded question on Samsung, then listen once using on-device recognition',
          {'text':STR,'locale':STR},['text']),
@@ -150,6 +163,24 @@ def invoke_tool(name: str, args: dict):
     if name == 'control_phone_voice_question':
         from .native_routes import phone_voice_question, VoiceQuestion
         return phone_voice_question(VoiceQuestion(**args))
+    if name == 'control_phone_network_status':
+        from .native_routes import phone_network_status
+        return phone_network_status()
+    if name == 'control_phone_voice_ack':
+        from .native_routes import phone_voice_ack, VoiceAcknowledgment
+        return phone_voice_ack(VoiceAcknowledgment(**args))
+    if name.startswith('control_phone_cycle_'):
+        from . import native_routes as nr
+        operations={
+            'control_phone_cycle_status': lambda: nr.phone_cycle_status(),
+            'control_phone_cycle_start': lambda: nr.phone_cycle_start(nr.CycleRequest(**args)),
+            'control_phone_cycle_pause': lambda: nr.phone_cycle_pause(),
+            'control_phone_cycle_resume': lambda: nr.phone_cycle_resume(),
+            'control_phone_cycle_stop': lambda: nr.phone_cycle_stop(),
+            'control_phone_cycle_confirm_new_chat': lambda: nr.phone_cycle_confirm_new_chat(nr.NewChatVerification(**args)),
+        }
+        if name in operations:
+            return operations[name]()
     if name == 'control_phone_observation_status':
         from .native_routes import phone_observation_status
         return phone_observation_status()
