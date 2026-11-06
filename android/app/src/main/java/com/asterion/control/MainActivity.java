@@ -294,6 +294,19 @@ public final class MainActivity extends Activity {
     wide(handoff,t("Only a queued, spec-referenced checkpoint is sent. Existing drafts are never overwritten; Android and ChatGPT limits still apply.",11,DesignSystem.MUTED,false));
     wide(devicesBody,handoff);
 
+    gap(devicesBody,12);LinearLayout fallback=card();
+    rowTitle(fallback,"Private GitHub relay (fallback)",
+      "Phone-only · uses your existing private Control Bridge",icon("shield",DesignSystem.TEAL,22));
+    gap(fallback,12);
+    button(fallback,"Connect Android private bridge","check",true,this::configurePhoneGitBridge);
+    gap(fallback,9);
+    button(fallback,"Inspect bridge health","activity",false,this::showPhoneGitBridgeStatus);
+    gap(fallback,9);
+    button(fallback,"Disable and clear bridge key","power",false,this::revokePhoneGitBridge);
+    gap(fallback,9);
+    wide(fallback,t("Optional when direct MCP is unavailable. Uses a restricted GitHub credential encrypted on the phone. Only authorized Android tool operations are accepted; no model API.",11,DesignSystem.MUTED,false));
+    wide(devicesBody,fallback);
+
     gap(devicesBody,12);LinearLayout observation=card();
     rowTitle(observation,"Cross-app screen observation",
       "Local screen evidence & events · no embedded AI",icon("activity",DesignSystem.TEAL,23));
@@ -754,6 +767,54 @@ public final class MainActivity extends Activity {
         runOnUiThread(()->setPairingFeedback("Direct ChatGPT setup unavailable: "+message));
       }finally{if(connection!=null)connection.disconnect();}
     });
+  }
+  private void configurePhoneGitBridge(){
+    EditText credential=new EditText(this);
+    credential.setSingleLine(true);
+    credential.setTextSize(14f);
+    credential.setHint("GitHub token scoped to Asterion-Control-Bridge");
+    credential.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD);
+    LinearLayout layout=v();pad(layout,18,12);
+    wide(layout,credential);gap(layout,12);
+    wide(layout,t("This optional fallback runs on your Samsung, even when Windows is off. Grant the token Contents read/write only for the existing private bridge repository. A blank field retains a previously configured token.",12,DesignSystem.MUTED,false));
+    new AlertDialog.Builder(this).setTitle("Enable private Android command bridge")
+      .setView(layout)
+      .setPositiveButton("Enable",(dialog,which)->{
+        String supplied=credential.getText().toString();
+        credential.setText("");
+        io.execute(()->{
+          try{
+            PhoneGitBridge.configure(this,supplied,true);
+            runOnUiThread(()->{
+              startAgent();
+              toast("Android command bridge enabled");
+            });
+          }catch(Exception e){
+            runOnUiThread(()->toast("Bridge key invalid or could not be saved"));
+          }
+        });
+      }).setNegativeButton("Cancel",(d,w)->credential.setText("")).show();
+  }
+  private void showPhoneGitBridgeStatus(){
+    try{
+      JSONObject status=PhoneGitBridge.status(this);
+      String report="Enabled: "+status.optBoolean("enabled")+
+        "\nCredential configured: "+status.optBoolean("token_present")+
+        "\nCompleted commands: "+status.optLong("completed")+
+        "\nLast processed: "+status.optString("last_command","none")+
+        "\nLast error: "+status.optString("last_error","none");
+      new AlertDialog.Builder(this).setTitle("Android private bridge status")
+        .setMessage(report).setPositiveButton("Close",null).show();
+    }catch(Exception e){toast("Bridge status unavailable");}
+  }
+  private void revokePhoneGitBridge(){
+    new AlertDialog.Builder(this).setTitle("Disable Android bridge")
+      .setMessage("Stop remote commands and delete the locally encrypted GitHub token? The GitHub token itself must be revoked separately if necessary.")
+      .setPositiveButton("Disable and erase",(d,w)->io.execute(()->{
+        try{PhoneGitBridge.revoke(this);
+          runOnUiThread(()->toast("Android private bridge disabled"));}
+        catch(Exception e){runOnUiThread(()->toast("Bridge could not be disabled"));}
+      })).setNegativeButton("Cancel",null).show();
   }
   private void startVoiceQuestions(){
     if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){
