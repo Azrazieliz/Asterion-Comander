@@ -57,6 +57,40 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+      - name: Provision owner Android signer from encrypted GitHub Actions secret
+        shell: bash
+        env:
+          ASTERION_OWNER_KEYSTORE_B64: ${{ secrets.ASTERION_ANDROID_DEBUG_KEYSTORE_B64 }}
+        run: |
+          python - <<'PY'
+          import base64, os, pathlib, re, subprocess
+          sealed=os.environ.get('ASTERION_OWNER_KEYSTORE_B64','')
+          if not sealed:
+              raise SystemExit('Original signing identity missing from protected GitHub Actions secrets')
+          try:
+              data=base64.b64decode(sealed,validate=True)
+          except (ValueError,base64.binascii.Error):
+              raise SystemExit('Invalid protected keystore encoding')
+          if not (500<=len(data)<=100000):
+              raise SystemExit('Owner signing key size invalid')
+          target=pathlib.Path.home()/'.android'/'debug.keystore'
+          target.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
+          target.write_bytes(data)
+          target.chmod(0o600)
+          result=subprocess.run(['keytool','-list','-v','-keystore',str(target),
+              '-storepass','android','-alias','androiddebugkey'],
+              capture_output=True,text=True,timeout=30)
+          if result.returncode:
+              raise SystemExit('Protected signing key is unreadable')
+          match=re.search(r'SHA256:\\s*([0-9A-Fa-f:]+)',result.stdout+result.stderr)
+          if match is None:
+              raise SystemExit('Signing key certificate fingerprint missing')
+          actual=match.group(1).replace(':','').lower()
+          expected='9bc439712a0a460cc4703ebf254aaaf9bf3cc6e67b0ced6fc12162ed3ca3b9ad'
+          if actual!=expected:
+              raise SystemExit('CI signer does not match installed Samsung package')
+          print('OWNER_ANDROID_SIGNER_MATCHES_INSTALLED_APP=true')
+          PY
       - name: Provision Android SDK 35 using available cmdline-tools
         shell: bash
         run: |
@@ -75,7 +109,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
-      - name: Build native APK (CI debug signer; not owner release key)
+      - name: Build owner-compatible native APK entirely on GitHub Actions
         working-directory: android
         run: gradle --no-daemon --console=plain :app:assembleDebug
       - name: Validate Android app identity and archive
@@ -106,11 +140,12 @@ jobs:
             echo "SIGNER_COMPATIBLE_WITH_V086_BASELINE=true" | tee "$RUNNER_TEMP/asterion-signing-compatibility.txt"
           else
             echo "SIGNER_COMPATIBLE_WITH_V086_BASELINE=false" | tee "$RUNNER_TEMP/asterion-signing-compatibility.txt"
-            echo "::warning::This CI APK cannot replace v0.8.6 in place; rebuild with the owner's matching original signing key."
+            echo "::error::Refusing to publish an Android APK with an incompatible signer"
+            exit 1
           fi
       - uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: Asterion-Control-v0.8.8-CI-SIGNER-UNVERIFIED
+          name: Asterion-Control-v0.8.8-OWNER-SIGNED-CI
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
