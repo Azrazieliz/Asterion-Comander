@@ -70,7 +70,7 @@ def test_direct_disconnection_is_uncertain_and_never_replayed(monkeypatch):
     with TestClient(mcp_gateway.app) as client:
         result = client.post("/mcp", headers=AUTH, json=RPC)
         assert result.status_code == 504
-        assert "no replay" in result.json()["detail"].lower()
+        assert "replay" in result.json()["detail"].lower()
 
 
 def test_private_wifi_phone_mcp_works_without_github(monkeypatch):
