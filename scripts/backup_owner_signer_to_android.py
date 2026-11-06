@@ -9,6 +9,7 @@ ADB is only a bootstrap transport, not a normal Control runtime dependency.
 from __future__ import annotations
 
 import hashlib
+import os
 import pathlib
 import re
 import shutil
@@ -45,17 +46,33 @@ def main() -> None:
     if not 500 <= len(data) <= 100000:
         raise RuntimeError("Owner signing keystore invalid size")
     expected = hashlib.sha256(data).hexdigest()
-    # ADB joins shell parameters; an unquoted sh -c script could run redirection
-    # outside the run-as app context. Direct dd avoids shell quoting and logs.
-    call(adb, ["-s", serial, "shell", "-T", "run-as", PACKAGE,
+    # 'adb shell' truncates streamed binary input on some Windows drivers.
+    # Use the dedicated raw exec-in channel and prove it using harmless random
+    # bytes before ever transferring the original signer.
+    preflight = os.urandom(3072)
+    test_dest = "no_backup/asterion-transfer-check.bin"
+    try:
+        call(adb, ["-s", serial, "exec-in", "run-as", PACKAGE,
+                   "dd", "of=" + test_dest, "bs=4096"], preflight)
+        check = call(adb, ["-s", serial, "shell", "-T", "run-as",
+                          PACKAGE, "sha256sum", test_dest])
+        observed = check.stdout.decode("utf8", "replace").split()
+        if not observed or observed[0] != hashlib.sha256(preflight).hexdigest():
+            raise RuntimeError("Binary-safe Android transfer failed preflight checksum")
+    finally:
+        subprocess.run([adb, "-s", serial, "shell", "-T", "run-as",
+                        PACKAGE, "rm", "-f", test_dest],
+                       capture_output=True, timeout=20, check=False)
+    call(adb, ["-s", serial, "exec-in", "run-as", PACKAGE,
                "dd", "of=" + DESTINATION, "bs=4096"], data)
-    call(adb, ["-s", serial, "shell", "-T", "run-as", PACKAGE,
-               "chmod", "600", DESTINATION])
-    verified = call(adb, ["-s", serial, "shell", "-T", "run-as", PACKAGE, "sha256sum", DESTINATION])
+    call(adb, ["-s", serial, "shell", "-T", "run-as",
+               PACKAGE, "chmod", "600", DESTINATION])
+    verified = call(adb, ["-s", serial, "shell", "-T", "run-as",
+                          PACKAGE, "sha256sum", DESTINATION])
     answer = verified.stdout.decode("utf8", "replace")
     digest = answer.split()[0] if answer.split() else ""
     if not re.fullmatch(r"[a-f0-9]{64}", digest) or digest != expected:
-        raise RuntimeError("Owner signing keystore phone backup checksum did not match")
+        raise RuntimeError("Owner signer backup checksum mismatch; PC original preserved")
     print("OWNER_SIGNER_SAMSUNG_APP_PRIVATE_BACKUP_VERIFIED")
     print("Owner keystore bytes were not emitted; PC key remains until CI proof is accepted.")
 
