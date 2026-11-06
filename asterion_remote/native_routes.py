@@ -84,10 +84,15 @@ def phone_continuation_queue(data:ContinuationRequest):
 def phone_continuation_dispatch():
     return request('/continuation/dispatch','POST',{},timeout=15.0).json()
 
-class CycleRequest(ContinuationRequest):
+class CycleRequest(BaseModel):
+    project: str = Field(min_length=3,max_length=70)
+    priority_tier: Literal['5*','6*','7*']
+    spec_reference: str = Field(min_length=3,max_length=250)
+    message: str = Field(min_length=1,max_length=3000)
     cycle_id: str = Field(min_length=3,max_length=66)
     conversation: Literal['same','new'] = 'same'
-    voice_locale: str = Field(default='en-US',pattern=r'^[a-z]{2}(-[A-Z]{2})? = Field(default=0,ge=0,le=1000000)
+    voice_locale: str = Field(default='en-US',min_length=2,max_length=5)
+    max_cycles: int = Field(default=0,ge=0,le=1000000)
 
 class NewChatVerification(BaseModel):
     verification: str = Field(min_length=8,max_length=512)
