@@ -12,7 +12,9 @@ android {
   // CI must explicitly use the original installed application's signing key.
   // Never silently substitute a runner-generated debug identity.
   signingConfigs {
-    debug {
+    // Owner release is distinct from Gradle's debug build type. Android must
+    // retain the ORIGINAL signing certificate for non-destructive upgrades.
+    ownerRelease {
       def originalKey = System.getenv('ASTERION_OWNER_KEYSTORE_PATH')
       if (originalKey != null && !originalKey.trim().isEmpty()) {
         storeFile file(originalKey)
@@ -23,7 +25,7 @@ android {
     }
   }
   buildTypes {
-    debug { signingConfig signingConfigs.debug }
+    debug { debuggable true }
     release {
       // Real non-debuggable APK variant, signed with the installed app's
       // ORIGINAL certificate to preserve seamless in-place upgrades.
@@ -32,7 +34,7 @@ android {
       minifyEnabled true
       shrinkResources true
       proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-      signingConfig signingConfigs.debug
+      signingConfig signingConfigs.ownerRelease
     }
   }
   compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
