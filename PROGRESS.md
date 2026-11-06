@@ -1,3 +1,12 @@
+# 2026-11-06 — Post-v0.9.5 live acceptance and plugin surface finding
+
+- Actual authenticated cellular probe returned Samsung `SM-S948B` **installed version `0.9.5`**, native direct WSS `connected=true`, Android network `cellular` validated, 57 advertised gateway tools, voice/cycle endpoints responding; public anonymous access still rejected. The Android installation and cellular connectivity blockers are therefore **resolved and verified**. Status-only voice and cycle responses are not successful audio/iteration receipts.
+- Primary private plugin `Asterion Control` **v1.7.1** was published; its MCP and App SDK manifests are present, but Plugin Management reports `not_installed` in this chat and no callable `control_phone_*` tools are attached.
+- OpenAI Plugins quickstart (https://developers.openai.com/plugins/quickstart) states personal MCP plugins must be installed from their personal plugin entry and invoked in **ChatGPT Work on the web** with `@`. OpenAI plugin troubleshooting (https://help.openai.com/en/articles/20001497-troubleshooting-plugins-and-apps-in-chatgpt) notes installation, selected model/surface, and app authorization are separate from publishing. This Android Chat conversation does not verify the Work web installation. **Owner interaction to install/enable in Work web is required**; further APK modifications cannot fix this ChatGPT account/surface state.
+- Existing gateway at port 8995 has responded correctly over cellular. A controlled live process reload of the newer Python tool catalog was not completed; preserve working service rather than risk disabling the Samsung connection. Voice recognition fallback implemented in installed v0.9.5 still needs a real audible question and recognized-answer receipt.
+
+---
+
 # 2026-11-06 — ChatGPT-operated cycle correction and signed v0.9.5 release
 
 - User clarified that **ChatGPT, not Android Control, owns iteration**. Removed active Android autonomous cycle scheduling / self-test launch controls; keep Android as deterministic authenticated executor and receipt transport. New regression checks enforce no `cycles.tick()` runner. The old installed v0.9.4 may still show `needs_review` from the legacy cycle; it is not a successful cycle.
