@@ -95,7 +95,7 @@ final class AndroidMcp {
         return textContent(new JSONObject().put("ok",true).put("android",Build.VERSION.RELEASE)
           .put("device",Build.MODEL).put("capture",CaptureService.active)
           .put("accessibility",ControlAccessibilityService.active!=null)
-          .put("version","0.8.8"));
+          .put("version","0.9.0"));
       case "control_phone_bridge_status":return textContent(PhoneGitBridge.status(owner));
       case "control_phone_health":return textContent(owner.health());
       case "control_phone_ui":{
@@ -169,7 +169,7 @@ final class AndroidMcp {
           result.put("result",new JSONObject().put("protocolVersion",VERSION)
             .put("capabilities",new JSONObject().put("tools",new JSONObject()))
             .put("serverInfo",new JSONObject().put("name","asterion-control-android")
-              .put("version","0.8.8")));
+              .put("version","0.9.0")));
           break;
         case "ping":result.put("result",new JSONObject());break;
         case "tools/list":result.put("result",tools());break;
