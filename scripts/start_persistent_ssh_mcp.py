@@ -173,7 +173,7 @@ def run() -> None:
     backoff = 3
     known = STATE / "mcp-stable-known-hosts"
     while FLAG.exists():
-        cmd = [ssh, "-n", "-T", "-i", str(SSH_KEY),
+        cmd = [ssh, "-v", "-n", "-T", "-i", str(SSH_KEY),
                "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes",
                "-o", "StrictHostKeyChecking=yes",
                "-o", "UserKnownHostsFile=" + str(known),
@@ -196,6 +196,7 @@ def run() -> None:
                     evt = json.loads(line)
                 except (ValueError, TypeError):
                     evt = {}
+                    emit("CONTROL_STABLE_SSH_HANDSHAKE=" + line.strip()[:230])
                 values = [str(evt.get(k, "")) for k in ("url", "public_url", "https_url", "message")]
                 values.append(line)
                 for candidate in values:
@@ -223,6 +224,9 @@ def run() -> None:
                 emit("CONTROL_STABLE_MCP_PUBLIC_NOT_VERIFIED")
         else:
             emit("CONTROL_STABLE_SSH_PUBLIC_URL_NOT_RETURNED")
+            # Do not keep a stalled, unauthenticated SSH process forever.
+            if proc.poll() is None:
+                proc.terminate()
         while FLAG.exists() and proc.poll() is None:
             time.sleep(3)
         if proc.poll() is None:
