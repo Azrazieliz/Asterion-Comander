@@ -133,3 +133,29 @@ def test_performance_mcp_uses_native_phone_cellular_route(monkeypatch):
         "control_phone_performance_mode",
         "control_phone_performance_optimize",
     ]
+
+
+def test_canonical_tools_survive_stale_subordinate_agent(monkeypatch):
+    _authorize(monkeypatch)
+    monkeypatch.setattr(mcp_gateway, "phone_live_connected", lambda: False)
+    monkeypatch.setattr(mcp_gateway, "_phone_route", lambda: None)
+    monkeypatch.setattr(
+        mcp_gateway, "_windows_route",
+        lambda: ("http://192.168.0.12:8911/mcp", "m" * 48))
+    async def stale(*args, **kwargs):
+        return httpx.Response(200, json={
+            "jsonrpc": "2.0", "id": 55,
+            "result": {"tools": [{
+                "name": "remote_system", "description": "Older Windows agent",
+                "inputSchema": {"type": "object", "properties": {}}
+            }]}})
+    monkeypatch.setattr(mcp_gateway, "_forward", stale)
+    with TestClient(mcp_gateway.app) as client:
+        reply = client.post("/mcp", headers=AUTH, json={
+            "jsonrpc": "2.0", "id": 55, "method": "tools/list"})
+        assert reply.status_code == 200
+        tools = {t["name"] for t in reply.json()["result"]["tools"]}
+        assert "control_phone_performance_optimize" in tools
+        assert "control_pc_performance_mode" in tools
+        assert "control_phone_cycle_start" in tools
+        assert "remote_system" in tools
