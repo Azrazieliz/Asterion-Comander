@@ -12,11 +12,16 @@ from pathlib import Path
 import httpx
 
 STATE = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "AsterionControl"
-BASE = (STATE / "mcp-tunnel-url.txt").read_text("utf8").strip().rstrip("/")
 KEY = (STATE / "mcp-gateway-token.txt").read_text("utf8").strip()
-if len(KEY) < 43 or not BASE.startswith("https://") or not BASE.endswith(".trycloudflare.com"):
-    raise RuntimeError("Native Control HTTPS tunnel is not initialized")
-URL = BASE + "/mcp"
+# Prefer the stable, owner-keyed ingress. Never send the gateway bearer key to
+# a hostname outside the explicitly approved Control tunnel domain.
+URL = (STATE / "mcp-stable-https-url.txt").read_text("utf8").strip()
+from urllib.parse import urlsplit
+parsed = urlsplit(URL)
+if (len(KEY) < 43 or parsed.scheme != "https" or
+    not (parsed.hostname or "").endswith(".tunnl.gg") or
+    parsed.path != "/mcp" or parsed.query or parsed.fragment):
+    raise RuntimeError("Verified stable Control HTTPS MCP endpoint is unavailable")
 HEADERS = {"Authorization": "Bearer " + KEY,
            "Accept": "application/json, text/event-stream",
            "Content-Type": "application/json"}
