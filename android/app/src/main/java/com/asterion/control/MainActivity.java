@@ -91,7 +91,7 @@ public final class MainActivity extends Activity {
   private final DesignSystem.Icon[] tabIcons=new DesignSystem.Icon[4];
   private final TextView[] tabLabels=new TextView[4];
   private TextView headerStatus,pcConnection,homeAgent,homeBattery,homeMemory,homeThermal;
-  private TextView healthBattery,healthTemp,healthMemory,healthStorage,healthThermal,healthWifi,healthActionStatus;
+  private TextView healthBattery,healthTemp,healthMemory,healthStorage,healthThermal,healthWifi,healthActionStatus,pcPerformanceActionStatus;
   private TextView remoteConnection,remotePlaceholder,agentConnection,captureConnection,accessConnection,phoneAddress,hostHealth,pairingFeedback,transferFeedback,updateFeedback;
   private String activeTransferId=null;
   private DesignSystem.Meter batteryMeter,memoryMeter,storageMeter;
@@ -279,7 +279,17 @@ public final class MainActivity extends Activity {
     captureConnection=serviceLine(services,"Screen sharing","share");services.addView(line(),new LinearLayout.LayoutParams(-1,dp(1)));
     accessConnection=serviceLine(services,"Input access","shield");wide(healthBody,services);
     gap(healthBody,24);wide(healthBody,eyebrow("WINDOWS HEALTH"));gap(healthBody,10);
-    LinearLayout windows=card();hostHealth=t("Connect your Windows agent to see its CPU, memory, storage and temperature sensors.",12,DesignSystem.MUTED,false);wide(windows,hostHealth);wide(healthBody,windows);
+    LinearLayout windows=card();hostHealth=t("Connect your Windows agent to see its CPU, memory, storage and temperature sensors.",12,DesignSystem.MUTED,false);wide(windows,hostHealth);
+    gap(windows,12);
+    pcPerformanceActionStatus=t("Windows job controls adjust only jobs launched through Control.",11,DesignSystem.MUTED,false);
+    wide(windows,pcPerformanceActionStatus);
+    gap(windows,10);
+    button(windows,"Favor PC foreground apps","activity",true,
+      ()->managePcPerformance("favor_foreground"));
+    gap(windows,8);
+    button(windows,"Restore managed PC job priority","check",false,
+      ()->managePcPerformance("restore"));
+    wide(healthBody,windows);
     return scroll(healthBody);
   }
   private TextView serviceLine(LinearLayout card,String title,String iconName){LinearLayout row=h();row.setPadding(0,dp(11),0,dp(11));row.addView(icon(iconName,DesignSystem.PURPLE,20));TextView titleText=t(title,13,DesignSystem.TEXT,true);titleText.setPadding(dp(14),0,0,0);row.addView(titleText,new LinearLayout.LayoutParams(0,-2,1));TextView value=t("Checking",12,DesignSystem.MUTED,false);row.addView(value);wide(card,row);return value;}
@@ -759,6 +769,40 @@ public final class MainActivity extends Activity {
         toast("Control workload: "+result.optString("reason","updated"));
       }else toast("Control performance action did not complete");
     }catch(Exception e){toast("Performance action rejected: "+e.getClass().getSimpleName());}
+  }
+  private void managePcPerformance(String mode){
+    String url=prefs.getString("url","").replaceAll("/+$","");
+    String token=prefs.getString("token","");
+    if(url.isEmpty()||token.isEmpty()){
+      toast("Pair the Windows Control agent first");return;
+    }
+    io.execute(()->{
+      String result;
+      java.net.HttpURLConnection connection=null;
+      try{
+        connection=(java.net.HttpURLConnection)new java.net.URL(
+          url+"/api/v1/performance/jobs").openConnection();
+        connection.setRequestMethod("POST");
+        connection.setConnectTimeout(4000);connection.setReadTimeout(6000);
+        connection.setDoOutput(true);
+        connection.setRequestProperty("Authorization","Bearer "+token);
+        connection.setRequestProperty("Content-Type","application/json");
+        byte[] payload=new JSONObject().put("mode",mode).toString()
+          .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        try(java.io.OutputStream out=connection.getOutputStream()){out.write(payload);}
+        if(connection.getResponseCode()!=200)throw new IllegalStateException(
+          "Windows denied priority change (HTTP "+connection.getResponseCode()+")");
+        JSONObject reply=new JSONObject(new String(connection.getInputStream().readNBytes(16384),
+          java.nio.charset.StandardCharsets.UTF_8));
+        if(!reply.optBoolean("ok"))throw new IllegalStateException("No confirmed priority action");
+        result="PC jobs adjusted: "+reply.optJSONArray("applied").length()+
+          " · unchanged: "+reply.optJSONArray("skipped").length()+
+          "\nScope: Control-started Windows processes only";
+      }catch(Exception e){result="PC job priority unavailable: "+e.getClass().getSimpleName();}
+      finally{if(connection!=null)connection.disconnect();}
+      final String receipt=result;
+      runOnUiThread(()->{if(pcPerformanceActionStatus!=null)pcPerformanceActionStatus.setText(receipt);});
+    });
   }
   private String thermalName(int level){switch(level){case PowerManager.THERMAL_STATUS_NONE:return "Nominal";case PowerManager.THERMAL_STATUS_LIGHT:return "Light";case PowerManager.THERMAL_STATUS_MODERATE:return "Moderate";case PowerManager.THERMAL_STATUS_SEVERE:return "Severe";case PowerManager.THERMAL_STATUS_CRITICAL:return "Critical";case PowerManager.THERMAL_STATUS_EMERGENCY:return "Emergency";case PowerManager.THERMAL_STATUS_SHUTDOWN:return "Shutdown";default:return "Unavailable";}}
   private String networkName(){try{ConnectivityManager cm=(ConnectivityManager)getSystemService(CONNECTIVITY_SERVICE);Network n=cm.getActiveNetwork();NetworkCapabilities cap=cm.getNetworkCapabilities(n);if(cap==null)return "Offline";if(cap.hasTransport(NetworkCapabilities.TRANSPORT_WIFI))return "Wi-Fi connected";if(cap.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR))return "Mobile data";if(cap.hasTransport(NetworkCapabilities.TRANSPORT_VPN))return "VPN connected";if(cap.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))return "Ethernet";return "Connected";}catch(Exception e){return "Unavailable";}}
