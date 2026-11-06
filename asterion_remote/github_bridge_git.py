@@ -29,7 +29,8 @@ def agent_host():
     cgnat=ip in ipaddress.ip_network('100.64.0.0/10')
     if (parsed.scheme!='http' or port!=8911 or parsed.username or
         parsed.password or parsed.path not in ('','/') or parsed.query or
-        parsed.fragment or not (ip.is_private or ip.is_loopback or cgnat)):
+        parsed.fragment or ip.is_unspecified or ip.is_multicast or
+        ip.is_link_local or not (ip.is_private or ip.is_loopback or cgnat)):
         raise RuntimeError('Control endpoint is not an authorized private IP')
     host=('['+str(ip)+']') if ip.version==6 else str(ip)
     return 'http://'+host+':8911'
