@@ -185,10 +185,12 @@ final class PhoneGitBridge {
   private static void markHandled(Context ctx,String id){
     String[] prior=previous(ctx);
     StringBuilder out=new StringBuilder();
-    for(String earlier:prior)
-      if(!earlier.isEmpty())out.append(earlier).append(',');
-    if(out.length()>500_000)
-      throw new IllegalStateException("Local bridge receipt history is full; archive before continuing");
+    // A bounded recent-ID index avoids permanent self-lockout after thousands
+    // of phone cycles. Older commands are protected by durable results and
+    // the per-command outbox marker before any action can be dispatched.
+    int start=Math.max(0,prior.length-1800);
+    for(int i=start;i<prior.length;i++)
+      if(!prior[i].isEmpty()&&!prior[i].equals(id))out.append(prior[i]).append(',');
     out.append(id);
     if(!pref(ctx).edit().putString("handled",out.toString()).commit())
       throw new IllegalStateException("Cannot durably mark command as handled");
@@ -331,6 +333,15 @@ final class PhoneGitBridge {
         markHandled(owner,id);
         if(isolated)pruneFinishedCommand(pat,folder,name,entry.optString("sha",""),true);
         continue;
+      }
+      File priorOutbox=pendingFile(owner,id);
+      if(priorOutbox.isFile()){
+        // Local in-flight receipt survives a process crash. Never run the
+        // same UI action a second time after history rotation.
+        markHandled(owner,id);
+        if(publish(owner,pat,priorOutbox))
+          pruneFinishedCommand(pat,folder,name,entry.optString("sha",""),isolated);
+        return true;
       }
       JSONObject raw=getFile(folder+name,pat);
       if(raw==null)continue;
