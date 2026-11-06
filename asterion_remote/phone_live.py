@@ -15,14 +15,13 @@ import secrets
 from pathlib import Path
 from typing import Any
 
+from .pairing import is_authorized as paired_device_is_authorized
 from fastapi import APIRouter, WebSocket
 from starlette.websockets import WebSocketDisconnect
 
-STATE = Path(os.environ.get(
-    "ASTERION_CONTROL_STATE",
-    str(Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "AsterionControl"),
-))
-AUTHORIZED = STATE / "authorized-devices.json"
+# Use the canonical Windows Control pairing ledger. It is written by
+# POST /api/v1/pair and is shared by both native agent and MCP gateway.
+# Do not keep a second inconsistent copy under LOCALAPPDATA.
 router = APIRouter()
 _active: WebSocket | None = None
 _pending: dict[str, asyncio.Future] = {}
@@ -34,18 +33,8 @@ class DirectPhoneUncertain(RuntimeError):
 
 
 def _authorized(candidate: str) -> bool:
-    if len(candidate) < 32 or len(candidate) > 512:
-        return False
-    try:
-        records = json.loads(AUTHORIZED.read_text(encoding="utf-8"))
-        if not isinstance(records, list):
-            return False
-        digest = hashlib.sha256(candidate.encode("utf-8")).hexdigest()
-        return any(isinstance(row, dict) and
-                   hmac.compare_digest(str(row.get("hash", "")), digest)
-                   for row in records)
-    except (ValueError, OSError):
-        return False
+    # Single source of truth: /api/v1/pair issue+revocation records.
+    return paired_device_is_authorized(candidate)
 
 
 def connected() -> bool:
