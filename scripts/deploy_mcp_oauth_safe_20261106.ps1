@@ -12,11 +12,21 @@ $originalGateway = Join-Path $backup 'mcp_gateway.original.py'
 Copy-Item $gateway $originalGateway
 if(Test-Path $oauth){Copy-Item $oauth (Join-Path $backup 'oauth_bridge.original.py')}
 # Verify no unrelated local changes exist before replacing the running gateway source.
-$hashPython = 'import sys,hashlib,pathlib; b=pathlib.Path(sys.argv[1]).read_bytes().replace(b"\r\n",b"\n"); b=b[3:] if b.startswith(b"\xef\xbb\xbf") else b; print(hashlib.sha1(b"blob "+str(len(b)).encode()+b"\x00"+b).hexdigest())'
+function Get-BlobHash([string]$path) {
+  $raw=[IO.File]::ReadAllText($path)
+  $raw=$raw.Replace(([string][char]13+[string][char]10),[string][char]10)
+  if($raw.Length -gt 0 -and $raw[0] -eq [char]0xFEFF){$raw=$raw.Substring(1)}
+  $bytes=[Text.Encoding]::UTF8.GetBytes($raw)
+  $prefix=[Text.Encoding]::ASCII.GetBytes(("blob "+$bytes.Length+[char]0))
+  $combined=New-Object byte[] ($prefix.Length+$bytes.Length)
+  [Array]::Copy($prefix,0,$combined,0,$prefix.Length)
+  [Array]::Copy($bytes,0,$combined,$prefix.Length,$bytes.Length)
+  $digest=[Security.Cryptography.SHA1]::Create().ComputeHash($combined)
+  return [BitConverter]::ToString($digest).Replace('-','').ToLowerInvariant()
+}
 $baseBlob = '6639ca9da2b425544328f6b6974d2644fae6ae01'
 $updatedBlob = '23e811151f6af478a6278cc818d858ef9c831b48'
-$currentBlob = ((& $py -c $hashPython $gateway) | Out-String).Trim()
-if($LASTEXITCODE -ne 0){throw 'Could not fingerprint original gateway'}
+$currentBlob = Get-BlobHash $gateway
 if($currentBlob -ne $baseBlob -and $currentBlob -ne $updatedBlob){throw ('Gateway has other changes; refusing overwrite (blob '+$currentBlob+')')}
 $prefix='https://raw.githubusercontent.com/Azrazieliz/Asterion-Comander/work/android-primary-continuation-observation-20261105/asterion_remote/'
 $stagedGateway=Join-Path $backup 'mcp_gateway.new.py'
@@ -24,7 +34,7 @@ $stagedOauth=Join-Path $backup 'oauth_bridge.new.py'
 Invoke-WebRequest -Uri ($prefix+'mcp_gateway.py') -OutFile $stagedGateway -UseBasicParsing -TimeoutSec 25
 Invoke-WebRequest -Uri ($prefix+'oauth_bridge.py') -OutFile $stagedOauth -UseBasicParsing -TimeoutSec 25
 if((Get-Item $stagedGateway).Length -lt 12000 -or (Get-Item $stagedOauth).Length -lt 10000){throw 'Staged gateway source incomplete'}
-$gatewayNewBlob=((& $py -c $hashPython $stagedGateway)|Out-String).Trim()
+$gatewayNewBlob=Get-BlobHash $stagedGateway
 if($gatewayNewBlob -ne $updatedBlob){throw ('Staged gateway SHA mismatch: '+$gatewayNewBlob)}
 $restarted=$false
 try {
