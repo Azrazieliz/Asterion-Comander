@@ -53,6 +53,7 @@ final class PhoneGitBridge {
   private static volatile String lastError="",lastCommand="";
   private static volatile long lastPollMs=0,lastSuccessMs=0;
   private static volatile long completed=0;
+  private static volatile String commandsEtag="";
   private PhoneGitBridge(){}
   private static SharedPreferences pref(Context ctx){
     return ctx.getSharedPreferences("asterion_phone_git_bridge",Context.MODE_PRIVATE);
@@ -313,11 +314,15 @@ final class PhoneGitBridge {
     c.setRequestProperty("Accept","application/vnd.github+json");
     c.setRequestProperty("X-GitHub-Api-Version","2022-11-28");
     c.setRequestProperty("User-Agent","Asterion-Control-Android");
+    if(!commandsEtag.isEmpty())c.setRequestProperty("If-None-Match",commandsEtag);
     int code=c.getResponseCode();
+    if(code==304){c.disconnect();return null;}
     byte[] data=readBounded(code>=400?c.getErrorStream():c.getInputStream());
+    String receivedEtag=c.getHeaderField("ETag");
     c.disconnect();
     if(code==404)return null;
     if(code!=200)throw new IllegalStateException("Private command listing returned HTTP "+code);
+    if(receivedEtag!=null && receivedEtag.length()<256)commandsEtag=receivedEtag;
     return new JSONArray(new String(data,StandardCharsets.UTF_8));
   }
 }
