@@ -21,6 +21,7 @@ ALLOWED={
  'pc_script_run':('POST','/api/v1/internal/scripts/run'),
  'pc_script_parallel':('POST','/api/v1/internal/scripts/batch'),
  'phone_status':('GET','/api/v1/phone'),
+ 'phone_bridge_status':('GET','/api/v1/phone/bridge/status'),
  'phone_health':('GET','/api/v1/phone/health'),
  'phone_screen':('GET','/api/v1/phone/screen'),
  'phone_ui':('GET','/api/v1/phone/ui'),

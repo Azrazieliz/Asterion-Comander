@@ -24,6 +24,7 @@ def test_continuation_and_observation_endpoints_require_auth():
             "/api/v1/phone/observation/events",
             "/api/v1/phone/observation/frame",
             "/api/v1/phone/voice/status",
+            "/api/v1/phone/bridge/status",
             "/api/v1/phone/apps",
         ):
             assert client.get(path).status_code == 401
@@ -53,6 +54,7 @@ def test_mcp_lists_phone_continuation_and_game_observer():
         "control_phone_observation_frame",
         "control_phone_voice_status",
         "control_phone_voice_question",
+        "control_phone_bridge_status",
         "control_phone_apps",
         "control_phone_app_launch",
         "control_phone_continuation_ack",
@@ -101,3 +103,10 @@ def test_voice_question_schema_and_direct_native_dispatch(monkeypatch):
                         lambda question:{"ok":True,"question":question.text})
     assert mcp_protocol.invoke_tool("control_phone_voice_question",
                                     {"text":"What happened?","locale":"en-US"})["ok"]
+
+def test_phone_private_bridge_diagnostics_never_return_credentials(monkeypatch):
+    monkeypatch.setattr(native_routes,"phone_bridge_status",
+        lambda:{"enabled":True,"token_present":True,"completed":3})
+    state=mcp_protocol.invoke_tool("control_phone_bridge_status",{})
+    assert state["enabled"] and state["completed"]==3
+    assert "token" not in state

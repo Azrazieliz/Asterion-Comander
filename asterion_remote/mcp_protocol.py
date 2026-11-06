@@ -44,6 +44,7 @@ TOOLS = [
          {'action': {'type': 'string', 'enum': ['click','double_click','right_click','move','drag','scroll','type','hotkey','press','mouse_down','mouse_up']},
           'x':INT,'y':INT,'to_x':INT,'to_y':INT,'text':STR,'keys':{'type':'array','items':STR},'amount':INT, 'monitor':INT}, ['action']),
     spec('control_phone_status','Read paired native Android agent status; requires no ADB'),
+    spec('control_phone_bridge_status','Inspect opt-in Android GitHub bridge health without exposing credentials'),
     spec('control_phone_health','Read native Android CPU, memory, battery and thermal indicators'),
     spec('control_phone_screen','Capture a single current native Android MediaProjection frame'),
     spec('control_phone_ui','Read native Android accessibility UI hierarchy'),
@@ -123,6 +124,9 @@ def invoke_tool(name: str, args: dict):
     if name == 'control_phone_status':
         from .native_routes import phone_status
         return phone_status()
+    if name == 'control_phone_bridge_status':
+        from .native_routes import phone_bridge_status
+        return phone_bridge_status()
     if name == 'control_phone_health':
         from .native_routes import phone_health
         return phone_health()
