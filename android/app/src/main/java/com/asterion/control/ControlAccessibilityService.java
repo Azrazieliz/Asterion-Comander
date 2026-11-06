@@ -85,6 +85,73 @@ public final class ControlAccessibilityService extends AccessibilityService {
       return null;
     return field;
   }
+  /** Safe navigation only. A clicked "New chat" control is NOT proof that
+   * the new conversation loaded; the external operator must inspect UI first.
+   */
+  JSONObject requestNewChat(){
+    final CountDownLatch done=new CountDownLatch(1);
+    final JSONObject[] result={chatOutcome(false,false,"ChatGPT not ready")};
+    main.post(()->{
+      try{
+        AccessibilityNodeInfo root=getRootInActiveWindow();
+        if(root==null||root.getPackageName()==null||
+            !"com.openai.chatgpt".contentEquals(root.getPackageName())){
+          result[0]=chatOutcome(false,false,"ChatGPT must be visible on the phone");
+          return;
+        }
+        AccessibilityNodeInfo editor=findComposer(root);
+        if(editor!=null&&editor.getText()!=null&&editor.getText().length()>0){
+          result[0]=chatOutcome(false,false,"Existing draft preserved; cannot navigate away");
+          return;
+        }
+        AccessibilityNodeInfo button=findNewChat(root,0);
+        if(button==null){
+          result[0]=chatOutcome(false,false,
+             "Accessible New chat control not visible; inspect ChatGPT UI");
+          return;
+        }
+        boolean clicked=button.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+        JSONObject response=new JSONObject();
+        response.put("requested",clicked).put("verified_new_chat",false)
+          .put("reason",clicked?"New chat navigation clicked; inspect UI before sending":
+            "Android did not accept New chat click");
+        result[0]=response;
+      }catch(Exception e){
+        result[0]=chatOutcome(false,true,
+          "Uncertain ChatGPT navigation: "+e.getClass().getSimpleName());
+      }finally{done.countDown();}
+    });
+    try{
+      if(!done.await(6,TimeUnit.SECONDS))
+        return chatOutcome(false,true,"New chat navigation timed out");
+    }catch(InterruptedException e){
+      Thread.currentThread().interrupt();
+      return chatOutcome(false,true,"New chat navigation interrupted");
+    }
+    return result[0];
+  }
+  private AccessibilityNodeInfo findNewChat(AccessibilityNodeInfo node,int depth){
+    if(node==null||depth>24)return null;
+    CharSequence desc=node.getContentDescription(),txt=node.getText();
+    String value=(desc==null?txt:desc)==null?""
+      :(desc==null?txt:desc).toString().trim().toLowerCase(java.util.Locale.ROOT);
+    boolean match=value.equals("new chat")||value.equals("new conversation")
+      ||value.equals("start new chat")||value.equals("start a new chat")
+      ||value.equals("nouvelle conversation")||value.equals("nouvelle discussion");
+    if(match&&node.isVisibleToUser()){
+      AccessibilityNodeInfo parent=node;
+      for(int i=0;i<4&&parent!=null;i++){
+        if(parent.isEnabled()&&parent.isClickable()&&parent.isVisibleToUser())
+          return parent;
+        parent=parent.getParent();
+      }
+    }
+    for(int i=0;i<node.getChildCount();i++){
+      AccessibilityNodeInfo found=findNewChat(node.getChild(i),depth+1);
+      if(found!=null)return found;
+    }
+    return null;
+  }
   private JSONObject chatOutcome(boolean sent,boolean uncertain,String reason){
     JSONObject result=new JSONObject();
     try {
