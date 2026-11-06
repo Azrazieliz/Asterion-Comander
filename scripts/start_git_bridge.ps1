@@ -19,6 +19,15 @@ try {
   while ($true) {
     try {
       Set-Location $root
+      # A pre-upgrade Git worker may still be active without the watchdog lock.
+      # Never start a competing worker that could claim the same command twice.
+      $existing = @(Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -match 'asterion_remote\\.github_bridge_git' })
+      if ($existing.Count -gt 0) {
+        Add-Content -Path $log -Value ("EXISTING_WORKER " + (Get-Date -Format 'o'))
+        Start-Sleep -Seconds 20
+        continue
+      }
       $env:ASTERION_CONTROL_HOST = if ($env:ASTERION_CONTROL_HOST) {
         $env:ASTERION_CONTROL_HOST
       } else { 'http://192.168.1.133:8911' }
