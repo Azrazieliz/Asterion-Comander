@@ -316,8 +316,17 @@ final class PhoneGitBridge {
           "Android worker was interrupted; inspect before retrying"));
       markHandled(owner,id);
       JSONObject receipt;
-      try{receipt=execute(owner,id,command);}
-      catch(Exception e){
+      try{
+        long expiry=command.optLong("expires_at_ms",0);
+        long now=System.currentTimeMillis();
+        if(expiry>0&&(expiry<now||expiry-now>180000L)){
+          receipt=new JSONObject().put("id",id).put("ok",false)
+            .put("status","expired").put("error",
+              "The remote request expired before Android received it; no action executed");
+        }else{
+          receipt=execute(owner,id,command);
+        }
+      }catch(Exception e){
         receipt=new JSONObject().put("id",id).put("ok",false).put("status","failed")
           .put("error",e.getClass().getSimpleName()+": "+String.valueOf(e.getMessage()));
       }
