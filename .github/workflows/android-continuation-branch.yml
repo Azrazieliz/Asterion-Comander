@@ -56,6 +56,8 @@ jobs:
         run: |
           test -s android/app/build/outputs/apk/debug/app-debug.apk
           grep -q "versionName '0.8.8'" android/app/build.gradle
+          test -s android/app/src/main/java/com/asterion/control/PhoneGitBridge.java
+          test -s android/app/src/main/java/com/asterion/control/AndroidMcp.java
           sha256sum android/app/build/outputs/apk/debug/app-debug.apk
       - name: Audit debug APK signing identity versus installed v0.8.6 baseline
         shell: bash
