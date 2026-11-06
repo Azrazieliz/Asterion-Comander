@@ -1,0 +1,1 @@
+65c0640e2e6d299eaefa421a2d8c06430ad6d0fabc3fe74dddcaef256702ed25  Asterion-Control-v0.9.0-debug.apk
