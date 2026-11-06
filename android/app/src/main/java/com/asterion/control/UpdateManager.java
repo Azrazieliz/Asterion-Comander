@@ -31,7 +31,9 @@ import java.util.concurrent.Executors;
  */
 final class UpdateManager {
   interface Feedback {void show(String message);}
-  private static final String INDEX="https://raw.githubusercontent.com/Azrazieliz/Asterion-Comander/main/dist/latest.json";
+  // Release manifest is canonical. Old v0.8.8 clients still consume
+  // latest.json with an alias pointing to the SAME release-signed APK bytes.
+  private static final String INDEX="https://raw.githubusercontent.com/Azrazieliz/Asterion-Comander/main/dist/latest-release.json";
   private static final String PREFIX="https://raw.githubusercontent.com/Azrazieliz/Asterion-Comander/main/dist/";
   private static final String APK_TYPE="application/vnd.android.package-archive";
   private static final ExecutorService IO=Executors.newSingleThreadExecutor();
@@ -74,7 +76,8 @@ final class UpdateManager {
         String sha=meta.getString("sha256").toLowerCase(Locale.ROOT);
         long size=meta.getLong("size_bytes");
         if(!name.matches("[0-9]+\\.[0-9]+\\.[0-9]+")
-          ||!url.equals(PREFIX+"Asterion-Control-v"+name+"-debug.apk")
+          ||!(url.equals(PREFIX+"Asterion-Control-v"+name+"-release.apk") ||
+               url.equals(PREFIX+"Asterion-Control-v"+name+"-debug.apk"))
           ||!sha.matches("[0-9a-f]{64}")||size<20000||size>300000000)
           throw new IllegalStateException("Invalid update signature metadata");
         long current=owner.getPackageManager().getPackageInfo(owner.getPackageName(),0).getLongVersionCode();
@@ -104,7 +107,7 @@ final class UpdateManager {
         connection.setInstanceFollowRedirects(false);
         if(connection.getResponseCode()!=200)throw new IllegalStateException("Release download failed");
         ContentValues v=new ContentValues();
-        v.put(MediaStore.MediaColumns.DISPLAY_NAME,"Asterion-Control-v"+version+"-debug.apk");
+        v.put(MediaStore.MediaColumns.DISPLAY_NAME,"Asterion-Control-v"+version+"-release.apk");
         v.put(MediaStore.MediaColumns.MIME_TYPE,APK_TYPE);
         v.put(MediaStore.MediaColumns.RELATIVE_PATH,Environment.DIRECTORY_DOWNLOADS+"/Asterion Control/Updates/");
         v.put(MediaStore.MediaColumns.IS_PENDING,1);
