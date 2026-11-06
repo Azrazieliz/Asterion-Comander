@@ -167,7 +167,9 @@ final class PhoneGitBridge {
     byte[] body=readBounded(code>=400?c.getErrorStream():c.getInputStream());
     c.disconnect();
     if(code==404)return null;
-    if(code!=200&&code!=201)throw new IllegalStateException("Private GitHub bridge returned HTTP "+code);
+    if(code!=200&&code!=201&&code!=204)
+      throw new IllegalStateException("Private GitHub bridge returned HTTP "+code);
+    if(code==204||body.length==0)return new JSONObject();
     return new JSONObject(new String(body,StandardCharsets.UTF_8));
   }
   private static JSONObject getFile(String path,String pat)throws Exception{
@@ -285,10 +287,28 @@ final class PhoneGitBridge {
       if(lastError.length()>190)lastError=lastError.substring(0,190);
     }finally{busy=false;}
   }
+  private static void pruneFinishedCommand(String pat,String folder,
+      String name,String sha,boolean isolated){
+    // Only the new phone-owned isolated queue is pruned. Historical results
+    // remain immutable for audit, while Git history retains the old command.
+    if(!isolated||!name.matches("phone-[A-Za-z0-9_.-]{3,90}\\.json")||
+       !sha.matches("[0-9a-f]{40}"))return;
+    try {
+      JSONObject payload=new JSONObject()
+        .put("message","Archive completed Asterion phone command "+name)
+        .put("sha",sha).put("branch","main");
+      connect(API+folder+name,pat,"DELETE",payload);
+      phoneCommandsEtag="";
+    }catch(Exception e){
+      // Not fatal after a durable receipt. A later maintenance pass can retry.
+      android.util.Log.w("AsterionPhoneBridge",
+        "Command archive retry needed: "+e.getClass().getSimpleName());
+    }
+  }
   private static boolean processDirectory(AgentService owner,String pat,String folder,boolean isolated)throws Exception{
     JSONArray files=directory(pat,folder,isolated);
     if(files==null)return false;
-    int examined=0;
+    int examined=0, archived=0;
     for(int i=0;i<files.length()&&examined<MAX_ITEMS;i++){
       JSONObject entry=files.optJSONObject(i);
       if(entry==null||!"file".equals(entry.optString("type")))continue;
@@ -298,10 +318,19 @@ final class PhoneGitBridge {
       if(!name.matches(pattern))continue;
       examined++;
       String id=name.substring(0,name.length()-5);
-      if(handled(owner,id))continue;
       String remote=(isolated?"results/android/":"results/")+id+".json";
+      if(handled(owner,id)){
+        // Incremental cleanup; do not spend unlimited API calls on history.
+        if(isolated&&archived<3&&getFile(remote,pat)!=null){
+          pruneFinishedCommand(pat,folder,name,entry.optString("sha",""),true);
+          archived++;
+        }
+        continue;
+      }
       if(getFile(remote,pat)!=null){
-        markHandled(owner,id);continue;
+        markHandled(owner,id);
+        if(isolated)pruneFinishedCommand(pat,folder,name,entry.optString("sha",""),true);
+        continue;
       }
       JSONObject raw=getFile(folder+name,pat);
       if(raw==null)continue;
@@ -332,7 +361,8 @@ final class PhoneGitBridge {
       }
       savePending(pending,receipt);
       lastCommand=id;
-      publish(owner,pat,pending);
+      if(publish(owner,pat,pending))
+        pruneFinishedCommand(pat,folder,name,entry.optString("sha",""),isolated);
       completed++;
       return true;
     }
