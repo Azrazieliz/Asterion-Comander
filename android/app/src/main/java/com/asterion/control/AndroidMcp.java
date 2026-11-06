@@ -37,6 +37,10 @@ final class AndroidMcp {
     tools.put(tool("control_phone_bridge_status","Legacy alias for phone direct TLS state",null));
     tools.put(tool("control_phone_direct_status","Inspect phone initiated direct TLS MCP",null));
     tools.put(tool("control_phone_health","Android native battery, memory, thermal and screen state",null));
+    tools.put(tool("control_phone_performance_status","Read applied Android workload controls and observed pressure",null));
+    tools.put(tool("control_phone_performance_mode","Set bounded phone workload mode: automatic, foreground, full, quiet",
+      args("mode","string"),"mode"));
+    tools.put(tool("control_phone_performance_optimize","Prioritize foreground app for 20 minutes by lowering Control overhead",null));
     tools.put(tool("control_phone_ui","Accessible active Android UI hierarchy",null));
     tools.put(tool("control_phone_screen","Current consented live native screen frame",null));
     tools.put(tool("control_phone_input","Authorized Android gesture or UI action",args(
@@ -101,6 +105,11 @@ final class AndroidMcp {
       case "control_phone_bridge_status":
       case "control_phone_direct_status":return textContent(PhoneDirectMcp.status());
       case "control_phone_health":return textContent(owner.health());
+      case "control_phone_performance_status":return textContent(PerformanceManager.status(owner));
+      case "control_phone_performance_mode":return textContent(
+        PerformanceManager.setMode(owner,args.getString("mode")));
+      case "control_phone_performance_optimize":return textContent(
+        PerformanceManager.prioritizeForegroundNow(owner));
       case "control_phone_ui":{
         ControlAccessibilityService service=ControlAccessibilityService.active;
         if(service==null)throw new IllegalStateException("Owner has not enabled Android Accessibility");
