@@ -39,6 +39,25 @@ public final class VoiceDialogueService extends Service {
   private volatile boolean speakerReady=false;
   private String listeningLocale="en-US";
   private static final int NOTIFICATION_ID=2107;
+  private static final long SPEAKER_TIMEOUT_MS=90000L;
+  private static final long ANSWER_TIMEOUT_MS=45000L;
+  private volatile boolean consumed=true;
+  private volatile boolean microphoneActive=false;
+  private Runnable deadline;
+  private void clearDeadline(){
+    if(deadline!=null){ui.removeCallbacks(deadline);deadline=null;}
+  }
+  private void scheduleDeadline(String id,long delay){
+    clearDeadline();
+    deadline=()->{
+      if(active!=this||!id.equals(questionId))return;
+      if("answered".equals(phase)||"acknowledged".equals(phase))return;
+      if(listener!=null){listener.cancel();listener.destroy();listener=null;}
+      microphoneActive=false;
+      state("failed","Speech answer timed out; microphone closed");
+    };
+    ui.postDelayed(deadline,delay);
+  }
   private void state(String value,String message){
     phase=value;error=message;updatedAt=System.currentTimeMillis();
   }
@@ -77,29 +96,57 @@ public final class VoiceDialogueService extends Service {
     if(!speakerReady)state("initializing","");
     return START_NOT_STICKY;
   }
-  JSONObject ask(String text,String locale)throws Exception {
+  synchronized JSONObject ask(String text,String locale)throws Exception {
+    return ask(text,locale,"");
+  }
+  synchronized JSONObject ask(String text,String locale,String requestId)throws Exception {
     if(active!=this)throw new IllegalStateException("Enable voice questions from the phone first");
     if(!speakerReady)throw new IllegalStateException("Android speaker not ready");
     if(text==null||text.isBlank()||text.length()>700)
       throw new IllegalArgumentException("Question must contain 1-700 characters");
     if(!locale.matches("[a-z]{2}(-[A-Z]{2})?"))
       throw new IllegalArgumentException("Invalid speech locale");
-    if("speaking".equals(phase)||"listening".equals(phase))
+    if(requestId!=null&&!requestId.isEmpty()&&
+       !requestId.matches("[A-Za-z0-9_.-]{3,100}"))
+      throw new IllegalArgumentException("Invalid voice question identifier");
+    if(requestId!=null&&!requestId.isEmpty()&&requestId.equals(questionId)){
+      if(!text.equals(question))throw new IllegalStateException("Question ID was already used");
+      return report();  // Safe retry: never speak a question twice.
+    }
+    if("speaking".equals(phase)||"listening".equals(phase)||"processing".equals(phase))
       throw new IllegalStateException("Another voice exchange is active");
+    if("answered".equals(phase)&&!consumed)
+      throw new IllegalStateException("Previous voice answer has not been acknowledged");
     if(Build.VERSION.SDK_INT<31||!SpeechRecognizer.isOnDeviceRecognitionAvailable(this))
       throw new IllegalStateException("Android on-device speech recognition is unavailable");
-    question=text;transcript="";questionId=UUID.randomUUID().toString();
+    if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)
+      throw new IllegalStateException("Android microphone consent is missing");
+    question=text;transcript="";consumed=false;
+    questionId=requestId==null||requestId.isEmpty()?UUID.randomUUID().toString():requestId;
     listeningLocale=locale;
     state("speaking","");
-    ui.post(()->speakNow(text,locale,questionId));
-    return new JSONObject().put("ok",true).put("question_id",questionId)
-      .put("phase","speaking");
+    final String id=questionId;
+    ui.post(()->{
+      scheduleDeadline(id,SPEAKER_TIMEOUT_MS);
+      speakNow(text,locale,id);
+    });
+    return new JSONObject().put("ok",true).put("question_id",id).put("phase","speaking");
+  }
+  synchronized JSONObject acknowledge(String id)throws Exception {
+    if(id==null||!id.equals(questionId)||!"answered".equals(phase))
+      throw new IllegalStateException("No completed voice answer with this question ID");
+    consumed=true;
+    transcript="";question="";
+    state("acknowledged","");
+    return new JSONObject().put("ok",true).put("question_id",id)
+      .put("phase","acknowledged");
   }
   private void speakNow(String text,String locale,String id){
     if(active!=this)return;
     Locale language=Locale.forLanguageTag(locale);
-    if(speaker.setLanguage(language)==TextToSpeech.LANG_MISSING_DATA){
-      state("failed","Speech voice data not installed");return;
+    int languageResult=speaker.setLanguage(language);
+    if(languageResult==TextToSpeech.LANG_MISSING_DATA || languageResult==TextToSpeech.LANG_NOT_SUPPORTED){
+      clearDeadline();state("failed","Requested speech voice data is unavailable");return;
     }
     speaker.setOnUtteranceProgressListener(new UtteranceProgressListener(){
       @Override public void onStart(String utteranceId){}
@@ -107,29 +154,43 @@ public final class VoiceDialogueService extends Service {
         if(id.equals(utteranceId))ui.post(()->startListening(locale,id));
       }
       @Override public void onError(String utteranceId){
-        if(id.equals(utteranceId))state("failed","Android speech playback failed");
+        if(id.equals(utteranceId)){
+          ui.post(()->clearDeadline());
+          state("failed","Android speech playback failed");
+        }
       }
     });
     int response=speaker.speak(text,TextToSpeech.QUEUE_FLUSH,null,id);
-    if(response!=TextToSpeech.SUCCESS)state("failed","Could not start speaker");
+    if(response!=TextToSpeech.SUCCESS){clearDeadline();state("failed","Could not start speaker");}
   }
   private void startListening(String locale,String id){
     if(active!=this||!id.equals(questionId))return;
     try {
       if(listener!=null){listener.destroy();listener=null;}
       listener=SpeechRecognizer.createOnDeviceSpeechRecognizer(this);
+      scheduleDeadline(id,ANSWER_TIMEOUT_MS);
       listener.setRecognitionListener(new RecognitionListener(){
-        @Override public void onReadyForSpeech(Bundle extras){state("listening","");}
+        @Override public void onReadyForSpeech(Bundle extras){
+          microphoneActive=true;state("listening","");
+        }
         @Override public void onBeginningOfSpeech(){}
         @Override public void onRmsChanged(float rmsdB){}
         @Override public void onBufferReceived(byte[] data){}
         @Override public void onEndOfSpeech(){state("processing","");}
-        @Override public void onError(int code){state("failed","Recognition failed: "+code);}
+        @Override public void onError(int code){
+          if(!id.equals(questionId))return;
+          microphoneActive=false;clearDeadline();
+          state("failed","On-device recognition failed: "+code);
+          ui.post(()->{if(listener!=null){listener.destroy();listener=null;}});
+        }
         @Override public void onResults(Bundle results){
+          if(!id.equals(questionId))return;
+          microphoneActive=false;clearDeadline();
           ArrayList<String> phrases=results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
           transcript=phrases==null||phrases.isEmpty()?"":phrases.get(0);
           state(transcript.isEmpty()?"failed":"answered",
                 transcript.isEmpty()?"No recognized speech":"");
+          ui.post(()->{if(listener!=null){listener.destroy();listener=null;}});
         }
         @Override public void onPartialResults(Bundle results){}
         @Override public void onEvent(int type,Bundle params){}
@@ -141,12 +202,18 @@ public final class VoiceDialogueService extends Service {
       request.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS,1);
       state("listening","");
       listener.startListening(request);
-    } catch(Exception e){state("failed",e.getClass().getSimpleName());}
+    } catch(Exception e){
+      clearDeadline();microphoneActive=false;
+      if(listener!=null){listener.destroy();listener=null;}
+      state("failed",e.getClass().getSimpleName());
+    }
   }
   JSONObject report()throws Exception {
     return new JSONObject().put("enabled",active==this)
       .put("phase",phase).put("question_id",questionId)
       .put("question",question).put("transcript",transcript)
+      .put("microphone_active",microphoneActive)
+      .put("answer_pending_ack","answered".equals(phase)&&!consumed)
       .put("error",error).put("updated_at_ms",updatedAt)
       .put("on_device_recognition",Build.VERSION.SDK_INT>=31
          && SpeechRecognizer.isOnDeviceRecognitionAvailable(this));
@@ -154,6 +221,7 @@ public final class VoiceDialogueService extends Service {
   @Override public void onDestroy(){
     active=null;
     ui.post(()->{
+      clearDeadline();microphoneActive=false;
       if(listener!=null){listener.destroy();listener=null;}
       if(speaker!=null){speaker.stop();speaker.shutdown();}
     });
