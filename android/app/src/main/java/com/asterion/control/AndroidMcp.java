@@ -101,7 +101,7 @@ final class AndroidMcp {
         return textContent(new JSONObject().put("ok",true).put("android",Build.VERSION.RELEASE)
           .put("device",Build.MODEL).put("capture",CaptureService.active)
           .put("accessibility",ControlAccessibilityService.active!=null)
-          .put("version","0.9.2"));
+          .put("version",owner.getPackageManager().getPackageInfo(owner.getPackageName(),0).versionName));
       case "control_phone_bridge_status":
       case "control_phone_direct_status":return textContent(PhoneDirectMcp.status());
       case "control_phone_health":return textContent(owner.health());
@@ -181,7 +181,7 @@ final class AndroidMcp {
           result.put("result",new JSONObject().put("protocolVersion",VERSION)
             .put("capabilities",new JSONObject().put("tools",new JSONObject()))
             .put("serverInfo",new JSONObject().put("name","asterion-control-android")
-              .put("version","0.9.2")));
+              .put("version",owner.getPackageManager().getPackageInfo(owner.getPackageName(),0).versionName)));
           break;
         case "ping":result.put("result",new JSONObject());break;
         case "tools/list":result.put("result",tools());break;
