@@ -27,15 +27,18 @@ def test_cycle_includes_real_response_and_spoken_answer():
     assert "voice.acknowledge(" not in cycle or "voice_answer" in cycle
 
 def test_phone_controls_remain_in_private_https_and_no_pc_required():
-    phone=text("android/app/src/main/java/com/asterion/control/PhoneGitBridge.java")
+    agent=text("android/app/src/main/java/com/asterion/control/AgentService.java")
+    phone=text("android/app/src/main/java/com/asterion/control/PhoneDirectMcp.java")
     transport=text("android/app/src/main/java/com/asterion/control/TransportConnectivity.java")
-    cloud=text("asterion_remote/phone_cloud_relay.py")
-    for check in ("HttpsURLConnection","expires_at_ms","status","pruneFinishedCommand"):
-        assert check in phone
+    gateway=text("asterion_remote/mcp_gateway.py")
+    assert "PhoneDirectMcp.start(this)" in agent
+    assert "PhoneGitBridge.poll(this)" not in agent
+    assert 'setEndpointIdentificationAlgorithm("HTTPS")' in phone
+    assert "phone_live_invoke(message)" in gateway
+    assert "phone_cloud_relay.submit" not in gateway
     for check in ("TRANSPORT_CELLULAR","TRANSPORT_VPN","https_outbound_only",
                   "requires_pc_for_phone_commands"):
         assert check in transport
-    assert "commands/android" in cloud or '"/android/"' in cloud
 
 def test_release_requires_exact_owner_signer_and_uses_existing_update_feed():
     workflow=text(".github/workflows/android-continuation-branch.yml")
