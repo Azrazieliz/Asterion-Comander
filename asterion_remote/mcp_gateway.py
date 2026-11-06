@@ -176,41 +176,9 @@ async def _preferred(payload: bytes, headers: dict, phone_first=True):
 
 @app.post("/mcp")
 async def rpc(req: Request):
-    # Public metadata-only MCP discovery; device control remains authenticated.
-    if not req.headers.get("authorization"):
-        try:
-            raw_length = int(req.headers.get("content-length") or "0")
-        except ValueError:
-            raise HTTPException(400, "Malformed content length")
-        if raw_length > MAX_REQUEST:
-            raise HTTPException(413, "MCP request too large")
-        data = await req.body()
-        if len(data) > MAX_REQUEST:
-            raise HTTPException(413, "MCP request too large")
-        try:
-            discovery_msg = json.loads(data)
-        except (ValueError, UnicodeError):
-            discovery_msg = None
-        if isinstance(discovery_msg, dict) and discovery_msg.get("method") in ("initialize", "tools/list"):
-            accepted = req.headers.get("accept", "")
-            if "application/json" not in accepted or "text/event-stream" not in accepted:
-                raise HTTPException(406, "MCP requires JSON and event-stream Accept")
-            if discovery_msg["method"] == "initialize":
-                outcome = {"jsonrpc": "2.0", "id": discovery_msg.get("id"),
-                           "result": {"protocolVersion": "2025-11-25", "capabilities": {"tools": {}},
-                                      "serverInfo": {"name": "asterion-control", "version": "0.9.0"}}}
-            else:
-                from .mcp_protocol import TOOLS
-                schemas = []
-                for item in TOOLS:
-                    public = dict(item)
-                    public["_meta"] = {**(public.get("_meta") or {}),
-                                       "securitySchemes": [{"type": "oauth2", "scopes": [SCOPE]}]}
-                    schemas.append(public)
-                outcome = {"jsonrpc": "2.0", "id": discovery_msg.get("id"),
-                           "result": {"tools": schemas}}
-            return Response(content=json.dumps(outcome), media_type="application/json",
-                            headers={"Cache-Control": "no-store"})
+    # MCP authorization must challenge *all* unauthorized requests, including
+    # initialize and tools/list. Otherwise clients can skip OAuth discovery and
+    # a registered connection may produce an empty tool catalogue.
     bearer = req.headers.get("authorization", "")
     token = bearer[7:] if bearer.startswith("Bearer ") else ""
     if not token or not (
@@ -240,6 +208,10 @@ async def rpc(req: Request):
     if not isinstance(message, dict):
         raise HTTPException(400, "A single MCP JSON-RPC object is required")
     method = message.get("method")
+    # The MCP client sends this notification after successful initialize.
+    # It has no JSON-RPC id, so a stateless server acknowledges it with 202.
+    if method == "notifications/initialized":
+        return Response(status_code=202, headers={"Cache-Control":"no-store"})
     name = (message.get("params") or {}).get("name") if isinstance(message.get("params"), dict) else ""
     if method == "tools/call":
         params = message.get("params") or {}
