@@ -240,9 +240,14 @@ async def rpc(req: Request):
                 answer = await phone_cloud_relay.submit(name,args,message.get("id"))
                 return Response(content=json.dumps(answer),media_type="application/json",
                                 headers={"Cache-Control":"no-store"})
-            except (RuntimeError,ValueError,httpx.HTTPError):
-                pass
-        upstream = await _preferred(payload, req.headers, phone_first=native)
+            except (RuntimeError,ValueError,httpx.HTTPError) as exc:
+                # A GitHub PUT can succeed even if the response is lost.
+                # Never replay a possibly queued side-effecting phone command
+                # through a second transport.
+                raise HTTPException(503,
+                    "Phone cloud receipt uncertain or transport unavailable; "+
+                    "inspect the private command ledger before reissuing") from exc
+        upstream = await _preferred(payload, req.headers, phone_first=False)
         return _response(upstream)
     if method == "tools/list":
         # Merge the phone and optional Windows tool catalogues. A phone-owned
