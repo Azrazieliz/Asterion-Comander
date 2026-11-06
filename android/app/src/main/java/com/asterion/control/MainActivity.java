@@ -909,6 +909,30 @@ public final class MainActivity extends Activity {
   }
   private void startPhoneCycleTest(){
     try {
+      // A selftest must not silently queue something the phone cannot send.
+      // These checks do not alter the user's ChatGPT draft or existing ledger.
+      if(ControlAccessibilityService.active==null){
+        new AlertDialog.Builder(this)
+          .setTitle("Continuation cannot send")
+          .setMessage("Asterion Control Accessibility is not enabled. The two-turn test needs it to read the ChatGPT composer and detect actual reply markers. Enable Asterion Control in Android Accessibility settings, then retry.")
+          .setPositiveButton("Accessibility settings",(dialog,which)->{
+            startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
+          })
+          .setNegativeButton("Cancel",null).show();
+        return;
+      }
+      Intent chat=getPackageManager().getLaunchIntentForPackage("com.openai.chatgpt");
+      if(chat==null){
+        new AlertDialog.Builder(this).setTitle("ChatGPT not found")
+          .setMessage("The on-device cycle test requires the installed ChatGPT Android application.")
+          .setPositiveButton("Close",null).show();
+        return;
+      }
+      JSONObject old=ContinuationCycle.get(this).status();
+      if(old.optBoolean("active",false)){
+        showCycleStatus();
+        return;
+      }
       // All work remains phone-owned; the Windows worker is never involved.
       ContinuationLedger.get(this).configure(true);
       if(!AgentService.running)
@@ -925,20 +949,32 @@ public final class MainActivity extends Activity {
              "the two-turn test and print the exact checkpoint DONE marker.");
       ContinuationCycle.get(this).start(input);
       ContinuationCycle.get(this).tick();
-      Intent launch=getPackageManager().getLaunchIntentForPackage("com.openai.chatgpt");
-      if(launch==null){toast("ChatGPT not installed: test queued but not sent");return;}
-      startActivity(launch);
-    }catch(Exception e){toast("Cycle test: "+String.valueOf(e.getMessage()));}
+      startActivity(chat);
+      // Do not report completion: a queued turn still requires a distinct
+      // ChatGPT response with its own ACK/DONE marker.
+    }catch(Exception e){
+      new AlertDialog.Builder(this).setTitle("Continuation test did not start")
+        .setMessage(String.valueOf(e.getMessage())+
+          "\n\nNo pending ChatGPT message was overwritten. Inspect cycle status before retrying.")
+        .setPositiveButton("Inspect state",(dialog,which)->showCycleStatus())
+        .setNegativeButton("Close",null).show();
+    }
   }
   private void showCycleStatus(){
     try{
       JSONObject cycle=ContinuationCycle.get(this).status();
-      String info="Active: "+cycle.optBoolean("active")+
-        "\nPhase: "+cycle.optString("state","idle")+
+      JSONObject ledger=ContinuationLedger.get(this).status();
+      String info="Accessibility active: "+(ControlAccessibilityService.active!=null)+
+        "\nAgent service active: "+AgentService.running+
+        "\nContinuation enabled: "+ledger.optBoolean("enabled")+
+        "\nCycle active: "+cycle.optBoolean("active")+
+        "\nCycle phase: "+cycle.optString("state","idle")+
+        "\nCheckpoint phase: "+ledger.optString("state","idle")+
         "\nProject: "+cycle.optString("project","none")+
         "\nCycle index: "+cycle.optInt("index",0)+
         "\nAcknowledged: "+cycle.optInt("ack_count",0)+
-        "\nLast error: "+cycle.optString("last_error","none");
+        "\nCycle error: "+cycle.optString("last_error","none")+
+        "\nDispatch error: "+ledger.optString("last_error","none");
       new AlertDialog.Builder(this).setTitle("Checkpoint cycle status")
         .setMessage(info).setPositiveButton("Close",null).show();
     }catch(Exception e){toast("Cycle status unavailable");}
@@ -978,7 +1014,10 @@ public final class MainActivity extends Activity {
           String phase=report.optString("phase","initializing");
           String answer=report.optString("transcript","");
           String problem=report.optString("error","");
-          voiceTestStatus.setText("Voice test: "+phase+
+          String speaker=report.optBoolean("speaker_finished")?
+            "Speaker completed":report.optBoolean("speaker_started")?
+            "Speaker started":"Speaker not confirmed";
+          voiceTestStatus.setText("Voice test: "+phase+" | "+speaker+
             (answer.isEmpty()?"":" — heard: "+answer)+
             (problem.isEmpty()?"":" — "+problem));
           if("answered".equals(phase)||"failed".equals(phase)||
@@ -995,6 +1034,9 @@ public final class MainActivity extends Activity {
       if(session==null){toast("Speech session not enabled");return;}
       JSONObject report=session.report();
       String message="Phase: "+report.optString("phase")+
+        "\nSpeaker started: "+report.optBoolean("speaker_started")+
+        "\nSpeaker completed: "+report.optBoolean("speaker_finished")+
+        "\nOffline recognition available: "+report.optBoolean("on_device_recognition")+
         "\nMicrophone listening: "+report.optBoolean("microphone_active")+
         "\nAnswer pending acknowledgment: "+report.optBoolean("answer_pending_ack")+
         "\nRecognized answer: "+report.optString("transcript","")+
