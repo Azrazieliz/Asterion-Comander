@@ -218,11 +218,21 @@ async def rpc(req: Request):
                     direct = await asyncio.wait_for(
                         _forward(paired,payload,req.headers),timeout=4.0)
                     if direct.status_code == 200:
+                        # MCP application errors are definitive results. Retrying
+                        # after one would duplicate a side-effecting operation.
                         parsed = json.loads(direct.content)
-                        if not parsed.get("error"):
+                        if isinstance(parsed,dict) and parsed.get("jsonrpc")=="2.0":
                             return _response(direct)
-                except (asyncio.TimeoutError,httpx.HTTPError,ValueError):
+                    if direct.status_code not in (502,503,504):
+                        return _response(direct)
+                except (httpx.ConnectError,httpx.ConnectTimeout):
+                    # Failed before a connection was established: cloud retry safe.
                     pass
+                except (asyncio.TimeoutError,httpx.ReadTimeout,httpx.RemoteProtocolError):
+                    raise HTTPException(504,
+                        "Native Control command outcome uncertain; will not replay")
+                except (ValueError,):
+                    raise HTTPException(502,"Native Control returned invalid MCP JSON")
             # The existing private GitHub bridge is outbound HTTPS from Android.
             # It operates on mobile data with a separately authorized repo token.
             try:
@@ -256,7 +266,12 @@ async def rpc(req: Request):
         except (RuntimeError, httpx.HTTPError, ValueError):
             pass
         if not catalogs:
-            raise HTTPException(503, "No native MCP tool catalogue reachable")
+            # Discovery must remain available on cellular when the phone is
+            # temporarily unreachable or the Windows worker is switched off.
+            # This is a STATIC tool schema, NOT a false availability claim:
+            # each tool still returns an explicit pending/offline result.
+            from .mcp_protocol import TOOLS
+            catalogs=[{"result":{"tools":TOOLS}}]
         merged = {}
         # Reverse so the first/native catalogue wins.
         for item in reversed(catalogs):
@@ -275,7 +290,17 @@ async def rpc(req: Request):
         }
         return Response(content=json.dumps(response), media_type="application/json",
                         headers={"Cache-Control": "no-store"})
-    # Prefer Samsung even for initialize; fallback Windows when the phone is off.
+    if method == "initialize":
+        return Response(content=json.dumps({
+            "jsonrpc":"2.0","id":message.get("id"),
+            "result":{"protocolVersion":"2025-11-25",
+                      "capabilities":{"tools":{}},
+                      "serverInfo":{"name":"asterion-control","version":"0.9.0"}}
+        }),media_type="application/json",headers={"Cache-Control":"no-store"})
+    if method == "ping":
+        return Response(content=json.dumps({
+            "jsonrpc":"2.0","id":message.get("id"),"result":{}
+        }),media_type="application/json",headers={"Cache-Control":"no-store"})
     return _response(await _preferred(payload, req.headers, phone_first=True))
 
 @app.get("/mcp")
