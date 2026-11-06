@@ -344,7 +344,8 @@ final class ContinuationCycle {
       "ASTERION-VOICE-ASK: with the checkpoint ID, a vertical bar and your "+
       "single concise question (no more than 700 characters). Only do so "+
       "when the speaker/microphone session was enabled by the owner. "+
-      "The Control app will read the answer aloud and continue with the "+
+      "Asterion Control speaks your question first, then listens once for "+
+      "the owner\u0027s spoken answer and continues with its transcription. "+
       "owner's transcription in the next cycle. "+
       "The Control app verifies the actual visible response and stable "+
       "speech input before proceeding; do not duplicate or reset work.";
