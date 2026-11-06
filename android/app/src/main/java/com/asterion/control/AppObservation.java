@@ -161,14 +161,46 @@ final class AppObservation {
     for(String line:ring)try{items.put(new JSONObject(line));}catch(Exception ignored){}
     return new JSONObject().put("events",items).put("target",target(c));
   }
-  static byte[] latestRecordedFrame(Context c)throws Exception {
-    String name=latestFrame;
-    if(name.isEmpty()||!name.matches("frame-[0-9]{10,15}\\.jpg"))return null;
+  /** Recently recorded frames that have not been pruned by the storage quota.
+   * No guessing based on application time; metadata is persisted by the device.
+   */
+  static JSONObject timeline(Context c,int limit)throws Exception {
+    limit=Math.max(1,Math.min(limit,100));
+    File dir=folder(c);
+    File log=new File(dir,"frames.jsonl");
+    org.json.JSONArray entries=new org.json.JSONArray();
+    if(!log.isFile())return new JSONObject().put("target",target(c))
+      .put("frames",entries).put("retention_bytes",MAX_FRAMES_BYTES);
+    java.util.ArrayDeque<JSONObject> ring=new java.util.ArrayDeque<>();
+    try(java.io.BufferedReader reader=new java.io.BufferedReader(new java.io.InputStreamReader(
+      new java.io.FileInputStream(log),StandardCharsets.UTF_8))){
+      String line;
+      while((line=reader.readLine())!=null){
+        try{
+          JSONObject item=new JSONObject(line);
+          String name=item.optString("frame","");
+          if(!name.matches("frame-[0-9]{10,15}\\.jpg"))continue;
+          File image=new File(dir,name);
+          if(!image.isFile()||image.length()<2048||image.length()>1500000)continue;
+          if(ring.size()>=limit)ring.removeFirst();
+          ring.addLast(item);
+        }catch(Exception ignored){}
+      }
+    }
+    for(JSONObject entry:ring)entries.put(entry);
+    return new JSONObject().put("target",target(c)).put("frames",entries)
+      .put("retention_bytes",MAX_FRAMES_BYTES);
+  }
+  static byte[] recordedFrame(Context c,String name)throws Exception {
+    if(name==null||!name.matches("frame-[0-9]{10,15}\\.jpg"))return null;
     File file=new File(folder(c),name);
-    if(!file.isFile()||file.length()>1500000)return null;
+    if(!file.isFile()||file.length()<2048||file.length()>1500000)return null;
     try(java.io.FileInputStream stream=new java.io.FileInputStream(file)){
       return stream.readAllBytes();
     }
+  }
+  static byte[] latestRecordedFrame(Context c)throws Exception {
+    return recordedFrame(c,latestFrame);
   }
   private static void trim(File dir) {
     File[] frames=dir.listFiles((d,name)->name.startsWith("frame-")&&name.endsWith(".jpg"));
