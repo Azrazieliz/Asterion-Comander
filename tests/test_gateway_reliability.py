@@ -159,3 +159,27 @@ def test_canonical_tools_survive_stale_subordinate_agent(monkeypatch):
         assert "control_pc_performance_mode" in tools
         assert "control_phone_cycle_start" in tools
         assert "remote_system" in tools
+
+
+def test_registered_phone_agent_token_supports_direct_cellular(monkeypatch):
+    """Native phone identity, not Windows pairing preferences, is the WSS key."""
+    from asterion_remote import pairing
+    token = "phone-owned-" + "p" * 48
+    monkeypatch.setattr(phone_live, "load_registered_phone",
+                        lambda: {"device": "Samsung", "token": token})
+    monkeypatch.setattr(phone_live, "paired_device_is_authorized", lambda key: False)
+    assert phone_live._authorized(token) is True
+    assert phone_live._authorized(token + "extra") is False
+    assert phone_live._authorized("") is False
+    monkeypatch.setattr(phone_live, "load_registered_phone", lambda: None)
+    assert phone_live._authorized(token) is False
+
+
+def test_revoked_native_registration_cannot_connect(monkeypatch):
+    token = "agent-" + "a" * 44
+    monkeypatch.setattr(phone_live, "load_registered_phone",
+                        lambda: {"device": "Samsung", "token": token})
+    monkeypatch.setattr(phone_live, "paired_device_is_authorized", lambda key: False)
+    assert phone_live._authorized(token)
+    monkeypatch.setattr(phone_live, "load_registered_phone", lambda: None)
+    assert not phone_live._authorized(token)
