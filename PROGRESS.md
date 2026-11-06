@@ -1,3 +1,17 @@
+# 2026-11-06 — Control-only v0.8.8 update recovery (source repaired; owner-key deployment outstanding)
+
+**No Desktop Commander or ADB was used in this recovery.** Control remains the external deterministic tool, Android is the principal device, Windows is its authorized build worker, and ChatGPT remains the external operator. Frozen 7-star requirements and app data were preserved.
+
+- Repaired the **Windows PowerShell 5.1 encoding error** in `scripts/build_owner_signed_control_088.ps1`: removed the non-ASCII characters that caused the owner's Windows parser to fail before APK compilation. Added regression coverage (`tests/test_owner_signing_compat.py`).
+- Replaced the one-shot private Git transport launcher with **Control-owned single-instance supervision**: the existing launcher restarts failed Control bridge processes and avoids duplicate legacy Python workers; the Control Windows launcher starts the supervisor when enabled. Does not invoke Desktop Commander or a new service provider.
+- Added a **dedicated private PC active command queue** (`commands/active/`) to the Git-backed Control transport. During first-start legacy migration, only genuinely ambiguous old root commands are skipped, while explicitly reauthorized active commands can continue exactly once. Added deduplication and migration tests (`tests/test_control_bridge_queue.py`).
+- Repaired the outstanding `owner-signed-control-v088-20261106` native Control update request and reauthorized the **same command ID** in the private active queue. Its command fast-forwards only the existing Control branch and runs the matching-owner-certificate build/transfer script. New code and the owner-key build remain separate from the installed app until successful execution and owner-approved Android installation.
+- **Verified**: [CI 42190608211](https://github.com/Azrazieliz/Asterion-Comander/actions/runs/42190608211) passed at commit `1dfd0be7326665fb9da7125e2aa976f58b7e0bcc`: **41 Python tests passed**, all three critical Control PowerShell scripts passed syntax and ASCII checks, and native Gradle Android build succeeded.
+- **Not yet completed**: Original Windows Control bridge has not produced a command result or uploaded a matching-signer v0.8.8 APK. CI debug signer is mismatched and must NOT be installed over owner-confirmed Samsung v0.8.6. There is **no device-install confirmation**. The existing private Git transport is a queued trigger, not an out-of-band way to start a stopped PC process.
+- **Unblocker**: The Windows machine must be running its own Asterion Control Windows agent and Git bridge (existing login-autostart shortcuts, or launch the existing `scripts/start_windows.ps1` and `scripts/start_git_bridge.ps1` directly). Once the native Control worker executes the queued checkpoint, inspect its job ID/result, signed APK certificate and private Wi-Fi receipt. The Android package installer still requires owner consent. Do not use Desktop Commander to bootstrap.
+
+---
+
 # 2026-11-06 — Continuation improvements, isolated phone command queue, Android observation history (latest)
 
 **Canonical:** Asterion Control remains Android-primary, shared deterministic device-control infrastructure. ChatGPT is the external AI operator. No new AI service, paid model API, embedded game engine or alteration to `7STAR_FROZEN_MASTER.md`.
