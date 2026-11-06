@@ -300,6 +300,22 @@ public final class MainActivity extends Activity {
     wide(handoff,t("Only a queued, spec-referenced checkpoint is sent. Existing drafts are never overwritten; Android and ChatGPT limits still apply.",11,DesignSystem.MUTED,false));
     wide(devicesBody,handoff);
 
+    gap(devicesBody,12);LinearLayout cycles=card();
+    rowTitle(cycles,"Continuation cycles",
+      "Phone-owned checkpoints; ChatGPT verifies every actual reply",
+      icon("refresh",DesignSystem.TEAL,22));
+    gap(cycles,12);
+    button(cycles,"Inspect cycle status","activity",true,this::showCycleStatus);
+    gap(cycles,8);button(cycles,"Pause cycle","power",false,()->changeCycle("pause"));
+    gap(cycles,8);button(cycles,"Resume reviewed cycle","check",false,()->changeCycle("resume"));
+    gap(cycles,8);button(cycles,"Stop cycle","power",false,()->changeCycle("stop"));
+    gap(cycles,8);
+    wide(cycles,t("ChatGPT starts cycles through authenticated Control commands. "
+      +"Each cycle waits for a verified response acknowledgment; it never silently "
+      +"replays a submitted message or overwrites your draft.",
+      11,DesignSystem.MUTED,false));
+    wide(devicesBody,cycles);
+
     gap(devicesBody,12);LinearLayout fallback=card();
     rowTitle(fallback,"Private GitHub relay (fallback)",
       "Phone-only · uses your existing private Control Bridge",icon("shield",DesignSystem.TEAL,22));
@@ -345,7 +361,12 @@ public final class MainActivity extends Activity {
       stopService(new Intent(this,VoiceDialogueService.class));
       toast("Voice question session stopped");
     });
-    gap(voice,9);wide(voice,t("The microphone is activated only for a question's answer and requires Android permission. No remote paid speech API or raw audio recording.",11,DesignSystem.MUTED,false));
+    gap(voice,9);button(voice,"Inspect speech / answer status","activity",false,
+      this::showVoiceAnswerStatus);
+    gap(voice,9);wide(voice,t("The speaker asks the question first; microphone recognition "
+      +"stops on answer, error or timeout. The external ChatGPT operator reads "
+      +"the answer through Control and acknowledges it before another question.",
+      11,DesignSystem.MUTED,false));
     wide(devicesBody,voice);
 
     gap(devicesBody,12);LinearLayout transfer=card();
@@ -834,6 +855,29 @@ public final class MainActivity extends Activity {
         .setMessage(report).setPositiveButton("Close",null).show();
     }catch(Exception e){toast("Remote readiness unavailable");}
   }
+  private void showCycleStatus(){
+    try{
+      JSONObject cycle=ContinuationCycle.get(this).status();
+      String info="Active: "+cycle.optBoolean("active")+
+        "\nPhase: "+cycle.optString("state","idle")+
+        "\nProject: "+cycle.optString("project","none")+
+        "\nCycle index: "+cycle.optInt("index",0)+
+        "\nAcknowledged: "+cycle.optInt("ack_count",0)+
+        "\nLast error: "+cycle.optString("last_error","none");
+      new AlertDialog.Builder(this).setTitle("Checkpoint cycle status")
+        .setMessage(info).setPositiveButton("Close",null).show();
+    }catch(Exception e){toast("Cycle status unavailable");}
+  }
+  private void changeCycle(String operation){
+    try{
+      ContinuationCycle cycle=ContinuationCycle.get(this);
+      if("pause".equals(operation))cycle.pause();
+      else if("resume".equals(operation))cycle.resume();
+      else if("stop".equals(operation))cycle.stop();
+      else throw new IllegalArgumentException("Unknown cycle operation");
+      showCycleStatus();
+    }catch(Exception e){toast("Cycle action unavailable: "+e.getClass().getSimpleName());}
+  }
   private void showPhoneGitBridgeStatus(){
     try{
       JSONObject status=PhoneGitBridge.status(this);
@@ -854,6 +898,20 @@ public final class MainActivity extends Activity {
           runOnUiThread(()->toast("Android private bridge disabled"));}
         catch(Exception e){runOnUiThread(()->toast("Bridge could not be disabled"));}
       })).setNegativeButton("Cancel",null).show();
+  }
+  private void showVoiceAnswerStatus(){
+    try{
+      VoiceDialogueService session=VoiceDialogueService.active;
+      if(session==null){toast("Speech session not enabled");return;}
+      JSONObject report=session.report();
+      String message="Phase: "+report.optString("phase")+
+        "\nMicrophone listening: "+report.optBoolean("microphone_active")+
+        "\nAnswer pending acknowledgment: "+report.optBoolean("answer_pending_ack")+
+        "\nRecognized answer: "+report.optString("transcript","")+
+        "\nError: "+report.optString("error","none");
+      new AlertDialog.Builder(this).setTitle("Speaker and microphone status")
+        .setMessage(message).setPositiveButton("Close",null).show();
+    }catch(Exception e){toast("Voice status unavailable");}
   }
   private void startVoiceQuestions(){
     if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){
