@@ -82,7 +82,7 @@ jobs:
               capture_output=True,text=True,timeout=30)
           if result.returncode:
               raise SystemExit('Protected signing key is unreadable')
-          match=re.search(r'SHA256:\\s*([0-9A-Fa-f:]+)',result.stdout+result.stderr)
+          match=re.search(r'SHA256:\s*([0-9A-Fa-f:]+)',result.stdout+result.stderr)
           if match is None:
               raise SystemExit('Signing key certificate fingerprint missing')
           actual=match.group(1).replace(':','').lower()
