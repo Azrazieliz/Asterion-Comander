@@ -1,3 +1,36 @@
+# 2026-11-06 — Control v0.8.8, phone-only private fallback and confirmed signer blocker
+
+**Canonical scope unchanged:** Control is shared Android-primary deterministic execution infrastructure for all separate Asterion applications. ChatGPT is the external AI. No embedded AI, paid model API, merged engines, user-data reset or routine ADB.
+
+## Implemented and committed (PR #1, branch `work/android-primary-continuation-observation-20261105`)
+
+- Improved ChatGPT UI checkpoint sending: verifies the queued composer text, waits for UI recomposition before Send, refuses to replace a different draft, bounded retries on transient failures, uncertain submissions require manual review rather than duplicate actions.
+- Added `PhoneGitBridge.java`: **owner-opt-in Android-resident private bridge** using the existing `Azrazieliz/Asterion-Control-Bridge` private GitHub command/result layout, without Windows execution. Token enters the phone only, encrypted at rest with Android Keystore AES-GCM. The Android foreground agent polls GitHub HTTPS with conditional ETags (15-second default), supports a STRICT native-tool whitelist, durable uncertain crash receipts, file-result outbox, idempotent command markers, no shell/API-model access, and local revocation. This is a slower fallback, NOT direct real-time MCP.
+- Added native Devices controls to configure/revoke the private credential and inspect health; wired the worker through the owner-started Android foreground agent, with a separate executor so observation sampling is not blocked.
+- Added authenticated native `GET /github-bridge/status`, corresponding Android MCP `control_phone_bridge_status`, Windows proxy/REST/MCP mappings, and tests.
+- Version bumped to source **Android 0.8.8 (code 808)**; GitHub Actions CI verifies both native Android MCP and phone bridge are present.
+- Reverted `dist/latest.json` to owner-confirmed 0.8.6 so the self-updater NEVER references an absent/mismatched 0.8.7/0.8.8 release. 0.8.8 preview is not advertised as installed or safe to upgrade.
+- Owner-key signing script `scripts/build_owner_signed_control_088.ps1` verifies actual v0.8.6 certificate, compiles original-package v0.8.8 using the same Windows debug keystore, rejects signer mismatch, and would publish the resulting matching-key APK to the development branch only after validation. It does not uninstall/overwrite the current phone installation or change the production update manifest.
+- Private ChatGPT plugin **v1.5.0** published (universal Control operating contract + optional phone-bridge command schema); preserves the previous direct MCP server declaration. Plugin version ≠ authenticated connection.
+
+## Evidence and active dependencies
+
+- **CI [42134917023](https://github.com/Azrazieliz/Asterion-Comander/actions/runs/42134917023) PASSED** from source at `5661208bfe7c03d7dafef5037853709177abaeb5`: **35 Python tests passed**, real Gradle **BUILD SUCCESSFUL**, CI APK artifact, SHA-256 `446a5e7246cf9a001ec3f3d1dc6d03e9ec722b867152e99baa0f1220663fcaed`. Subsequent additions are signing-script/documentation only. Java Android bridge source was included in the compiled CI snapshot.
+- CI signer **incompatible** with owner-installed 0.8.6: baseline certificate SHA-256 `9bc439712a0a460cc4703ebf254aaaf9bf3cc6e67b0ced6fc12162ed3ca3b9ad`; CI certificate SHA-256 `09c819aed23671b9dccca9c3597ac065c0e7f1e94be045996c108b63dbe4c897`. This is a VERIFIED blocker to in-place install. Do not offer the CI APK as an update.
+- Queued authorized owner-signed build command `commands/owner-signed-control-v088-20261106.json` in the existing private bridge, waiting for the original Windows worker. Also queued harmless read-only Android smoke request `commands/android-v088-phone-native-smoke-20261106.json` for AFTER the new APK is installed and locally enabled.
+- The private Windows bridge returned **no response** to the latest worker-health or signing command. A queued command is not an executed job; do not claim signing, upload or phone installation complete.
+- Only 0.8.6 is owner-confirmed installed. Stable phone-hosted authenticated HTTPS direct ChatGPT MCP connection, Android-only bridge device tests, actual ChatGPT next-turn acknowledgment, new-chat routing, spoken-question availability and long-idle resilience remain unverified.
+
+## Next strictly required acceptance
+
+1. Original Windows worker comes online and processes the non-destructive matching-signer build; verify artifact SHA-256 and signature before user-approved Android package update.
+2. Install original-package signed 0.8.8 over 0.8.6 without uninstall or app-data reset, on Samsung; verify code 808 and prior pairing/access states.
+3. Owner authorizes the optional phone-local Github fallback only if direct MCP remains unavailable (repo-scoped token, never in chat); inspect real `android-...` result receipts from the actual Samsung without relying on Windows.
+4. Configure supported stable, authenticated ChatGPT MCP access; do not assume the previous temporary Cloudflare URL is live, nor that a plugin release grants tools automatically.
+5. Demonstrate real ChatGPT checkpoint -> send -> next model response -> acknowledgment -> next checkpoint across chat boundaries, preserving 5*/6*/7* source references and respecting ChatGPT platform usage limits. Observe gameplay/voice only with Android consent and project-engine boundaries intact.
+
+---
+
 # 2026-11-06 — Android-native MCP endpoint + verified universal tool CI
 
 - Implemented `AndroidMcp.java` on the Samsung agent: native stateless bearer-authenticated `POST /mcp`, `initialize`, `tools/list`, `tools/call` and direct phone-only tools. No Windows-based phone MCP proxy needed inside the Android device. Private Wi-Fi/VPN/loopback peers only. The private HTTP listener **must not be published on public internet**.
