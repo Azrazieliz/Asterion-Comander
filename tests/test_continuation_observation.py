@@ -104,6 +104,31 @@ def test_generic_phone_app_catalog_launch_and_receipt_contract(monkeypatch):
         {"checkpoint_id":"checkpoint001","response_receipt":"observed-next-chat-turn-001"})
     assert response["state"]=="acknowledged"
 
+def test_observation_timeline_and_recorded_frame_routes(monkeypatch):
+    from fastapi import HTTPException
+    from fastapi.responses import Response
+    from asterion_remote import phone_bridge
+
+    monkeypatch.setattr(phone_bridge, "load", lambda: None)
+    with pytest.raises(HTTPException) as invalid:
+        phone_bridge.request("/observation/frame/../private")
+    assert invalid.value.status_code == 400
+    with pytest.raises(HTTPException) as unavailable:
+        phone_bridge.request("/observation/frame/frame-1793804400000.jpg")
+    assert unavailable.value.status_code == 503
+
+    monkeypatch.setattr(native_routes, "phone_observation_timeline",
+                        lambda: {"target":"com.gamepilot","frames":[{"frame":"frame-1793804400000.jpg"}]})
+    result=mcp_protocol.invoke_tool("control_phone_observation_timeline",{})
+    assert result["frames"][0]["frame"].endswith(".jpg")
+    monkeypatch.setattr(native_routes, "phone_observation_get_frame",
+                        lambda name: Response(content=b"jpeg-data",media_type="image/jpeg"))
+    response=mcp_protocol.invoke_tool("control_phone_observation_get_frame",
+                                      {"frame_id":"frame-1793804400000.jpg"})
+    assert response.media_type=="image/jpeg"
+    assert response.body==b"jpeg-data"
+
+
 def test_voice_question_schema_and_direct_native_dispatch(monkeypatch):
     assert native_routes.VoiceQuestion(text="What happened?",locale="en-US").text
     with pytest.raises(ValidationError):
