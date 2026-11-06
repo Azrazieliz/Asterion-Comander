@@ -46,7 +46,8 @@ final class PhoneGitBridge {
     String[] names={"status","health","screen","ui","input","apps","app_launch",
       "continuation_status","continuation_queue","continuation_dispatch",
       "continuation_ack","continuation_cancel","chat_new","observation_status",
-      "observation_events","observation_frame","voice_status","voice_question"};
+      "observation_events","observation_frame",
+      "observation_timeline","observation_get_frame","voice_status","voice_question"};
     for(String name:names) OPS.put("phone_"+name,"control_phone_"+name);
   }
   private static volatile boolean busy=false;
