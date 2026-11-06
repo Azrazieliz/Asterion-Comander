@@ -1,4 +1,4 @@
-name: Android Control continuation branch acceptance
+name: Android Control source tests (APK build on manual release only)
 on:
   push:
     branches:
@@ -54,10 +54,12 @@ jobs:
             Write-Host "Control PowerShell syntax valid: $path"
           }
       - uses: actions/setup-java@v4
+        if: github.event_name == 'workflow_dispatch'
         with:
           distribution: temurin
           java-version: '21'
       - name: Provision owner Android signer from encrypted GitHub Actions secret
+        if: github.event_name == 'workflow_dispatch'
         shell: bash
         env:
           ASTERION_OWNER_KEYSTORE_B64: ${{ secrets.ASTERION_ANDROID_DEBUG_KEYSTORE_B64 }}
@@ -94,6 +96,7 @@ jobs:
               output.write('ASTERION_OWNER_KEYSTORE_PATH='+str(target)+'\n')
           PY
       - name: Provision Android SDK 35 using available cmdline-tools
+        if: github.event_name == 'workflow_dispatch'
         shell: bash
         run: |
           SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
@@ -109,12 +112,15 @@ jobs:
           test -f "$SDK/platforms/android-35/android.jar"
           test -d "$SDK/build-tools/35.0.0"
       - uses: gradle/actions/setup-gradle@v4
+        if: github.event_name == 'workflow_dispatch'
         with:
           gradle-version: '8.13'
       - name: Build owner-compatible native APK entirely on GitHub Actions
+        if: github.event_name == 'workflow_dispatch'
         working-directory: android
         run: gradle --no-daemon --console=plain :app:assembleDebug
       - name: Validate Android app identity and archive
+        if: github.event_name == 'workflow_dispatch'
         run: |
           test -s android/app/build/outputs/apk/debug/app-debug.apk
           grep -q "versionName '0.8.8'" android/app/build.gradle
@@ -122,6 +128,7 @@ jobs:
           test -s android/app/src/main/java/com/asterion/control/AndroidMcp.java
           sha256sum android/app/build/outputs/apk/debug/app-debug.apk
       - name: Audit debug APK signing identity versus installed v0.8.6 baseline
+        if: github.event_name == 'workflow_dispatch'
         shell: bash
         run: |
           set -euo pipefail
@@ -146,7 +153,7 @@ jobs:
             exit 1
           fi
       - uses: actions/upload-artifact@v4
-        if: success()
+        if: success() && github.event_name == 'workflow_dispatch'
         with:
           name: Asterion-Control-v0.8.8-OWNER-SIGNED-CI
           path: android/app/build/outputs/apk/debug/app-debug.apk
