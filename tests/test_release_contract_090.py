@@ -52,3 +52,7 @@ def test_release_requires_exact_owner_signer_and_uses_existing_update_feed():
     assert "dist/latest-release.json" in workflow
     assert "minifyEnabled true" in text("android/app/build.gradle")
     assert "debuggable false" in text("android/app/build.gradle")
+    assert "signingConfigs.ownerRelease" in text("android/app/build.gradle")
+    assert "latest-release.json" in text("android/app/src/main/java/com/asterion/control/UpdateManager.java")
+    assert "Asterion-Control-v0.9.1-debug.apk" in workflow  # backwards-compatible alias only
+    assert "cp \"$ROOT/dist/$PKG\" \"$ROOT/dist/Asterion-Control-v0.9.1-debug.apk\"" in workflow
