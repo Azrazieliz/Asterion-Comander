@@ -34,7 +34,8 @@ final class AndroidMcp {
   static JSONObject tools()throws Exception{
     JSONArray tools=new JSONArray();
     tools.put(tool("control_phone_status","Android native Control service, version and permissions",null));
-    tools.put(tool("control_phone_bridge_status","Inspect optional phone-owned private GitHub fallback",null));
+    tools.put(tool("control_phone_bridge_status","Legacy alias for phone direct TLS state",null));
+    tools.put(tool("control_phone_direct_status","Inspect phone initiated direct TLS MCP",null));
     tools.put(tool("control_phone_health","Android native battery, memory, thermal and screen state",null));
     tools.put(tool("control_phone_ui","Accessible active Android UI hierarchy",null));
     tools.put(tool("control_phone_screen","Current consented live native screen frame",null));
@@ -97,7 +98,8 @@ final class AndroidMcp {
           .put("device",Build.MODEL).put("capture",CaptureService.active)
           .put("accessibility",ControlAccessibilityService.active!=null)
           .put("version","0.9.2"));
-      case "control_phone_bridge_status":return textContent(PhoneGitBridge.status(owner));
+      case "control_phone_bridge_status":
+      case "control_phone_direct_status":return textContent(PhoneDirectMcp.status());
       case "control_phone_health":return textContent(owner.health());
       case "control_phone_ui":{
         ControlAccessibilityService service=ControlAccessibilityService.active;
