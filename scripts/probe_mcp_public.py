@@ -85,3 +85,41 @@ with httpx.Client(timeout=16, trust_env=False, follow_redirects=False) as client
                     print("PHONE_STATUS_UNPARSEABLE=true")
     except (httpx.HTTPError, ValueError, RuntimeError):
         print("LIVE_PHONE_STATUS_RETURNED=false")
+
+    # Read-only native checks, no configuration changes or raw credentials.
+    for call_id, tool, prefix in (
+        (5, "control_phone_direct_status", "DIRECT"),
+        (6, "control_phone_network_status", "NETWORK"),
+        (7, "control_phone_performance_status", "PERFORMANCE"),
+        (8, "control_phone_voice_status", "VOICE"),
+        (9, "control_phone_cycle_status", "CYCLE"),
+    ):
+        try:
+            answer = rpc("tools/call", call_id, {"name": tool, "arguments": {}})
+            result = answer.get("result", {})
+            if result.get("isError") or answer.get("error"):
+                print(prefix + "_LIVE_CALL=ERROR")
+                continue
+            content = result.get("content", [])
+            parsed = (json.loads(content[0]["text"])
+                      if content and content[0].get("type") == "text" else {})
+            if not isinstance(parsed, dict):
+                print(prefix + "_LIVE_CALL=INVALID_RESPONSE")
+                continue
+            print(prefix + "_LIVE_CALL=OK")
+            if prefix == "DIRECT":
+                for key in ("connected", "phase", "transport"):
+                    if key in parsed: print("LIVE_PHONE_DIRECT_" + key.upper() + "=" + str(parsed[key]))
+            if prefix == "NETWORK":
+                for key in ("network", "validated", "requires_home_wifi"):
+                    if key in parsed: print("LIVE_PHONE_NETWORK_" + key.upper() + "=" + str(parsed[key]))
+            if prefix == "PERFORMANCE":
+                for key in ("requested_mode", "reason", "capture_interval_ms",
+                            "jpeg_quality", "observation_interval_ms",
+                            "frames_encoded", "frames_skipped"):
+                    if key in parsed: print("LIVE_PHONE_PERF_" + key.upper() + "=" + str(parsed[key]))
+            if prefix in ("VOICE", "CYCLE"):
+                print(prefix + "_REPORTED_STATUS=" + str(parsed.get("state",
+                     parsed.get("status", "available")))[:80])
+        except (httpx.HTTPError, ValueError, RuntimeError, TypeError) as exc:
+            print(prefix + "_LIVE_CALL=UNAVAILABLE_" + type(exc).__name__)
