@@ -11,7 +11,7 @@ on:
       - '.github/workflows/android-continuation-branch.yml'
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 concurrency:
   group: android-control-${{ github.ref }}
   cancel-in-progress: true
@@ -58,7 +58,7 @@ jobs:
           distribution: temurin
           java-version: '21'
       - name: Provision owner Android signer from encrypted GitHub Actions secret
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'release:')
         shell: bash
         env:
           ASTERION_OWNER_KEYSTORE_B64: ${{ secrets.ASTERION_ANDROID_DEBUG_KEYSTORE_B64 }}
@@ -117,19 +117,20 @@ jobs:
         working-directory: android
         run: gradle --no-daemon --console=plain :app:compileDebugJavaWithJavac
       - name: Build owner-compatible native APK entirely on GitHub Actions
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'release:')
         working-directory: android
         run: gradle --no-daemon --console=plain :app:assembleDebug
       - name: Validate Android app identity and archive
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'release:')
         run: |
           test -s android/app/build/outputs/apk/debug/app-debug.apk
-          grep -q "versionName '0.8.8'" android/app/build.gradle
+          grep -q "versionName '0.9.0'" android/app/build.gradle
+          grep -q "versionCode 900" android/app/build.gradle
           test -s android/app/src/main/java/com/asterion/control/PhoneGitBridge.java
           test -s android/app/src/main/java/com/asterion/control/AndroidMcp.java
           sha256sum android/app/build/outputs/apk/debug/app-debug.apk
       - name: Audit debug APK signing identity versus installed v0.8.6 baseline
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'release:')
         shell: bash
         run: |
           set -euo pipefail
@@ -153,9 +154,46 @@ jobs:
             echo "::error::Refusing to publish an Android APK with an incompatible signer"
             exit 1
           fi
+      - name: Publish verified in-place Android update to the canonical app feed
+        if: success() && (github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'release:'))
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION='0.9.0'
+          PKG='Asterion-Control-v0.9.0-debug.apk'
+          ROOT="${RUNNER_TEMP}/asterion-release-feed"
+          git fetch --no-tags origin main
+          git worktree add --detach "$ROOT" origin/main
+          mkdir -p "$ROOT/dist"
+          cp android/app/build/outputs/apk/debug/app-debug.apk "$ROOT/dist/$PKG"
+          (
+            cd "$ROOT/dist"
+            sha256sum "$PKG" > 'SHA256SUMS-v0.9.0.txt'
+          )
+          python - "$ROOT/dist" <<'PY'
+          import hashlib,json,pathlib,sys
+          root=pathlib.Path(sys.argv[1])
+          source=root/'Asterion-Control-v0.9.0-debug.apk'
+          data={
+            "version_code":900,
+            "version_name":"0.9.0",
+            "apk_url":"https://raw.githubusercontent.com/Azrazieliz/Asterion-Comander/main/dist/Asterion-Control-v0.9.0-debug.apk",
+            "sha256":hashlib.file_digest(source.open('rb'),'sha256').hexdigest(),
+            "size_bytes":source.stat().st_size,
+          }
+          (root/'latest.json').write_text(json.dumps(data,indent=2)+'\n',encoding='utf8')
+          print("UPDATE_SIGNED_PACKAGE="+source.name)
+          print("UPDATE_BYTES="+str(data["size_bytes"]))
+          print("UPDATE_SHA256="+data["sha256"])
+          PY
+          git -C "$ROOT" add dist/latest.json "dist/$PKG" dist/SHA256SUMS-v0.9.0.txt
+          if ! git -C "$ROOT" diff --cached --quiet; then
+            git -C "$ROOT" -c user.name='asterion-control-actions' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m "Publish owner-signed Control v0.9.0 verified update"
+            git -C "$ROOT" push origin HEAD:main
+          fi
       - uses: actions/upload-artifact@v4
-        if: success() && github.event_name == 'workflow_dispatch'
+        if: success() && (github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'release:'))
         with:
-          name: Asterion-Control-v0.8.8-OWNER-SIGNED-CI
+          name: Asterion-Control-v0.9.0-OWNER-SIGNED-CI
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
