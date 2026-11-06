@@ -91,7 +91,7 @@ jobs:
               raise SystemExit('CI signer does not match installed Samsung package')
           print('OWNER_ANDROID_SIGNER_MATCHES_INSTALLED_APP=true')
           with open(os.environ['GITHUB_ENV'],'a',encoding='utf8') as output:
-              output.write('ASTERION_OWNER_KEYSTORE_PATH='+str(target)+'\\n')
+              output.write('ASTERION_OWNER_KEYSTORE_PATH='+str(target)+'\n')
           PY
       - name: Provision Android SDK 35 using available cmdline-tools
         shell: bash
