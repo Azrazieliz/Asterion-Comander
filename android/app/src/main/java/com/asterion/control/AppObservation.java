@@ -117,7 +117,7 @@ final class AppObservation {
   static void sample(Context c) {
     if(!enabled(c)||!CaptureService.active)return;
     long now=System.currentTimeMillis();
-    if(now-lastFrameMs<MIN_FRAME_MS)return;
+    if(now-lastFrameMs<Math.max(MIN_FRAME_MS,PerformanceManager.observationIntervalMs()))return;
     ControlAccessibilityService access=ControlAccessibilityService.active;
     if(access==null || !target(c).equals(access.currentPackage()))return;
     if(!target(c).equals(foreground))return;
