@@ -8,8 +8,10 @@ Android still needs an independent, stable HTTPS ingress before Windows can go.
 from __future__ import annotations
 
 import hmac
+import ipaddress
 import json
 import os
+from urllib.parse import urlsplit
 from pathlib import Path
 
 import httpx
@@ -21,13 +23,9 @@ from .phone_bridge import load as load_phone
 ROOT = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "AsterionControl"
 GATEWAY_KEY = ROOT / "mcp-gateway-token.txt"
 WINDOWS_AGENT_KEY = ROOT / "control-token.txt"
-WINDOWS_UPSTREAM = os.environ.get(
-    "ASTERION_CONTROL_UPSTREAM", "http://192.168.1.133:8911/mcp"
-)
-WINDOWS_ALLOWED = {
-    "http://127.0.0.1:8911/mcp",
-    "http://192.168.1.133:8911/mcp",
-}
+# The Windows worker is optional; Android-only MCP must start without it.
+# Never pin the route to a single private router's DHCP address.
+WINDOWS_UPSTREAM = os.environ.get("ASTERION_CONTROL_UPSTREAM", "")
 NATIVE_PHONE_PREFIXES = (
     "control_phone_status",
     "control_phone_health",
@@ -63,16 +61,44 @@ def _phone_route():
         return None
     return pairing["base_url"] + "/mcp", pairing["token"]
 
+def _validate_windows_route(url: str) -> str:
+    parsed = urlsplit(url)
+    try:
+        ip = ipaddress.ip_address(parsed.hostname or "")
+        port = parsed.port
+    except (ValueError, TypeError) as exc:
+        raise RuntimeError("Invalid native Control agent route") from exc
+    cgnat = ip in ipaddress.ip_network("100.64.0.0/10")
+    if (parsed.scheme != "http" or port != 8911 or
+        parsed.path != "/mcp" or parsed.query or parsed.fragment or
+        parsed.username or parsed.password or
+        ip.is_unspecified or ip.is_multicast or ip.is_link_local or
+        not (ip.is_private or ip.is_loopback or cgnat)):
+        raise RuntimeError("Windows MCP route must use a private Control IP")
+    host = "[" + str(ip) + "]" if ip.version == 6 else str(ip)
+    return "http://" + host + ":8911/mcp"
+
 def _windows_route():
-    if WINDOWS_UPSTREAM not in WINDOWS_ALLOWED:
-        raise RuntimeError("Windows MCP upstream outside authorized allowlist")
-    return WINDOWS_UPSTREAM, _secret(WINDOWS_AGENT_KEY)
+    if WINDOWS_UPSTREAM:
+        url = _validate_windows_route(WINDOWS_UPSTREAM)
+    else:
+        from .github_bridge_git import agent_host
+        try:
+            url = _validate_windows_route(agent_host() + "/mcp")
+        except RuntimeError:
+            return None
+    try:
+        token = _secret(WINDOWS_AGENT_KEY)
+    except RuntimeError:
+        return None
+    return url, token
 
 @app.on_event("startup")
 def verify_gateway():
     _secret(GATEWAY_KEY)
-    if WINDOWS_UPSTREAM not in WINDOWS_ALLOWED:
-        raise RuntimeError("MCP upstream not authorized")
+    # Explicit custom upstreams are validated, but Windows is not mandatory.
+    if WINDOWS_UPSTREAM:
+        _validate_windows_route(WINDOWS_UPSTREAM)
 
 async def _forward(route, payload: bytes, request_headers: dict):
     url, token = route
@@ -116,7 +142,8 @@ async def _preferred(payload: bytes, headers: dict, phone_first=True):
         if paired := _phone_route():
             candidates.append(paired)
         try:
-            candidates.append(_windows_route())
+            if route := _windows_route():
+                candidates.append(route)
         except RuntimeError:
             pass
     else:
@@ -184,9 +211,11 @@ async def rpc(req: Request):
             except (httpx.HTTPError, ValueError):
                 pass
         try:
-            response = await _forward(_windows_route(), payload, req.headers)
-            if response.status_code == 200:
-                catalogs.append(json.loads(response.content))
+            route = _windows_route()
+            if route is not None:
+                response = await _forward(route, payload, req.headers)
+                if response.status_code == 200:
+                    catalogs.append(json.loads(response.content))
         except (RuntimeError, httpx.HTTPError, ValueError):
             pass
         if not catalogs:
