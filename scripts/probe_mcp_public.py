@@ -66,5 +66,22 @@ with httpx.Client(timeout=16, trust_env=False, follow_redirects=False) as client
             "name": "control_phone_status", "arguments": {}
         })
         print("LIVE_PHONE_STATUS_RETURNED=" + str("result" in phone).lower())
+        result = phone.get("result", {})
+        if result.get("isError") or phone.get("error"):
+            print("LIVE_PHONE_ERROR=" + str(phone.get("error") or "MCP isError"))
+        else:
+            content = result.get("content", [])
+            if content and content[0].get("type") == "text":
+                try:
+                    state = json.loads(content[0].get("text", ""))
+                    for key in ("device", "version", "version_name", "ok", "paired",
+                                "reachable", "direct_mcp_connected"):
+                        if key in state:
+                            print("PHONE_" + key.upper() + "=" + str(state[key]))
+                    if isinstance(state.get("remote_transport"), dict):
+                        direct = state["remote_transport"].get("direct_mcp", {})
+                        print("PHONE_DIRECT_CONNECTED=" + str(direct.get("connected", False)).lower())
+                except (ValueError, TypeError):
+                    print("PHONE_STATUS_UNPARSEABLE=true")
     except (httpx.HTTPError, ValueError, RuntimeError):
         print("LIVE_PHONE_STATUS_RETURNED=false")
