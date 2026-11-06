@@ -57,6 +57,9 @@ final class AndroidMcp {
     tools.put(tool("control_phone_observation_status","Inspect owner-selected app observation",null));
     tools.put(tool("control_phone_observation_events","Fetch bounded local observation events",null));
     tools.put(tool("control_phone_observation_frame","Fetch latest recorded selected-app frame",null));
+    tools.put(tool("control_phone_observation_timeline","List retained sampled frames with timestamps",null));
+    tools.put(tool("control_phone_observation_get_frame","Retrieve a selected retained gameplay evidence image",
+      args("frame_id","string"),"frame_id"));
     tools.put(tool("control_phone_voice_status","Read owner-enabled on-device voice question state",null));
     tools.put(tool("control_phone_voice_question","Speak question and listen once on Android",
       args("text","string","locale","string"),"text"));
@@ -111,6 +114,9 @@ final class AndroidMcp {
       case "control_phone_observation_status":return textContent(AppObservation.status(owner));
       case "control_phone_observation_events":return textContent(AppObservation.recentEvents(owner,80));
       case "control_phone_observation_frame":return imageContent(AppObservation.latestRecordedFrame(owner));
+      case "control_phone_observation_timeline":return textContent(AppObservation.timeline(owner,100));
+      case "control_phone_observation_get_frame":
+        return imageContent(AppObservation.recordedFrame(owner,args.getString("frame_id")));
       case "control_phone_voice_status":{
         VoiceDialogueService voice=VoiceDialogueService.active;
         return textContent(voice==null?new JSONObject().put("enabled",false)
