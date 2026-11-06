@@ -119,13 +119,49 @@ def publish(paths):
             if attempt==3:raise
             time.sleep(1+attempt)
 
-def write_result(identity,response):
+def write_result(identity,response,*,publish_now=True):
     folder=ROOT/'results';folder.mkdir(exist_ok=True)
     target=folder/(identity+'.json')
     if target.exists() and response.get('status')=='running':return False
-    target.write_text(json.dumps(response,ensure_ascii=False,separators=(',',':')),encoding='utf8')
-    publish([Path('results')/(identity+'.json')])
+    # Save a durable local in-flight marker BEFORE the native side effect.
+    # Do not publish the intermediate "running" state: that used to require
+    # an entire extra GitHub commit, fetch/rebase and push for every action.
+    pending=folder/(identity+'.pending')
+    with pending.open('w',encoding='utf8') as out:
+        out.write(json.dumps(response,ensure_ascii=False,separators=(',',':')))
+        out.flush()
+        os.fsync(out.fileno())
+    os.replace(pending,target)
+    if publish_now:
+        publish([Path('results')/(identity+'.json')])
     return True
+
+
+def recover_unpublished():
+    """Publish complete local receipts after a failed push, never replay them.
+
+    Any unfinished local "running" receipt is handled by reconcile_jobs()
+    and is marked uncertain without replaying a potentially executed action.
+    """
+    changes=git('status','--porcelain','--untracked-files=all','--','results')
+    ready=[]
+    for row in changes.splitlines():
+        path=row[3:]
+        if not path.startswith('results/') or not path.endswith('.json'):
+            continue
+        candidate=Path(path)
+        if not NAME.fullmatch(candidate.stem):
+            continue
+        try:
+            receipt=json.loads((ROOT/candidate).read_text(encoding='utf8'))
+        except (ValueError,OSError):
+            continue
+        if receipt.get('status') in ('running','accepted'):
+            continue
+        ready.append(candidate)
+    if ready:
+        publish(ready)
+    return len(ready)
 
 def pending_in(folder):
     """Return only unknown commands; never replay a recorded running/error receipt."""
@@ -175,10 +211,13 @@ def cycle(key):
         ensure_agent(key)
     if unfinished:
         reconcile_jobs(key,unfinished)
+    # A finished receipt written just before a previous push failed is
+    # publication-only: NEVER execute the corresponding operation again.
+    recover_unpublished()
     for request in tasks:
         identity=request.stem
         # This receipt prevents replay after crashes but is not a success claim.
-        write_result(identity,{'id':identity,'ok':False,'status':'running'})
+        write_result(identity,{'id':identity,'ok':False,'status':'running'},publish_now=False)
         started=time.monotonic()
         try:
             task=json.loads(request.read_text('utf8'))
@@ -214,7 +253,11 @@ def main():
     failures=0
     while True:
         try:
-            cycle(secret);failures=0;time.sleep(4)
+            processed=cycle(secret)
+            failures=0
+            # A short command burst keeps interactive control responsive;
+            # idle polling remains bounded, without GitHub REST API quotas.
+            time.sleep(2 if processed else 3)
         except KeyboardInterrupt:return
         except Exception as exc:
             failures+=1
