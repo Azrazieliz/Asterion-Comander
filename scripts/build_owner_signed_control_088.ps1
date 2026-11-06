@@ -97,10 +97,7 @@ try {
     $payload=@{name='Asterion-Control-v0.8.8-debug.apk';size=(Get-Item $target).Length;sha256=$sha} | ConvertTo-Json -Compress
     $begin=Invoke-RestMethod -Uri ($base+'/transfer/start') -Headers $auth -Method Post -ContentType 'application/json' -Body $payload -TimeoutSec 12
     $transferId=[string]$begin.id
-    if($transferId -notmatch '^[A-Za-z0-9_-]{16,80}
-  (Get-Item $target).Length+" sha256="+$sha+" cert="+$new+
-  " commit="+(git rev-parse --short HEAD))
-){throw 'Invalid Android transfer receipt'}
+    if($transferId -notmatch '^[A-Za-z0-9_-]{16,80}$'){throw 'Invalid Android transfer receipt'}
     $bytes=[System.IO.File]::ReadAllBytes($target)
     $offset=0
     while($offset -lt $bytes.Length){
