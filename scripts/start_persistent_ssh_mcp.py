@@ -173,7 +173,7 @@ def run() -> None:
     backoff = 3
     known = STATE / "mcp-stable-known-hosts"
     while FLAG.exists():
-        cmd = [ssh, "-v", "-n", "-tt", "-i", str(SSH_KEY),
+        cmd = [ssh, "-n", "-tt", "-i", str(SSH_KEY),
                "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes",
                "-o", "StrictHostKeyChecking=yes",
                "-o", "UserKnownHostsFile=" + str(known),
@@ -196,11 +196,11 @@ def run() -> None:
                     evt = json.loads(line)
                 except (ValueError, TypeError):
                     evt = {}
-                    emit("CONTROL_STABLE_SSH_HANDSHAKE=" + line.strip()[:230])
+                    if "https://" in line or "Permission denied" in line or "Connection refused" in line:\n                        emit("CONTROL_STABLE_SSH_NOTICE=" + line.strip()[:230])
                 values = [str(evt.get(k, "")) for k in ("url", "public_url", "https_url", "message")]
                 values.append(line)
                 for candidate in values:
-                    match = re.search(r"https://[a-z0-9-]+\.tunnl\.gg(?:/|\\b)", candidate, re.I)
+                    match = re.search(r"https://[a-z0-9-]+\.tunnl\.gg", candidate, re.I)
                     if match:
                         url_holder["url"] = match.group(0).rstrip("/")
                         url_ready.set()
