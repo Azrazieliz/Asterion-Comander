@@ -312,6 +312,20 @@ public final class MainActivity extends Activity {
     gap(fallback,9);
     wide(fallback,t("Optional when direct MCP is unavailable. Uses a restricted GitHub credential encrypted on the phone. Only authorized Android tool operations are accepted; no model API.",11,DesignSystem.MUTED,false));
     wide(devicesBody,fallback);
+    gap(devicesBody,12);LinearLayout mobile=card();
+    rowTitle(mobile,"Away-from-home access",
+      "Cellular, another Wi-Fi network or VPN - outbound HTTPS only",
+      icon("shield",DesignSystem.TEAL,23));
+    gap(mobile,12);
+    wide(mobile,t("The phone can use its private GitHub relay on mobile data, without "
+      +"the home network or a running PC. Android battery/data-saver restrictions "
+      +"and the configured repository credential still apply.",
+      11,DesignSystem.MUTED,false));
+    gap(mobile,10);button(mobile,"Check remote readiness","activity",true,
+      this::showAwayFromHomeStatus);
+    gap(mobile,8);button(mobile,"Set up encrypted remote relay","shield",false,
+      this::configurePhoneGitBridge);
+    wide(devicesBody,mobile);
 
     gap(devicesBody,12);LinearLayout observation=card();
     rowTitle(observation,"Cross-app screen observation",
@@ -800,6 +814,25 @@ public final class MainActivity extends Activity {
           }
         });
       }).setNegativeButton("Cancel",(d,w)->credential.setText("")).show();
+  }
+  private void showAwayFromHomeStatus(){
+    try{
+      JSONObject network=TransportConnectivity.report(this);
+      JSONObject bridge=PhoneGitBridge.status(this);
+      boolean ready=network.optBoolean("validated")&&bridge.optBoolean("enabled")&&
+        bridge.optBoolean("token_present");
+      String report="Network: "+network.optString("network","offline")+
+        "\nInternet validated: "+network.optBoolean("validated")+
+        "\nMetered connection: "+network.optBoolean("metered")+
+        "\nData Saver restricted: "+network.optBoolean("data_saver_restricted")+
+        "\nPrivate relay configured: "+bridge.optBoolean("enabled")+
+        "\nRepository credential present: "+bridge.optBoolean("token_present")+
+        "\nReady now: "+ready+
+        "\nLast relay success: "+bridge.optLong("last_success_ms")+
+        "\nLast error: "+bridge.optString("last_error","none");
+      new AlertDialog.Builder(this).setTitle("Mobile-data remote access")
+        .setMessage(report).setPositiveButton("Close",null).show();
+    }catch(Exception e){toast("Remote readiness unavailable");}
   }
   private void showPhoneGitBridgeStatus(){
     try{

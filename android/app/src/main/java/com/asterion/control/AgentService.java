@@ -50,6 +50,17 @@ public final class AgentService extends Service {
       java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
   private final java.util.concurrent.ScheduledExecutorService privateBridge =
       java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
+  private android.net.ConnectivityManager networkManager;
+  private android.net.ConnectivityManager.NetworkCallback networkCallback;
+  private final java.util.concurrent.atomic.AtomicLong lastNetworkWake =
+      new java.util.concurrent.atomic.AtomicLong(0);
+  private void wakePrivateBridge(){
+    long now=android.os.SystemClock.elapsedRealtime();
+    long previous=lastNetworkWake.get();
+    if(now-previous<5000L||!lastNetworkWake.compareAndSet(previous,now))return;
+    try{privateBridge.execute(()->PhoneGitBridge.poll(this));}
+    catch(java.util.concurrent.RejectedExecutionException ignored){}
+  }
   @Override public void onCreate(){
     super.onCreate();
     transfers=new TransferStore(this);
@@ -68,6 +79,20 @@ public final class AgentService extends Service {
     // Optional and owner-enabled. Never a model executor or an untrusted shell.
     privateBridge.scheduleWithFixedDelay(()->PhoneGitBridge.poll(this),
       5,15,java.util.concurrent.TimeUnit.SECONDS);
+    try{
+      networkManager=(android.net.ConnectivityManager)getSystemService(CONNECTIVITY_SERVICE);
+      networkCallback=new android.net.ConnectivityManager.NetworkCallback(){
+        @Override public void onAvailable(android.net.Network network){wakePrivateBridge();}
+        @Override public void onCapabilitiesChanged(android.net.Network network,
+            android.net.NetworkCapabilities caps){
+          if(caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED))
+            wakePrivateBridge();
+        }
+      };
+      networkManager.registerDefaultNetworkCallback(networkCallback);
+    }catch(Exception e){
+      android.util.Log.w("AsterionAgent","Network callback unavailable; scheduled polling remains",e);
+    }
   }
   public static final String PREF_REMOTE_ENABLED="remote_enabled";
   public static String token(Context c){
@@ -211,9 +236,17 @@ public final class AgentService extends Service {
       try {
         VoiceDialogueService voice=VoiceDialogueService.active;
         if(voice==null){json(out,503,error("Enable voice dialogue from the phone"));return;}
-        json(out,200,voice.ask(body.getString("text"),body.optString("locale","en-US")));
+        json(out,200,voice.ask(body.getString("text"),body.optString("locale","en-US"),
+            body.optString("question_id","")));
       } catch(Exception e){json(out,400,error(e.getMessage()));}
       return;
+    }
+    if(method.equals("POST")&&path.equals("/voice/ack")){
+      try {
+        VoiceDialogueService voice=VoiceDialogueService.active;
+        if(voice==null){json(out,503,error("Voice not enabled"));return;}
+        json(out,200,voice.acknowledge(body.getString("question_id")));
+      }catch(Exception e){json(out,400,error(e.getMessage()));}return;
     }
     if(method.equals("GET")&&path.equals("/observation/timeline")){
       try{json(out,200,AppObservation.timeline(this,100));}
@@ -249,6 +282,14 @@ public final class AgentService extends Service {
     }
     if(method.equals("POST")&&path.equals("/apps/launch")){
       try{json(out,200,AppCatalog.requestLaunch(this,body.getString("package")));}
+      catch(Exception e){json(out,400,error(e.getMessage()));}return;
+    }
+    if(method.equals("GET")&&path.equals("/network/status")){
+      try{json(out,200,TransportConnectivity.report(this));}
+      catch(Exception e){json(out,400,error("Network status unavailable"));}return;
+    }
+    if(method.equals("POST")&&path.equals("/cycles/confirm-new-chat")){
+      try{json(out,200,cycles.confirmNewChat(body.getString("verification")));}
       catch(Exception e){json(out,400,error(e.getMessage()));}return;
     }
     if(method.equals("GET")&&path.equals("/cycles/status")){
@@ -355,9 +396,12 @@ public final class AgentService extends Service {
       .put("frame_width",CaptureService.width).put("frame_height",CaptureService.height)
       .put("battery",b).put("memory_available",mem.availMem).put("memory_total",mem.totalMem)
       .put("storage_available",disk.getAvailableBytes()).put("storage_total",disk.getTotalBytes())
-      .put("thermals",thermals);
+      .put("thermals",thermals).put("remote_transport",TransportConnectivity.report(this));
   }
   @Override public void onDestroy(){alive=false;running=false;try{if(server!=null)server.close();}catch(Exception ignored){}
+    if(networkManager!=null&&networkCallback!=null){
+      try{networkManager.unregisterNetworkCallback(networkCallback);}catch(Exception ignored){}
+    }
     clients.shutdownNow();observer.shutdownNow();privateBridge.shutdownNow();cycleWorker.shutdownNow();super.onDestroy();}
   @Override public IBinder onBind(Intent i){return null;}
 }

@@ -47,7 +47,9 @@ final class PhoneGitBridge {
       "continuation_status","continuation_queue","continuation_dispatch",
       "continuation_ack","continuation_cancel","chat_new","observation_status",
       "observation_events","observation_frame",
-      "observation_timeline","observation_get_frame","voice_status","voice_question"};
+      "observation_timeline","observation_get_frame","voice_status","voice_question",
+      "voice_ack","cycle_status","cycle_start","cycle_pause","cycle_resume",
+      "cycle_stop","cycle_confirm_new_chat","network_status"};
     for(String name:names) OPS.put("phone_"+name,"control_phone_"+name);
   }
   private static volatile boolean busy=false;
@@ -66,7 +68,8 @@ final class PhoneGitBridge {
       .put("last_poll_ms",lastPollMs).put("last_success_ms",lastSuccessMs)
       .put("completed",completed).put("last_command",lastCommand)
       .put("last_error",lastError).put("token_present",tokenExists(ctx))
-      .put("repository",REPO).put("poll_interval_seconds",15);
+      .put("repository",REPO).put("poll_interval_seconds",15)
+      .put("transport",TransportConnectivity.report(ctx));
   }
   private static File secretFile(Context ctx){
     return new File(ctx.getNoBackupFilesDir(),"phone-github-token.enc");
@@ -263,6 +266,10 @@ final class PhoneGitBridge {
   }
   static void poll(AgentService owner){
     if(!enabled(owner)||busy)return;
+    if(!TransportConnectivity.usable(owner)){
+      lastError="No validated Internet; waiting for Wi-Fi, cellular or VPN";
+      return;
+    }
     busy=true;lastPollMs=System.currentTimeMillis();
     try{
       String pat=token(owner);

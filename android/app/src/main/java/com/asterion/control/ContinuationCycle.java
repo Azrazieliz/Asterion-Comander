@@ -154,9 +154,10 @@ final class ContinuationCycle {
       return status();
     }
     if(!"ready".equals(phase))return status();
-    if("new".equals(state.optString("conversation"))) {
-      state.put("state","needs_review").put("last_error",
-        "New conversation navigation is not verified; cannot send into an unknown chat");
+    if("new".equals(state.optString("conversation")) &&
+       state.optInt("new_chat_verified_index",0)!=index) {
+      state.put("state","awaiting_new_chat")
+        .put("last_error","Wait for external operator to verify New chat navigation");
       save();return status();
     }
     String checkpointId=state.getString("cycle_id")+"-"+index;
@@ -185,6 +186,17 @@ final class ContinuationCycle {
       save();
     }
     return status();
+  }
+  synchronized JSONObject confirmNewChat(String verification)throws Exception {
+    if(!state.optBoolean("active",false)||
+       !"awaiting_new_chat".equals(state.optString("state")))
+      throw new IllegalStateException("No pending New chat verification");
+    if(verification==null||verification.length()<8||verification.length()>512)
+      throw new IllegalArgumentException("Observed new-chat verification required");
+    state.put("new_chat_verified_index",state.optInt("index",1))
+      .put("new_chat_receipt",verification).put("state","ready")
+      .put("last_error","");
+    save();return status();
   }
   synchronized JSONObject recover()throws Exception {
     if("queueing".equals(state.optString("state"))) {

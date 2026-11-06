@@ -61,8 +61,21 @@ final class AndroidMcp {
     tools.put(tool("control_phone_observation_get_frame","Retrieve a selected retained gameplay evidence image",
       args("frame_id","string"),"frame_id"));
     tools.put(tool("control_phone_voice_status","Read owner-enabled on-device voice question state",null));
-    tools.put(tool("control_phone_voice_question","Speak question and listen once on Android",
-      args("text","string","locale","string"),"text"));
+    tools.put(tool("control_phone_voice_question","Speak once; listen with owner-enabled microphone",
+      args("text","string","locale","string","question_id","string"),"text"));
+    tools.put(tool("control_phone_voice_ack","Acknowledge completed speech answer and erase transcript",
+      args("question_id","string"),"question_id"));
+    tools.put(tool("control_phone_cycle_status","Read durable ChatGPT checkpoint cycle state",null));
+    tools.put(tool("control_phone_cycle_start","Start ACK-gated canonical checkpoint cycles",
+      args("cycle_id","string","project","string","priority_tier","string",
+        "spec_reference","string","message","string","conversation","string","max_cycles","integer"),
+      "cycle_id","project","priority_tier","spec_reference","message"));
+    tools.put(tool("control_phone_cycle_pause","Pause checkpoint cycles",null));
+    tools.put(tool("control_phone_cycle_resume","Resume verified checkpoint cycles",null));
+    tools.put(tool("control_phone_cycle_stop","Stop future checkpoint cycles",null));
+    tools.put(tool("control_phone_cycle_confirm_new_chat","Operator confirms a new ChatGPT conversation was actually observed",
+      args("verification","string"),"verification"));
+    tools.put(tool("control_phone_network_status","Inspect mobile-data, VPN and authenticated relay readiness",null));
     return new JSONObject().put("tools",tools);
   }
   private static JSONObject textContent(Object value)throws Exception{
@@ -117,6 +130,14 @@ final class AndroidMcp {
       case "control_phone_observation_timeline":return textContent(AppObservation.timeline(owner,100));
       case "control_phone_observation_get_frame":
         return imageContent(AppObservation.recordedFrame(owner,args.getString("frame_id")));
+      case "control_phone_network_status":return textContent(TransportConnectivity.report(owner));
+      case "control_phone_cycle_status":return textContent(ContinuationCycle.get(owner).status());
+      case "control_phone_cycle_start":return textContent(ContinuationCycle.get(owner).start(args));
+      case "control_phone_cycle_pause":return textContent(ContinuationCycle.get(owner).pause());
+      case "control_phone_cycle_resume":return textContent(ContinuationCycle.get(owner).resume());
+      case "control_phone_cycle_stop":return textContent(ContinuationCycle.get(owner).stop());
+      case "control_phone_cycle_confirm_new_chat":return textContent(
+        ContinuationCycle.get(owner).confirmNewChat(args.getString("verification")));
       case "control_phone_voice_status":{
         VoiceDialogueService voice=VoiceDialogueService.active;
         return textContent(voice==null?new JSONObject().put("enabled",false)
@@ -125,7 +146,13 @@ final class AndroidMcp {
       case "control_phone_voice_question":{
         VoiceDialogueService voice=VoiceDialogueService.active;
         if(voice==null)throw new IllegalStateException("Owner has not enabled the microphone voice session");
-        return textContent(voice.ask(args.getString("text"),args.optString("locale","en-US")));
+        return textContent(voice.ask(args.getString("text"),args.optString("locale","en-US"),
+          args.optString("question_id","")));
+      }
+      case "control_phone_voice_ack":{
+        VoiceDialogueService voice=VoiceDialogueService.active;
+        if(voice==null)throw new IllegalStateException("Voice session not enabled");
+        return textContent(voice.acknowledge(args.getString("question_id")));
       }
       default:throw new IllegalArgumentException("Unknown MCP tool: "+name);
     }
