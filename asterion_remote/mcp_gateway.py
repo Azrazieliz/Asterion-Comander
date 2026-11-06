@@ -36,6 +36,7 @@ NATIVE_PHONE_PREFIXES = (
     "control_phone_input",
     "control_phone_apps",
     "control_phone_app_launch",
+    "control_phone_chat_new",
     "control_phone_continuation_",
     "control_phone_observation_",
     "control_phone_voice_",
