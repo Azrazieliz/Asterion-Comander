@@ -147,9 +147,17 @@ final class ContinuationCycle {
         save();return status();
       }
       if("acknowledged".equals(current)) {
+        if(state.optBoolean("response_completed_work",false)) {
+          state.put("ack_count",state.optInt("ack_count",0)+1)
+            .put("state","finished").put("active",false)
+            .put("last_acknowledged",expected).put("last_error","");
+          save();return status();
+        }
         state.put("ack_count",state.optInt("ack_count",0)+1)
           .put("index",index+1).put("state","ready")
-          .put("last_acknowledged",expected);
+          .put("last_acknowledged",expected)
+          .put("response_completed_work",false)
+          .put("marker_first_seen_ms",0L);
         save();
         return tick();
       }
@@ -168,6 +176,39 @@ final class ContinuationCycle {
       }
       if("submitted_unverified".equals(current)&&"queued".equals(phase)) {
         state.put("state","waiting_ack");save();
+      }
+      if("submitted_unverified".equals(current)) {
+        // A native Accessibility click does not mean the model replied.
+        // Await a unique final response marker, then a stable quiet interval.
+        ControlAccessibilityService view=ControlAccessibilityService.active;
+        long now=System.currentTimeMillis();
+        long sent=checkpoint.optLong("last_submit_ms",0);
+        if(view!=null&&now-sent>=8000L) {
+          JSONObject evidence=view.observeCycleResponse(expected);
+          boolean visible=evidence.optBoolean("visible",false);
+          boolean producing=evidence.optBoolean("generating",true);
+          long began=state.optLong("marker_first_seen_ms",0L);
+          if(visible&&!producing) {
+            if(began==0) {
+              state.put("marker_first_seen_ms",now)
+                .put("response_completed_work",evidence.optBoolean("finished",false));
+              save();
+            }else if(now-began>=12000L) {
+              // This is a bounded on-screen assistant answer, not an
+              // invented completion for an outbound ChatGPT message.
+              String receipt="accessibility-reply-observed-"+expected+"-"+now;
+              ledger.acknowledge(expected,receipt);
+              state.put("response_completed_work",
+                evidence.optBoolean("finished",false));
+              state.put("marker_first_seen_ms",0L);
+              save();
+            }
+          }else if(began>0) {
+            state.put("marker_first_seen_ms",0L)
+              .put("response_completed_work",false);
+            save();
+          }
+        }
       }
       return status();
     }
@@ -196,10 +237,14 @@ final class ContinuationCycle {
     String checkpointId=state.getString("cycle_id")+"-"+index;
     String instructions=state.getString("instruction")+
       "\nCycle: "+index+". Continue from the same canonical specification and "+
-      "the latest verified GitHub progress. At the end of your completed turn, "+
-      "acknowledge this checkpoint through the authenticated Asterion Control "+
-      "tool only after you actually observed the response. Do not mark a UI click "+
-      "as a completed response; do not duplicate or reset existing work.";
+      "the latest verified GitHub progress. Complete meaningful work before "+
+      "replying. On the LAST visible line of your answer, join the exact "+
+      "uppercase prefix ASTERION-CYCLE-ACK: immediately with the checkpoint "+
+      "ID supplied above. If the defined work is fully complete and further "+
+      "cycles are unnecessary, instead join ASTERION-CYCLE-DONE: with the same "+
+      "checkpoint ID. Never print both. Do not print either marker earlier. "+
+      "The Control app verifies that the response itself is visible and "+
+      "stable before progressing; do not duplicate or reset existing work.";
     JSONObject body=new JSONObject()
       .put("project",state.getString("project"))
       .put("checkpoint_id",checkpointId)
@@ -240,6 +285,12 @@ final class ContinuationCycle {
     save();return status();
   }
   synchronized JSONObject recover()throws Exception {
+    // A process restart must start a fresh observation interval, not take
+    // an older timestamp as proof of a completed assistant response.
+    if(state.optLong("marker_first_seen_ms",0L)>0) {
+      state.put("marker_first_seen_ms",0L);
+      save();
+    }
     if("queueing".equals(state.optString("state"))) {
       String checkpoint=state.optString("checkpoint");
       JSONObject other=ledger.status();
