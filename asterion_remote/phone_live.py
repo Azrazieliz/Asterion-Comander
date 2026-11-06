@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from .pairing import is_authorized as paired_device_is_authorized
+from .phone_bridge import load as load_registered_phone
 from fastapi import APIRouter, WebSocket
 from starlette.websockets import WebSocketDisconnect
 
@@ -33,7 +34,17 @@ class DirectPhoneUncertain(RuntimeError):
 
 
 def _authorized(candidate: str) -> bool:
-    # Single source of truth: /api/v1/pair issue+revocation records.
+    # The Android primary device uses the SAME native agent token already
+    # registered through /api/v1/phone/register. Its revocation immediately
+    # removes cellular access, and there is no extra PC pairing requirement.
+    if not isinstance(candidate, str) or not (32 <= len(candidate) <= 512):
+        return False
+    record = load_registered_phone()
+    registered = record.get("token") if isinstance(record, dict) else None
+    if isinstance(registered, str) and len(registered) >= 32:
+        if hmac.compare_digest(candidate.encode(), registered.encode()):
+            return True
+    # Preserve compatibility with an existing owner-approved Windows pairing.
     return paired_device_is_authorized(candidate)
 
 
