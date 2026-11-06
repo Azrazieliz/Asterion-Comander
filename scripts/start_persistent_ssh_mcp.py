@@ -196,7 +196,8 @@ def run() -> None:
                     evt = json.loads(line)
                 except (ValueError, TypeError):
                     evt = {}
-                    if "https://" in line or "Permission denied" in line or "Connection refused" in line:\n                        emit("CONTROL_STABLE_SSH_NOTICE=" + line.strip()[:230])
+                    if "https://" in line or "Permission denied" in line or "Connection refused" in line:
+                        emit("CONTROL_STABLE_SSH_NOTICE=" + line.strip()[:230])
                 values = [str(evt.get(k, "")) for k in ("url", "public_url", "https_url", "message")]
                 values.append(line)
                 for candidate in values:
