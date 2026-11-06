@@ -78,7 +78,11 @@ def migrate():
     if STAMP.exists():return
     # Never replay unknown previous jobs left by the failing REST relay.
     paths=[]
+    # Explicit owner reauthorization in commands/active takes precedence over
+    # an older root-level request with the same immutable checkpoint ID.
+    authorized={p.stem for p in pending_in(ROOT/'commands'/'active')}
     for request in pending_in(ROOT/'commands'):
+        if request.stem in authorized:continue
         target=ROOT/'results'/request.name
         target.write_text(json.dumps({'id':request.stem,'ok':False,'status':'skipped',
             'error':'Previous relay stalled; resubmit this command.'}),encoding='utf8')
