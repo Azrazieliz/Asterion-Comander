@@ -133,6 +133,8 @@ final class PhoneGitBridge {
     lastError="";return status(ctx);
   }
   private static byte[] readBounded(InputStream in)throws Exception{
+    // HTTP 304, empty 404 and some network failures do not carry an error body.
+    if(in==null)return new byte[0];
     try(InputStream stream=in;ByteArrayOutputStream buf=new ByteArrayOutputStream()){
       byte[] bytes=new byte[8192];int n;
       while((n=stream.read(bytes))!=-1){
