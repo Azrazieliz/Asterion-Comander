@@ -1,3 +1,25 @@
+# 2026-11-06 — Active health/performance controls (source implemented, CI validated)
+
+**Scope:** Extend the existing Android Control Health screen and the paired Windows health panel, not a replacement app or a privileged phone system optimizer. Preserve Android-primary Control, direct MCP, phone-local cycles and voice, permissions, pairing and approved signing. No APK release or device installation authorized.
+
+## Implemented on branch `work/android-primary-continuation-observation-20261105`
+
+- Added `PerformanceManager.java`: app-owned adaptive performance governor, sampled every five seconds. Automatically decreases Control's screenshot encode frequency, JPEG quality, and optional selected-game observation sampling when OS thermal status reaches MODERATE/SEVERE or memory pressure is present; battery protection also applies below 15% on battery. Thermal protection overrides user modes.
+- Added **active performance actions** to the existing native Android Health screen: `Automatic`, `Prioritize foreground app` (bounded 20-minute foreground-priority mode, reverts to automatic), `Restore full capture quality`, and `Low-overhead Control`. Actual applied capture interval, JPEG quality, observation interval, encoded/skipped frame counts and reason are visible. These modes change Control's workloads; they **do not raise CPU/GPU clocks, force-stop other apps, or bypass Android thermal policies**.
+- The existing capture encoder and selected-app observation consumer now consult `PerformanceManager` at runtime, reducing actual phone resource use instead of displaying passive telemetry alone. The Control agent keeps its authenticated direct transport, owner-authorized voice service, and Android-local response-ACK cycles.
+- Added authenticated `/performance/status`, `/performance/mode`, `/performance/optimize` and corresponding `control_phone_performance_status`, `control_phone_performance_mode`, `control_phone_performance_optimize` MCP tools. Existing private LAN proxy accepts these exact paths. Direct WSS transports use Android MCP commands.
+- Extended the Windows Health pane with `Favor PC foreground apps` and `Restore managed PC job priority` actions. The paired Windows agent's authenticated `/api/v1/performance/jobs` endpoint and `control_pc_performance_*` MCP tools change priority only for **tracked processes launched by the Control agent**; they save the previous priority, restore only if it was not altered by another operator, and do not touch unrelated applications or system services.
+- Added regression tests in `tests/test_active_performance_manager.py` covering real capture/observation policy wiring, thermal override, forbidden unsafe process changes, authenticated route/tool mappings and scoped Windows process management.
+
+## Evidence and outstanding steps
+
+- **CI verified**: [GitHub Actions 42255276739](https://github.com/Azrazieliz/Asterion-Comander/actions/runs/42255276739) completed successfully on commit `308161da5277ebee1f4cac3105671e17f79f731b`: Python tests, PowerShell parser validation and native Android Java compilation all passed. The build did not package/publish an APK.
+- **Not yet on device**: no signed update installed; actual phone resource savings, Android thermals, memory behavior, voice/cycle continuity and Windows managed-job priority effects remain unverified until owner-approved installation/testing.
+- **Private plugins identified**: `Asterion Control` v1.6.7 (`plugins_6aecce96358081918d70cb54cdca5b00`) and `Asterion Controler` v1.0.0 (`plugin_asdk_app_6aedf5c921b88191adf03a1cbe2f9886`). Both refer to the same underlying ChatGPT app integration `asdk_app_6aedf5c921b88191adf03a1cbe2f9886`. No Asterion device-control tool namespace was exposed to this conversation, so a live plugin/device call was NOT verified.
+- **Do not claim deployed or fully functional** from CI; no change to release manifests, installer, installed Android version or plugin package was made during this performance patch. Preserve owner permission gate before any release.
+
+---
+
 # 2026-11-06 — Control-only v0.8.8 update recovery (source repaired; owner-key deployment outstanding)
 
 **No Desktop Commander or ADB was used in this recovery.** Control remains the external deterministic tool, Android is the principal device, Windows is its authorized build worker, and ChatGPT remains the external operator. Frozen 7-star requirements and app data were preserved.
