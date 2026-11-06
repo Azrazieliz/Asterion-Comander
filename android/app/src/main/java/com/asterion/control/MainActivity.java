@@ -321,31 +321,17 @@ public final class MainActivity extends Activity {
       11,DesignSystem.MUTED,false));
     wide(devicesBody,cycles);
 
-    gap(devicesBody,12);LinearLayout fallback=card();
-    rowTitle(fallback,"Private GitHub relay (fallback)",
-      "Phone-only · uses your existing private Control Bridge",icon("shield",DesignSystem.TEAL,22));
-    gap(fallback,12);
-    button(fallback,"Connect Android private bridge","check",true,this::configurePhoneGitBridge);
-    gap(fallback,9);
-    button(fallback,"Inspect bridge health","activity",false,this::showPhoneGitBridgeStatus);
-    gap(fallback,9);
-    button(fallback,"Disable and clear bridge key","power",false,this::revokePhoneGitBridge);
-    gap(fallback,9);
-    wide(fallback,t("Optional when direct MCP is unavailable. Uses a restricted GitHub credential encrypted on the phone. Only authorized Android tool operations are accepted; no model API.",11,DesignSystem.MUTED,false));
-    wide(devicesBody,fallback);
     gap(devicesBody,12);LinearLayout mobile=card();
-    rowTitle(mobile,"Away-from-home access",
-      "Cellular, another Wi-Fi network or VPN - outbound HTTPS only",
+    rowTitle(mobile,"Direct cellular MCP",
+      "Phone-initiated encrypted connection · no GitHub polling",
       icon("shield",DesignSystem.TEAL,23));
     gap(mobile,12);
-    wide(mobile,t("The phone can use its private GitHub relay on mobile data, without "
-      +"the home network or a running PC. Android battery/data-saver restrictions "
-      +"and the configured repository credential still apply.",
+    wide(mobile,t("Your already paired phone connects over cellular or Wi-Fi to "
+      +"the authenticated Control MCP gateway. The native service and phone-local "
+      +"voice/cycle engine remain on Android.",
       11,DesignSystem.MUTED,false));
-    gap(mobile,10);button(mobile,"Check remote readiness","activity",true,
+    gap(mobile,10);button(mobile,"Check direct remote readiness","activity",true,
       this::showAwayFromHomeStatus);
-    gap(mobile,8);button(mobile,"Set up encrypted remote relay","shield",false,
-      this::configurePhoneGitBridge);
     wide(devicesBody,mobile);
 
     gap(devicesBody,12);LinearLayout observation=card();
@@ -818,51 +804,20 @@ public final class MainActivity extends Activity {
       }finally{if(connection!=null)connection.disconnect();}
     });
   }
-  private void configurePhoneGitBridge(){
-    EditText credential=new EditText(this);
-    credential.setSingleLine(true);
-    credential.setTextSize(14f);
-    credential.setHint("GitHub token scoped to Asterion-Control-Bridge");
-    credential.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD);
-    LinearLayout layout=v();pad(layout,18,12);
-    wide(layout,credential);gap(layout,12);
-    wide(layout,t("This optional fallback runs on your Samsung, even when Windows is off. Grant the token Contents read/write only for the existing private bridge repository. A blank field retains a previously configured token.",12,DesignSystem.MUTED,false));
-    new AlertDialog.Builder(this).setTitle("Enable private Android command bridge")
-      .setView(layout)
-      .setPositiveButton("Enable",(dialog,which)->{
-        String supplied=credential.getText().toString();
-        credential.setText("");
-        io.execute(()->{
-          try{
-            PhoneGitBridge.configure(this,supplied,true);
-            runOnUiThread(()->{
-              startAgent();
-              toast("Android command bridge enabled");
-            });
-          }catch(Exception e){
-            runOnUiThread(()->toast("Bridge key invalid or could not be saved"));
-          }
-        });
-      }).setNegativeButton("Cancel",(d,w)->credential.setText("")).show();
-  }
   private void showAwayFromHomeStatus(){
     try{
       JSONObject network=TransportConnectivity.report(this);
-      JSONObject bridge=PhoneGitBridge.status(this);
-      boolean ready=network.optBoolean("validated")&&bridge.optBoolean("enabled")&&
-        bridge.optBoolean("token_present");
+      JSONObject direct=PhoneDirectMcp.status();
+      boolean ready=direct.optBoolean("connected",false);
       String report="Network: "+network.optString("network","offline")+
         "\nInternet validated: "+network.optBoolean("validated")+
-        "\nMetered connection: "+network.optBoolean("metered")+
-        "\nData Saver restricted: "+network.optBoolean("data_saver_restricted")+
-        "\nPrivate relay configured: "+bridge.optBoolean("enabled")+
-        "\nRepository credential present: "+bridge.optBoolean("token_present")+
-        "\nReady now: "+ready+
-        "\nLast relay success: "+bridge.optLong("last_success_ms")+
-        "\nLast error: "+bridge.optString("last_error","none");
-      new AlertDialog.Builder(this).setTitle("Mobile-data remote access")
+        "\nDirect encrypted MCP connected: "+ready+
+        "\nState: "+direct.optString("phase","stopped")+
+        "\nLast direct success: "+direct.optLong("last_success_ms",0)+
+        "\nLast error: "+direct.optString("last_error","none");
+      new AlertDialog.Builder(this).setTitle("Direct mobile-data Control")
         .setMessage(report).setPositiveButton("Close",null).show();
-    }catch(Exception e){toast("Remote readiness unavailable");}
+    }catch(Exception e){toast("Direct connection status unavailable");}
   }
   private void startPhoneCycleTest(){
     try {
@@ -909,27 +864,6 @@ public final class MainActivity extends Activity {
       else throw new IllegalArgumentException("Unknown cycle operation");
       showCycleStatus();
     }catch(Exception e){toast("Cycle action unavailable: "+e.getClass().getSimpleName());}
-  }
-  private void showPhoneGitBridgeStatus(){
-    try{
-      JSONObject status=PhoneGitBridge.status(this);
-      String report="Enabled: "+status.optBoolean("enabled")+
-        "\nCredential configured: "+status.optBoolean("token_present")+
-        "\nCompleted commands: "+status.optLong("completed")+
-        "\nLast processed: "+status.optString("last_command","none")+
-        "\nLast error: "+status.optString("last_error","none");
-      new AlertDialog.Builder(this).setTitle("Android private bridge status")
-        .setMessage(report).setPositiveButton("Close",null).show();
-    }catch(Exception e){toast("Bridge status unavailable");}
-  }
-  private void revokePhoneGitBridge(){
-    new AlertDialog.Builder(this).setTitle("Disable Android bridge")
-      .setMessage("Stop remote commands and delete the locally encrypted GitHub token? The GitHub token itself must be revoked separately if necessary.")
-      .setPositiveButton("Disable and erase",(d,w)->io.execute(()->{
-        try{PhoneGitBridge.revoke(this);
-          runOnUiThread(()->toast("Android private bridge disabled"));}
-        catch(Exception e){runOnUiThread(()->toast("Bridge could not be disabled"));}
-      })).setNegativeButton("Cancel",null).show();
   }
   private void testVoiceDialogue(){
     if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){
