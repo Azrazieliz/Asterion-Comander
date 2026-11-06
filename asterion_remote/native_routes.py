@@ -97,6 +97,21 @@ class CycleRequest(BaseModel):
 class NewChatVerification(BaseModel):
     verification: str = Field(min_length=8,max_length=512)
 
+class PerformanceMode(BaseModel):
+    mode: Literal['automatic','foreground','full','quiet']
+
+@router.get('/phone/performance/status')
+def phone_performance_status():
+    return request('/performance/status').json()
+
+@router.post('/phone/performance/mode')
+def phone_performance_mode(data: PerformanceMode):
+    return request('/performance/mode','POST',data.model_dump(),timeout=7).json()
+
+@router.post('/phone/performance/optimize')
+def phone_performance_optimize():
+    return request('/performance/optimize','POST',{},timeout=7).json()
+
 @router.get('/phone/network/status')
 def phone_network_status():
     return request('/network/status').json()
