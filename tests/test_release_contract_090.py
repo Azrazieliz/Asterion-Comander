@@ -47,7 +47,9 @@ def test_release_requires_exact_owner_signer_and_uses_existing_update_feed():
     assert "SIGNER_COMPATIBLE_WITH_V086_BASELINE=true" in workflow
     assert "dist/latest.json" in workflow
     assert "actions/upload-artifact@v4" in workflow
-    assert "release:" in workflow
+    assert "workflow_dispatch:" in workflow
+    assert "if: github.event_name == 'workflow_dispatch'" in workflow
+    assert "APK build on manual release only" in workflow
     assert ":app:assembleRelease" in workflow
     assert ":app:assembleDebug" not in workflow
     assert "app-release.apk" in workflow
