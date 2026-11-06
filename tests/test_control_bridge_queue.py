@@ -42,3 +42,18 @@ def test_private_active_queue_deduplicates_legacy_name(tmp_path, monkeypatch):
         '{"status":"running"}', encoding="utf8"
     )
     assert bridge.entries() == []
+
+
+def test_explicit_reauthorization_prevents_initial_skip(tmp_path, monkeypatch):
+    monkeypatch.setattr(bridge, "ROOT", tmp_path)
+    monkeypatch.setattr(bridge, "STAMP", tmp_path / "bridge-migrated")
+    monkeypatch.setattr(bridge, "publish", lambda paths: None)
+    commands = tmp_path / "commands"
+    (commands / "active").mkdir(parents=True)
+    for path in (commands / "owner-approved-update.json",
+                 commands / "active" / "owner-approved-update.json"):
+        path.write_text('{"id":"owner-approved-update","op":"pc_status"}',
+                        encoding="utf8")
+    bridge.migrate()
+    assert not (tmp_path / "results" / "owner-approved-update.json").exists()
+    assert [p.stem for p in bridge.entries()] == ["owner-approved-update"]
