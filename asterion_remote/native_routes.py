@@ -133,3 +133,7 @@ def phone_continuation_ack(data:CheckpointAcknowledgment):
 @router.post('/phone/continuation/cancel')
 def phone_continuation_cancel():
     return request('/continuation/cancel','POST',{},timeout=6.0).json()
+
+@router.get('/phone/bridge/status')
+def phone_bridge_status():
+    return request('/github-bridge/status').json()

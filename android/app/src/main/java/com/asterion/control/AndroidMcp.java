@@ -34,6 +34,7 @@ final class AndroidMcp {
   static JSONObject tools()throws Exception{
     JSONArray tools=new JSONArray();
     tools.put(tool("control_phone_status","Android native Control service, version and permissions",null));
+    tools.put(tool("control_phone_bridge_status","Inspect optional phone-owned private GitHub fallback",null));
     tools.put(tool("control_phone_health","Android native battery, memory, thermal and screen state",null));
     tools.put(tool("control_phone_ui","Accessible active Android UI hierarchy",null));
     tools.put(tool("control_phone_screen","Current consented live native screen frame",null));
@@ -77,7 +78,8 @@ final class AndroidMcp {
         return textContent(new JSONObject().put("ok",true).put("android",Build.VERSION.RELEASE)
           .put("device",Build.MODEL).put("capture",CaptureService.active)
           .put("accessibility",ControlAccessibilityService.active!=null)
-          .put("version","0.8.7"));
+          .put("version","0.8.8"));
+      case "control_phone_bridge_status":return textContent(PhoneGitBridge.status(owner));
       case "control_phone_health":return textContent(owner.health());
       case "control_phone_ui":{
         ControlAccessibilityService service=ControlAccessibilityService.active;
@@ -128,7 +130,7 @@ final class AndroidMcp {
           result.put("result",new JSONObject().put("protocolVersion",VERSION)
             .put("capabilities",new JSONObject().put("tools",new JSONObject()))
             .put("serverInfo",new JSONObject().put("name","asterion-control-android")
-              .put("version","0.8.7")));
+              .put("version","0.8.8")));
           break;
         case "ping":result.put("result",new JSONObject());break;
         case "tools/list":result.put("result",tools());break;
