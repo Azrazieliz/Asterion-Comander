@@ -30,7 +30,6 @@ import android.os.Looper;
 import android.os.PowerManager;
 import android.os.StatFs;
 import android.provider.Settings;
-import android.provider.OpenableColumns;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
@@ -80,7 +79,7 @@ public final class MainActivity extends Activity {
     MainActivity current=visibleActivity.get();
     return current==null||current.isFinishing()||current.isDestroyed()?null:current;
   }
-  private static final int CAPTURE_REQUEST=112,NOTIFICATION_REQUEST=113,INSTALL_PICK_REQUEST=114,MICROPHONE_REQUEST=115;
+  private static final int CAPTURE_REQUEST=112,NOTIFICATION_REQUEST=113,MICROPHONE_REQUEST=115;
   private final Handler handler=new Handler(Looper.getMainLooper());
   private final ExecutorService io=Executors.newSingleThreadExecutor();
   private SharedPreferences prefs;
@@ -337,9 +336,10 @@ public final class MainActivity extends Activity {
     transferFeedback.setMaxLines(6);wide(transfer,transferFeedback);wide(devicesBody,transfer);
 
     gap(devicesBody,12);LinearLayout updater=card();
-    rowTitle(updater,"App updates & installation","Update without ADB · Android approval required",icon("download",DesignSystem.TEAL,22));
-    gap(updater,12);button(updater,"Install an APK","download",true,this::pickInstallPackage);
-    gap(updater,9);updateFeedback=t("Updates download over HTTPS, verify SHA-256 and open Android's installer. Never silent.",12,DesignSystem.MUTED,false);
+    rowTitle(updater,"Asterion Control updates","Official signed releases · install without losing data",icon("refresh",DesignSystem.TEAL,22));
+    gap(updater,12);button(updater,"Check for updates","refresh",true,
+      ()->UpdateManager.check(this,this::showUpdateFeedback));
+    gap(updater,9);updateFeedback=t("Checks the official release, verifies SHA-256 and requests Android approval before installing.",12,DesignSystem.MUTED,false);
     updateFeedback.setMaxLines(5);wide(updater,updateFeedback);
     wide(devicesBody,updater);
 
@@ -548,15 +548,6 @@ public final class MainActivity extends Activity {
   private void showUpdateFeedback(String message){
     if(updateFeedback!=null)updateFeedback.setText(message);
     else toast(message);
-  }
-  private void pickInstallPackage(){
-    try{
-      Intent picker=new Intent(Intent.ACTION_OPEN_DOCUMENT);
-      picker.setType("*/*");
-      picker.addCategory(Intent.CATEGORY_OPENABLE);
-      picker.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-      startActivityForResult(picker,INSTALL_PICK_REQUEST);
-    }catch(Exception e){showUpdateFeedback("Android file picker unavailable");}
   }
 
   /** Native private-network peer discovery; no ADB or remote-desktop dependency. */
@@ -1090,19 +1081,6 @@ public final class MainActivity extends Activity {
     }}
   private void beginCapture(){try{MediaProjectionManager p=(MediaProjectionManager)getSystemService(Context.MEDIA_PROJECTION_SERVICE);startActivityForResult(p.createScreenCaptureIntent(),CAPTURE_REQUEST);}catch(Exception e){toast("Screen capture not available");}}
   @Override protected void onActivityResult(int request,int code,Intent data){super.onActivityResult(request,code,data);
-    if(request==INSTALL_PICK_REQUEST && code==RESULT_OK && data!=null && data.getData()!=null){
-      Uri selected=data.getData();
-      String filename="";
-      try(android.database.Cursor cursor=getContentResolver().query(selected,
-           new String[]{OpenableColumns.DISPLAY_NAME},null,null,null)){
-        if(cursor!=null&&cursor.moveToFirst())filename=cursor.getString(0);
-      }catch(Exception e){showUpdateFeedback("Cannot inspect selected file");return;}
-      if(filename==null||!filename.toLowerCase(Locale.ROOT).endsWith(".apk")){
-        showUpdateFeedback("Select an Android .apk file");return;
-      }
-      UpdateManager.installReceived(this,selected,this::showUpdateFeedback);
-      return;
-    }
     if(request==CAPTURE_REQUEST&&code==RESULT_OK&&data!=null){try{Intent i=new Intent(this,CaptureService.class);i.putExtra("result",code);i.putExtra("data",data);startForegroundService(i);handler.postDelayed(this::updateHealth,450);}catch(Exception e){toast("Screen share could not start");}}
   }
   private void registerPhone(){
