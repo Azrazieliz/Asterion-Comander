@@ -111,11 +111,11 @@ final class PerformanceManager {
     }else if("quiet".equals(mode)){
       tune(800,45,16000,mode,"quiet_control");
     }else if("full".equals(mode)){
-      tune(90,62,3000,mode,"full_observation");
+      tune(65,62,3000,mode,"full_observation");
     }else if(percent>=0&&percent<15&&!plugged){
       tune(400,52,9000,mode,"low_battery");
     }else{
-      tune(90,62,3000,mode,"normal");
+      tune(65,62,3000,mode,"normal");
     }
   }
 

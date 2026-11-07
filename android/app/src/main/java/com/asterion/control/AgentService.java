@@ -232,6 +232,14 @@ public final class AgentService extends Service {
       } catch(Exception e){json(out,400,error("Voice status unavailable"));}
       return;
     }
+    if(method.equals("POST")&&path.equals("/voice/enable")){
+      try{json(out,200,VoiceDialogueService.enableFromOwnerApi(this));}
+      catch(Exception e){json(out,409,error(e.getMessage()));}return;
+    }
+    if(method.equals("POST")&&path.equals("/voice/stop")){
+      try{json(out,200,VoiceDialogueService.stopFromOwnerApi(this));}
+      catch(Exception e){json(out,400,error(e.getMessage()));}return;
+    }
     if(method.equals("POST")&&path.equals("/voice/question")){
       try {
         VoiceDialogueService voice=VoiceDialogueService.active;
@@ -367,11 +375,13 @@ public final class AgentService extends Service {
     }
     if(method.equals("GET")&&path.equals("/stream")){
       out.write("HTTP/1.1 200 OK\r\nContent-Type: multipart/x-mixed-replace; boundary=asterionframe\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n".getBytes(StandardCharsets.UTF_8));out.flush();
+      long lastSentAt=0L;
       while(alive&&!s.isClosed()){
         byte[] b=CaptureService.latest;
-        if(b!=null){String h="--asterionframe\r\nContent-Type: image/jpeg\r\nContent-Length: "+b.length+"\r\n\r\n";
-          out.write(h.getBytes(StandardCharsets.UTF_8));out.write(b);out.write("\r\n".getBytes(StandardCharsets.UTF_8));out.flush();}
-        Thread.sleep(125);
+        long frameAt=CaptureService.latestAtMs;
+        if(b!=null&&frameAt>lastSentAt){String h="--asterionframe\r\nContent-Type: image/jpeg\r\nContent-Length: "+b.length+"\r\n\r\n";
+          out.write(h.getBytes(StandardCharsets.UTF_8));out.write(b);out.write("\r\n".getBytes(StandardCharsets.UTF_8));out.flush();lastSentAt=frameAt;}
+        Thread.sleep(12);
       }return;
     }
     json(out,404,error("Unknown endpoint"));

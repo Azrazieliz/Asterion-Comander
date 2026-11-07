@@ -7,6 +7,7 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Intent;
+import android.content.Context;
 import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
@@ -26,7 +27,7 @@ import java.util.UUID;
 
 /**
  * Owner-started Android foreground speaker -> on-device microphone Q&A.
- * No remote speech API, no recording storage and no continuous hot microphone.
+ * Owner-only authenticated remote requests; no recording storage or continuous hot microphone.
  */
 public final class VoiceDialogueService extends Service {
   public static volatile VoiceDialogueService active;
@@ -127,6 +128,22 @@ public final class VoiceDialogueService extends Service {
       else state("initializing","Awaiting Android text-to-speech startup");
     }else if(!speakerReady)state("initializing","");
     return START_NOT_STICKY;
+  }
+  // Owner-only native API, with Android microphone consent and foreground rules.
+  static JSONObject enableFromOwnerApi(Context owner)throws Exception{
+    if(owner.checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)
+      throw new IllegalStateException("Android microphone permission is required");
+    VoiceDialogueService running=active;
+    if(running!=null)return running.report();
+    if(MainActivity.foregroundActivity()==null)
+      throw new IllegalStateException("Open Asterion Control on phone before enabling voice in the foreground");
+    owner.startForegroundService(new Intent(owner,VoiceDialogueService.class));
+    return new JSONObject().put("ok",true).put("start_requested",true).put("phase","initializing");
+  }
+  static JSONObject stopFromOwnerApi(Context owner)throws Exception{
+    boolean wasRunning=active!=null;
+    owner.stopService(new Intent(owner,VoiceDialogueService.class));
+    return new JSONObject().put("ok",true).put("stop_requested",true).put("was_running",wasRunning);
   }
   synchronized JSONObject ask(String text,String locale)throws Exception {
     return ask(text,locale,"");

@@ -65,6 +65,8 @@ final class AndroidMcp {
     tools.put(tool("control_phone_observation_timeline","List retained sampled frames with timestamps",null));
     tools.put(tool("control_phone_observation_get_frame","Retrieve a selected retained gameplay evidence image",
       args("frame_id","string"),"frame_id"));
+    tools.put(tool("control_phone_voice_enable","Enable owner-consented microphone when Control is foreground",null));
+    tools.put(tool("control_phone_voice_stop","Stop owner-enabled microphone and speaker session",null));
     tools.put(tool("control_phone_voice_status","Read owner-enabled on-device voice question state",null));
     tools.put(tool("control_phone_voice_question","Speak once; listen with owner-enabled microphone",
       args("text","string","locale","string","question_id","string"),"text"));
@@ -143,6 +145,8 @@ final class AndroidMcp {
       case "control_phone_cycle_confirm_new_chat":
         throw new IllegalStateException("Android-owned cycles are disabled. "+
           "Use ChatGPT-operated control_phone_continuation_queue, dispatch, status and ack.");
+      case "control_phone_voice_enable":return textContent(VoiceDialogueService.enableFromOwnerApi(owner));
+      case "control_phone_voice_stop":return textContent(VoiceDialogueService.stopFromOwnerApi(owner));
       case "control_phone_voice_status":{
         VoiceDialogueService voice=VoiceDialogueService.active;
         return textContent(voice==null?new JSONObject().put("enabled",false)
