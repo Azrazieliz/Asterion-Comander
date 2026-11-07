@@ -19,6 +19,13 @@ def main():
         with urllib.request.urlopen(req,timeout=9) as reply:
             return reply.status,json.load(reply)
     code,data=call('/cycles/status')
+    if '--stop-test' in sys.argv:
+        current=data.get('cycle',{})
+        if not isinstance(current,dict) or current.get('cycle_id')!='control-accept-v0913-20261107':
+            raise ValueError('Refusing to stop an unrelated cycle')
+        code,data=call('/cycles/stop',{})
+        print('ACCEPTANCE_TEST_STOPPED:control-accept-v0913-20261107')
+        code,data=call('/cycles/status')
     if '--start-test' in sys.argv:
         previous=data.get('cycle',{})
         if not isinstance(previous,dict):previous={}
