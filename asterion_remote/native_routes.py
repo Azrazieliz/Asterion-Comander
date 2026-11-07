@@ -161,6 +161,14 @@ class VoiceQuestion(BaseModel):
 class VoiceAcknowledgment(BaseModel):
     question_id: str = Field(min_length=3,max_length=100)
 
+@router.post('/phone/voice/enable')
+def phone_voice_enable():
+    return request('/voice/enable','POST',{},timeout=8).json()
+
+@router.post('/phone/voice/stop')
+def phone_voice_stop():
+    return request('/voice/stop','POST',{},timeout=7).json()
+
 @router.post('/phone/voice/ack')
 def phone_voice_ack(data: VoiceAcknowledgment):
     return request('/voice/ack','POST',data.model_dump(),timeout=7).json()
