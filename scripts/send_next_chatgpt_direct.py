@@ -33,6 +33,9 @@ def main():
     for attempt in range(1,10):
         status,data=direct()
         stage=data.get('stage','')
+        print('DIRECT_ATTEMPT',json.dumps({'attempt':attempt,'http':status,
+          'stage':stage,'details':data.get('details'),
+          'reason':data.get('reason','')},separators=(',',':')))
         if status!=200:
             print('DIRECT_FAILED',json.dumps({'http':status,'error':str(data)[:150]}))
             return 4
