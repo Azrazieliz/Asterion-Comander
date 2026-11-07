@@ -11,9 +11,34 @@ def main():
     if parsed.scheme!='http' or not (ip.is_private or ip in ipaddress.ip_network('100.64.0.0/10')):
         raise ValueError('Private pairing endpoint required')
     token=pairing['token']
-    req=urllib.request.Request(base+'/cycles/status',headers={'Authorization':'Bearer '+token,'Accept':'application/json'})
-    with urllib.request.urlopen(req,timeout=8) as reply:
-        data=json.load(reply); code=reply.status
+    def call(endpoint,payload=None):
+        raw=None if payload is None else json.dumps(payload,separators=(',',':')).encode('utf-8')
+        headers={'Authorization':'Bearer '+token,'Accept':'application/json'}
+        if raw is not None:headers['Content-Type']='application/json'
+        req=urllib.request.Request(base+endpoint,data=raw,headers=headers,method='POST' if raw is not None else 'GET')
+        with urllib.request.urlopen(req,timeout=9) as reply:
+            return reply.status,json.load(reply)
+    code,data=call('/cycles/status')
+    if '--start-test' in sys.argv:
+        previous=data.get('cycle',{})
+        if not isinstance(previous,dict):previous={}
+        if previous.get('active',False):
+            if not previous.get('cycle_id','').startswith('phone-selftest-'):
+                raise ValueError('Active non-test cycle; refusing replacement')
+            call('/cycles/stop',{})
+        test_id='control-accept-v0913-20261107'
+        payload={
+            'cycle_id':test_id,
+            'project':'Asterion-Control',
+            'priority_tier':'7*',
+            'spec_reference':'7STAR_FROZEN_MASTER.md',
+            'conversation':'same',
+            'max_cycles':2,
+            'message':'Two-turn autonomous continuation acceptance only. No repository edits or external tasks. For cycle 1, confirm the controller has delivered the first checkpoint and explain that it must automatically enqueue cycle 2; finish with the exact ASTERION-CYCLE-ACK marker specified below. For cycle 2, confirm that this is a distinct second controller-delivered turn; finish with the ASTERION-CYCLE-DONE marker. Do not complete after only one message.'
+        }
+        code,data=call('/cycles/start',payload)
+        print('ACCEPTANCE_TEST_STARTED:'+test_id)
+        code,data=call('/cycles/status')
     checkpoint=data.get('checkpoint',{})
     cycle=data.get('cycle',{})
     if not isinstance(cycle,dict): cycle={}
