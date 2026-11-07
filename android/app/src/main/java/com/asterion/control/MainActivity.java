@@ -317,10 +317,11 @@ public final class MainActivity extends Activity {
     // Internal relays, checkpoints and observation have authenticated APIs,
     // not duplicate diagnostic switches on this user-facing screen.
     gap(devicesBody,12);LinearLayout voice=card();
-    rowTitle(voice,"Voice questions",
-      "Permission-based speaker and microphone access",icon("activity",DesignSystem.TEAL,22));
+    rowTitle(voice,"Voice control",
+      "Say Asterion followed by your request · works in background while Android permits microphone access",
+      icon("activity",DesignSystem.TEAL,22));
     voiceStartAction=v();
-    button(voiceStartAction,"Enable voice questions","check",true,this::startVoiceQuestions);
+    button(voiceStartAction,"Enable hands-free voice","check",true,this::startVoiceQuestions);
     wide(voice,voiceStartAction);
     voiceTalkAction=v();
     button(voiceTalkAction,"Talk to Asterion","activity",true,()->{
@@ -334,7 +335,11 @@ public final class MainActivity extends Activity {
     wide(voice,voiceTalkAction);
     voiceStopAction=v();
     button(voiceStopAction,"Stop voice session","power",false,
-      ()->{stopService(new Intent(this,VoiceDialogueService.class));updateHealth();});
+      ()->{
+        try{VoiceDialogueService.stopFromOwnerApi(this);}
+        catch(Exception e){toast("Voice could not stop: "+e.getMessage());}
+        updateHealth();
+      });
     wide(voice,voiceStopAction);wide(devicesBody,voice);
 
     gap(devicesBody,12);LinearLayout transfer=card();
@@ -1061,6 +1066,15 @@ public final class MainActivity extends Activity {
   @Override protected void onResume(){
     super.onResume();
     visibleActivity = new java.lang.ref.WeakReference<>(this);
+    // The owner requested speech-only activation. Start the previously consented
+    // microphone service while this activity is visibly resumed; Android forbids
+    // starting a new microphone FGS from an ordinary hidden/background app.
+    if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED){
+      SharedPreferences voicePreference=getSharedPreferences("voice_style",MODE_PRIVATE);
+      if(!voicePreference.contains(VoiceDialogueService.ALWAYS_ON_PREF))
+        voicePreference.edit().putBoolean(VoiceDialogueService.ALWAYS_ON_PREF,true).apply();
+      VoiceDialogueService.ensureOwnerRequestedAlwaysOn(this);
+    }
     if(prefs!=null&&!destroyed&&getSharedPreferences("agent",MODE_PRIVATE)
        .getBoolean(AgentService.PREF_REMOTE_ENABLED,false)){
       if(!AgentService.running)startAgent();
