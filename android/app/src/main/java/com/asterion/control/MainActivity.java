@@ -94,7 +94,7 @@ public final class MainActivity extends Activity {
   private TextView healthBattery,healthTemp,healthMemory,healthStorage,healthThermal,healthWifi,healthActionStatus,pcPerformanceActionStatus;
   private TextView remoteConnection,remotePlaceholder,agentConnection,captureConnection,accessConnection,phoneAddress,hostHealth,pairingFeedback,transferFeedback,updateFeedback,phoneBridgeFeedback;
   private String activeTransferId=null;
-  private LinearLayout phoneAccessAction,phoneCaptureAction,phoneStopAction,transferCancelAction;
+  private LinearLayout phoneAccessAction,phoneCaptureAction,phoneStopAction,transferCancelAction,voiceStartAction,voiceStopAction;
   private DesignSystem.Meter batteryMeter,memoryMeter,storageMeter;
   private EditText serverUrl,serverToken,localAddress;
   private WebView web;
@@ -162,7 +162,10 @@ public final class MainActivity extends Activity {
     buildNav();show(0);updateHealth();handler.postDelayed(ticker,3500);
     // Owner-authorized continuation is persistent and controlled by the internal
     // ledger. No diagnostic/transport toggles belong on the everyday UI.
-    try{ContinuationLedger.get(this).configure(true);}catch(Exception ignored){}
+    if(!prefs.getBoolean("continuation_initial_default_v0913",false)){
+      try{ContinuationLedger.get(this).configure(true);}catch(Exception ignored){}
+      prefs.edit().putBoolean("continuation_initial_default_v0913",true).apply();
+    }
     // Only check periodically; Android continues to approve every APK install.
     long checked=prefs.getLong("last_auto_update_check_ms",0L);
     if(System.currentTimeMillis()-checked>86400000L){
@@ -312,9 +315,18 @@ public final class MainActivity extends Activity {
     wide(phone,phoneStopAction);
     wide(devicesBody,phone);
 
-    // Private GitHub transport, ChatGPT checkpoints, app observation and
-    // test/debug speech controls continue through authenticated internal APIs.
-    // Do not duplicate internal developer switches in the normal Connect UI.
+    // Internal relays, checkpoints and observation have authenticated APIs,
+    // not duplicate diagnostic switches on this user-facing screen.
+    gap(devicesBody,12);LinearLayout voice=card();
+    rowTitle(voice,"Voice questions",
+      "Permission-based speaker and microphone access",icon("activity",DesignSystem.TEAL,22));
+    voiceStartAction=v();
+    button(voiceStartAction,"Enable voice questions","check",true,this::startVoiceQuestions);
+    wide(voice,voiceStartAction);
+    voiceStopAction=v();
+    button(voiceStopAction,"Stop voice session","power",false,
+      ()->{stopService(new Intent(this,VoiceDialogueService.class));updateHealth();});
+    wide(voice,voiceStopAction);wide(devicesBody,voice);
 
     gap(devicesBody,12);LinearLayout transfer=card();
     rowTitle(transfer,"Direct Wi-Fi file transfer","PC → Phone · Files are saved to Downloads/Asterion Control",icon("download",DesignSystem.TEAL,24));
@@ -730,12 +742,8 @@ public final class MainActivity extends Activity {
     if(healthActionStatus!=null){
       JSONObject p=PerformanceManager.status(this);
       int every=p.optInt("capture_interval_ms",90);
-      String details="Mode: "+p.optString("requested_mode","automatic")+
-        " · "+p.optString("reason","normal")+
-        "\nScreen capture: "+every+" ms/frame, JPEG "+p.optInt("jpeg_quality",62)+
-        "\nObservation interval: "+p.optLong("observation_interval_ms",5000)+" ms"+
-        "\nFrames encoded: "+p.optLong("frames_encoded")+
-        " · saved by frame skipping: "+p.optLong("frames_skipped");
+      String details="Automatic · "+p.optString("reason","normal")+
+        "\nScreen refresh: "+every+" ms/frame";
       healthActionStatus.setText(details);
     }
     if(healthStorage!=null)healthStorage.setText(String.format(Locale.US,"%.1f GB free of %.0f GB",fs.getAvailableBytes()/1e9,fs.getTotalBytes()/1e9));
@@ -749,6 +757,10 @@ public final class MainActivity extends Activity {
       CaptureService.active?View.GONE:View.VISIBLE);
     if(phoneStopAction!=null)phoneStopAction.setVisibility(
       (AgentService.running||CaptureService.active)?View.VISIBLE:View.GONE);
+    if(voiceStartAction!=null)voiceStartAction.setVisibility(
+      VoiceDialogueService.active==null?View.VISIBLE:View.GONE);
+    if(voiceStopAction!=null)voiceStopAction.setVisibility(
+      VoiceDialogueService.active==null?View.GONE:View.VISIBLE);
     if(agentConnection!=null){agentConnection.setText(AgentService.running?"Enabled":"Off");agentConnection.setTextColor(AgentService.running?DesignSystem.TEAL:DesignSystem.MUTED);}
     if(captureConnection!=null){captureConnection.setText(CaptureService.active?"Streaming":"Off");captureConnection.setTextColor(CaptureService.active?DesignSystem.TEAL:DesignSystem.MUTED);}
     if(accessConnection!=null){accessConnection.setText(ControlAccessibilityService.active!=null?"Authorized":"Not enabled");accessConnection.setTextColor(ControlAccessibilityService.active!=null?DesignSystem.TEAL:DesignSystem.MUTED);}
