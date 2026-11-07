@@ -20,6 +20,19 @@ def phone_status():
     except Exception:
         return {'paired':True,'reachable':False,'device':pairing['device']}
 
+class AppBridgeAction(BaseModel):
+    package: str = Field(min_length=3,max_length=180)
+    action: str = Field(min_length=1,max_length=80)
+    request_id: str = Field(min_length=8,max_length=100)
+    payload: dict = Field(default_factory=dict)
+
+@router.get('/phone/app-bridge/apps')
+def app_bridges():return request('/app-bridge/apps').json()
+
+@router.post('/phone/app-bridge/invoke')
+def app_bridge_invoke(data:AppBridgeAction):
+    return request('/app-bridge/invoke','POST',data.model_dump(),timeout=11).json()
+
 @router.get('/phone/logcat')
 def phone_own_logcat():
     return request('/diagnostics/logcat',timeout=5).json()
