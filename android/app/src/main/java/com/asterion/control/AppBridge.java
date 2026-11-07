@@ -53,7 +53,7 @@ final class AppBridge {
       PackageInfo details=pm.getPackageInfo(pkg,PackageManager.GET_SIGNING_CERTIFICATES);
       SigningInfo info=details.signingInfo;
       if(info==null)throw new SecurityException("Application signature unavailable");
-      Signature[] signed=info.hasMultipleSigners()?info.getApkContentsSigners():info.getSigningCertificateHistory();
+      Signature[] signed=info.getApkContentsSigners(); // Pin current APK signer, not historical rotation ancestors.
       if(signed==null||signed.length==0)throw new SecurityException("Application signing identity unavailable");
       cert=signed[0].toByteArray();
     }else{
