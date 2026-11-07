@@ -163,7 +163,13 @@ class VoiceQuestion(BaseModel):
     locale: str = Field(default='en-US',pattern=r'^[a-z]{2}(-[A-Z]{2})?$')
 
 class VoiceCommand(BaseModel):
-    locale: str = Field(default='en-US',pattern=r'^[a-z]{2}(-[A-Z]{2})?
+    locale: str = Field(default='en-US',pattern=r'^[a-z]{2}(-[A-Z]{2})?$')
+
+class VoiceSay(BaseModel):
+    text: str = Field(min_length=1,max_length=700)
+    locale: str = Field(default='en-US',pattern=r'^[a-z]{2}(-[A-Z]{2})?$')
+
+class VoiceAcknowledgment(BaseModel):
     question_id: str = Field(min_length=3,max_length=100)
 
 class VoiceSettings(BaseModel):
@@ -201,168 +207,6 @@ def phone_voice_command(data:VoiceCommand):
 @router.post('/phone/voice/say')
 def phone_voice_say(data:VoiceSay):
     return request('/voice/say','POST',data.model_dump(),timeout=10.0).json()
-
-@router.post('/phone/voice/question')
-def phone_voice_question(data:VoiceQuestion):
-    return request('/voice/question','POST',data.model_dump(),timeout=10.0).json()
-
-# Generic application transport for authorized Asterion projects.
-# The Android app must be foreground before dispatching launch intents.
-class AppLaunch(BaseModel):
-    package: str = Field(min_length=3,max_length=180,pattern=r'^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*){1,12}$')
-
-@router.get('/phone/apps')
-def phone_apps():
-    return request('/apps').json()
-
-@router.post('/phone/apps/launch')
-def phone_app_launch(data:AppLaunch):
-    return request('/apps/launch','POST',data.model_dump(),timeout=7.0).json()
-
-class CheckpointAcknowledgment(BaseModel):
-    checkpoint_id: str = Field(min_length=3,max_length=100,pattern=r'^[A-Za-z0-9_.-]+$')
-    response_receipt: str = Field(min_length=8,max_length=512)
-
-@router.post('/phone/continuation/ack')
-def phone_continuation_ack(data:CheckpointAcknowledgment):
-    return request('/continuation/ack','POST',data.model_dump(),timeout=6.0).json()
-
-@router.post('/phone/continuation/cancel')
-def phone_continuation_cancel():
-    return request('/continuation/cancel','POST',{},timeout=6.0).json()
-
-@router.get('/phone/bridge/status')
-def phone_bridge_status():
-    return request('/github-bridge/status').json()
-
-@router.post('/phone/chat/new')
-def phone_chat_new():
-    """Request a new ChatGPT conversation; this does not prove navigation."""
-    return request('/chat/new','POST',{},timeout=12.0).json()
-
-@router.get('/phone/observation/timeline')
-def phone_observation_timeline():
-    return request('/observation/timeline').json()
-
-@router.get('/phone/observation/frames/{frame_id}')
-def phone_observation_get_frame(frame_id: str):
-    # phone_bridge validates the entire URL suffix; no path traversal allowed.
-    return Response(request('/observation/frame/'+frame_id).content,
-                    media_type='image/jpeg',headers={'Cache-Control':'no-store'})
-)
-
-class VoiceSay(BaseModel):
-    text: str = Field(min_length=1,max_length=700)
-    locale: str = Field(default='en-US',pattern=r'^[a-z]{2}(-[A-Z]{2})?
-    question_id: str = Field(min_length=3,max_length=100)
-
-class VoiceSettings(BaseModel):
-    rate: float = Field(ge=0.85,le=1.15)
-    pitch: float = Field(ge=0.90,le=1.10)
-
-@router.get('/phone/voice/settings')
-def phone_voice_settings():
-    return request('/voice/settings').json()
-
-@router.post('/phone/voice/settings')
-def phone_voice_configure(data: VoiceSettings):
-    return request('/voice/settings','POST',data.model_dump(),timeout=7).json()
-
-@router.post('/phone/voice/enable')
-def phone_voice_enable():
-    return request('/voice/enable','POST',{},timeout=8).json()
-
-@router.post('/phone/voice/stop')
-def phone_voice_stop():
-    return request('/voice/stop','POST',{},timeout=7).json()
-
-@router.post('/phone/voice/ack')
-def phone_voice_ack(data: VoiceAcknowledgment):
-    return request('/voice/ack','POST',data.model_dump(),timeout=7).json()
-
-@router.get('/phone/voice/status')
-def phone_voice_status():
-    return request('/voice/status').json()
-
-@router.post('/phone/voice/question')
-def phone_voice_question(data:VoiceQuestion):
-    return request('/voice/question','POST',data.model_dump(),timeout=10.0).json()
-
-# Generic application transport for authorized Asterion projects.
-# The Android app must be foreground before dispatching launch intents.
-class AppLaunch(BaseModel):
-    package: str = Field(min_length=3,max_length=180,pattern=r'^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*){1,12}$')
-
-@router.get('/phone/apps')
-def phone_apps():
-    return request('/apps').json()
-
-@router.post('/phone/apps/launch')
-def phone_app_launch(data:AppLaunch):
-    return request('/apps/launch','POST',data.model_dump(),timeout=7.0).json()
-
-class CheckpointAcknowledgment(BaseModel):
-    checkpoint_id: str = Field(min_length=3,max_length=100,pattern=r'^[A-Za-z0-9_.-]+$')
-    response_receipt: str = Field(min_length=8,max_length=512)
-
-@router.post('/phone/continuation/ack')
-def phone_continuation_ack(data:CheckpointAcknowledgment):
-    return request('/continuation/ack','POST',data.model_dump(),timeout=6.0).json()
-
-@router.post('/phone/continuation/cancel')
-def phone_continuation_cancel():
-    return request('/continuation/cancel','POST',{},timeout=6.0).json()
-
-@router.get('/phone/bridge/status')
-def phone_bridge_status():
-    return request('/github-bridge/status').json()
-
-@router.post('/phone/chat/new')
-def phone_chat_new():
-    """Request a new ChatGPT conversation; this does not prove navigation."""
-    return request('/chat/new','POST',{},timeout=12.0).json()
-
-@router.get('/phone/observation/timeline')
-def phone_observation_timeline():
-    return request('/observation/timeline').json()
-
-@router.get('/phone/observation/frames/{frame_id}')
-def phone_observation_get_frame(frame_id: str):
-    # phone_bridge validates the entire URL suffix; no path traversal allowed.
-    return Response(request('/observation/frame/'+frame_id).content,
-                    media_type='image/jpeg',headers={'Cache-Control':'no-store'})
-)
-
-class VoiceAcknowledgment(BaseModel):
-    question_id: str = Field(min_length=3,max_length=100)
-
-class VoiceSettings(BaseModel):
-    rate: float = Field(ge=0.85,le=1.15)
-    pitch: float = Field(ge=0.90,le=1.10)
-
-@router.get('/phone/voice/settings')
-def phone_voice_settings():
-    return request('/voice/settings').json()
-
-@router.post('/phone/voice/settings')
-def phone_voice_configure(data: VoiceSettings):
-    return request('/voice/settings','POST',data.model_dump(),timeout=7).json()
-
-@router.post('/phone/voice/enable')
-def phone_voice_enable():
-    return request('/voice/enable','POST',{},timeout=8).json()
-
-@router.post('/phone/voice/stop')
-def phone_voice_stop():
-    return request('/voice/stop','POST',{},timeout=7).json()
-
-@router.post('/phone/voice/ack')
-def phone_voice_ack(data: VoiceAcknowledgment):
-    return request('/voice/ack','POST',data.model_dump(),timeout=7).json()
-
-@router.get('/phone/voice/status')
-def phone_voice_status():
-    return request('/voice/status').json()
 
 @router.post('/phone/voice/question')
 def phone_voice_question(data:VoiceQuestion):
