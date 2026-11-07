@@ -93,7 +93,7 @@ public final class MainActivity extends Activity {
   private TextView healthBattery,healthTemp,healthMemory,healthStorage,healthThermal,healthWifi,healthActionStatus,pcPerformanceActionStatus;
   private TextView remoteConnection,remotePlaceholder,agentConnection,captureConnection,accessConnection,phoneAddress,hostHealth,pairingFeedback,transferFeedback,updateFeedback,phoneBridgeFeedback;
   private String activeTransferId=null;
-  private LinearLayout phoneAccessAction,phoneCaptureAction,phoneStopAction,transferCancelAction,voiceStartAction,voiceStopAction;
+  private LinearLayout phoneAccessAction,phoneCaptureAction,phoneStopAction,transferCancelAction,voiceStartAction,voiceTalkAction,voiceStopAction;
   private DesignSystem.Meter batteryMeter,memoryMeter,storageMeter;
   private EditText serverUrl,serverToken,localAddress;
   private WebView web;
@@ -322,6 +322,16 @@ public final class MainActivity extends Activity {
     voiceStartAction=v();
     button(voiceStartAction,"Enable voice questions","check",true,this::startVoiceQuestions);
     wide(voice,voiceStartAction);
+    voiceTalkAction=v();
+    button(voiceTalkAction,"Talk to Asterion","activity",true,()->{
+      try{
+        VoiceDialogueService v=VoiceDialogueService.active;
+        if(v==null){startVoiceQuestions();return;}
+        v.beginOwnerVoiceControl("en-US");
+        toast("Asterion is speaking; answer after the question");
+      }catch(Exception e){toast("Voice: "+e.getMessage());}
+    });
+    wide(voice,voiceTalkAction);
     voiceStopAction=v();
     button(voiceStopAction,"Stop voice session","power",false,
       ()->{stopService(new Intent(this,VoiceDialogueService.class));updateHealth();});
@@ -751,6 +761,8 @@ public final class MainActivity extends Activity {
     if(voiceStartAction!=null)voiceStartAction.setVisibility(
       VoiceDialogueService.active==null?View.VISIBLE:View.GONE);
     if(voiceStopAction!=null)voiceStopAction.setVisibility(
+      VoiceDialogueService.active==null?View.GONE:View.VISIBLE);
+    if(voiceTalkAction!=null)voiceTalkAction.setVisibility(
       VoiceDialogueService.active==null?View.GONE:View.VISIBLE);
     if(agentConnection!=null){agentConnection.setText(AgentService.running?"Enabled":"Off");agentConnection.setTextColor(AgentService.running?DesignSystem.TEAL:DesignSystem.MUTED);}
     if(captureConnection!=null){captureConnection.setText(CaptureService.active?"Streaming":"Off");captureConnection.setTextColor(CaptureService.active?DesignSystem.TEAL:DesignSystem.MUTED);}
