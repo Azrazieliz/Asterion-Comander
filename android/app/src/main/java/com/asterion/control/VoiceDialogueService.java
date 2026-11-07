@@ -344,7 +344,7 @@ public final class VoiceDialogueService extends Service {
       getSharedPreferences("voice_style",MODE_PRIVATE).edit()
         .putBoolean(ALWAYS_ON_PREF,false).apply();
       ambientEnabled=false;cancelAmbient();stopAmbientWake();
-      pendingOwnerSpeech="";PendingVoiceStore.clear(this);
+      pendingOwnerSpeech="";pendingRestored=false;PendingVoiceStore.clear(this);
       stopSelf();return START_NOT_STICKY;
     }
     if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){
@@ -749,7 +749,7 @@ public final class VoiceDialogueService extends Service {
       "microphone question only if a response is required.";
     JSONObject result=access.sendChatMessage(message);
     if(result.optBoolean("sent",false)){
-      pendingOwnerSpeech="";PendingVoiceStore.clear(this);
+      pendingOwnerSpeech="";pendingRestored=false;PendingVoiceStore.clear(this);
       transcript="";consumed=true;
       lastVoiceDispatch="submitted_unverified";
       state("delivered","");
@@ -757,7 +757,7 @@ public final class VoiceDialogueService extends Service {
       refreshVoiceNotification();
     }else if(result.optBoolean("uncertain",false)){
       // The gesture may have reached Send. Never double-send it.
-      pendingOwnerSpeech="";PendingVoiceStore.clear(this);
+      pendingOwnerSpeech="";pendingRestored=false;PendingVoiceStore.clear(this);
       lastVoiceDispatch="needs_review";
       state("failed",result.optString("reason","ChatGPT Send not verified"));
       if(ambientEnabled)scheduleAmbient(800L);
@@ -811,7 +811,7 @@ public final class VoiceDialogueService extends Service {
       .put("last_voice_dispatch",lastVoiceDispatch)
       .put("voice_request_awaiting_send",!pendingOwnerSpeech.isEmpty())
       .put("pending_voice_recovered",pendingRestored)
-      .put("pending_voice_encrypted",!pendingOwnerSpeech.isEmpty())
+      .put("pending_voice_encrypted",PendingVoiceStore.hasSaved(this))
       .put("speaker_started",speakerPlaybackStarted)
       .put("speaker_finished",speakerPlaybackCompleted)
       .put("answer_pending_ack","answered".equals(phase)&&!consumed)
