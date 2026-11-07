@@ -46,6 +46,8 @@ public final class AgentService extends Service {
   private ContinuationCycle cycles;
   private final java.util.concurrent.ScheduledExecutorService observer =
       java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
+  private final java.util.concurrent.ScheduledExecutorService cycleSupervisor =
+      java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
   // Independent worker: GitHub HTTP never stalls local performance observation.
   // Does nothing until the owner explicitly enables the encrypted private bridge.
   private final java.util.concurrent.ScheduledExecutorService phoneBridgePoller =
@@ -67,7 +69,12 @@ public final class AgentService extends Service {
     try{continuation.recover();}catch(Exception ignored){}
     cycles=ContinuationCycle.get(this);
     try{cycles.recover();}catch(Exception ignored){}
-    // ChatGPT is the sole cycle operator. Never auto-tick an Android model-turn loop.
+    // Control owns the durable transport cycle; ChatGPT supplies the actual
+    // reasoning and explicit ACK/DONE marker. Never infer success from a tap.
+    cycleSupervisor.scheduleWithFixedDelay(()->{
+      try{if(cycles!=null)cycles.tick();}
+      catch(Exception e){android.util.Log.w("AsterionCycle","Cycle tick deferred",e);}
+    },5,4,java.util.concurrent.TimeUnit.SECONDS);
     observer.scheduleWithFixedDelay(()->{
       try{PerformanceManager.tick(this);AppObservation.sample(this);}catch(Exception ignored){}
     },3,3,java.util.concurrent.TimeUnit.SECONDS);
@@ -307,14 +314,38 @@ public final class AgentService extends Service {
       catch(Exception e){json(out,400,error("Network status unavailable"));}return;
     }
     if(method.equals("GET")&&path.equals("/cycles/status")){
-      try{json(out,200,new JSONObject().put("controller","chatgpt")
-        .put("android_autonomous_cycle",false)
-        .put("checkpoint",continuation.status()));}
-      catch(Exception e){json(out,400,error("Checkpoint status unavailable"));}
+      try{json(out,200,new JSONObject().put("controller","asterion-control")
+        .put("android_autonomous_cycle",true)
+        .put("cycle",cycles.status())
+        .put("checkpoint",continuation.status().optString("state","idle")));}
+      catch(Exception e){json(out,400,error("Cycle status unavailable"));}
       return;
     }
-    if(method.equals("POST")&&path.startsWith("/cycles/")){
-      json(out,410,error("Android autonomous cycles disabled; ChatGPT must queue, dispatch and acknowledge each checkpoint"));
+    if(method.equals("POST")&&path.equals("/cycles/start")){
+      try{
+        continuation.configure(true);
+        json(out,200,cycles.start(body));
+      }catch(Exception e){json(out,400,error(e.getMessage()));}
+      return;
+    }
+    if(method.equals("POST")&&path.equals("/cycles/pause")){
+      try{json(out,200,cycles.pause());}
+      catch(Exception e){json(out,400,error(e.getMessage()));}
+      return;
+    }
+    if(method.equals("POST")&&path.equals("/cycles/resume")){
+      try{json(out,200,cycles.resume());}
+      catch(Exception e){json(out,400,error(e.getMessage()));}
+      return;
+    }
+    if(method.equals("POST")&&path.equals("/cycles/stop")){
+      try{json(out,200,cycles.stop());}
+      catch(Exception e){json(out,400,error(e.getMessage()));}
+      return;
+    }
+    if(method.equals("POST")&&path.equals("/cycles/tick")){
+      try{json(out,200,cycles.tick());}
+      catch(Exception e){json(out,400,error(e.getMessage()));}
       return;
     }
     if(method.equals("POST")&&path.equals("/continuation/ack")){
@@ -451,6 +482,6 @@ public final class AgentService extends Service {
       try{networkManager.unregisterNetworkCallback(networkCallback);}catch(Exception ignored){}
     }
     PhoneDirectMcp.stop();clients.shutdownNow();observer.shutdownNow();
-    phoneBridgePoller.shutdownNow();super.onDestroy();}
+    cycleSupervisor.shutdownNow();phoneBridgePoller.shutdownNow();super.onDestroy();}
   @Override public IBinder onBind(Intent i){return null;}
 }
