@@ -224,6 +224,16 @@ public final class AgentService extends Service {
     // native UI; HTTP bearer possession alone cannot enable self-continuation.
     // User-enabled Asterion app recording; only native MediaProjection frames.
     // Foreground voice exchange is independently owner-enabled on Android.
+    if(method.equals("GET")&&path.equals("/voice/settings")){
+      try{VoiceDialogueService v=VoiceDialogueService.active;
+        json(out,v==null?503:200,v==null?error("Enable voice session first"):v.voiceSettings());}
+      catch(Exception e){json(out,400,error(e.getMessage()));}return;
+    }
+    if(method.equals("POST")&&path.equals("/voice/settings")){
+      try{VoiceDialogueService v=VoiceDialogueService.active;
+        json(out,v==null?503:200,v==null?error("Enable voice session first"):v.configureVoiceSettings(body));}
+      catch(Exception e){json(out,400,error(e.getMessage()));}return;
+    }
     if(method.equals("GET")&&path.equals("/voice/status")){
       try {
         VoiceDialogueService voice=VoiceDialogueService.active;

@@ -52,6 +52,8 @@ ALLOWED={
 
 # Use the owner's existing locally paired Android API; avoid stale Windows proxy routes.
 PHONE_NATIVE={
+ 'phone_voice_settings':('GET','/voice/settings'),
+ 'phone_voice_configure':('POST','/voice/settings'),
  'phone_voice_status':('GET','/voice/status'),
  'phone_voice_question':('POST','/voice/question'),
  'phone_voice_ack':('POST','/voice/ack'),
@@ -128,6 +130,10 @@ def run(request,key):
     if op in PHONE_NATIVE:
         method,path=PHONE_NATIVE[op]
         if method=='GET' and args:raise ValueError('GET takes no arguments')
+        if op=='phone_voice_configure' and (
+            not isinstance(args.get('rate'),(int,float)) or not 0.85<=args['rate']<=1.15
+            or not isinstance(args.get('pitch'),(int,float)) or not 0.90<=args['pitch']<=1.10):
+            raise ValueError('Invalid natural voice settings')
         if op=='phone_voice_question' and (not isinstance(args.get('text'),str)
             or not 1<=len(args['text'])<=700):raise ValueError('Voice question must contain 1-700 characters')
         if op=='phone_performance_mode' and args.get('mode') not in ('automatic','foreground','full','quiet'):

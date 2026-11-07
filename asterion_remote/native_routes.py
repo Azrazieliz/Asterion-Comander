@@ -161,6 +161,18 @@ class VoiceQuestion(BaseModel):
 class VoiceAcknowledgment(BaseModel):
     question_id: str = Field(min_length=3,max_length=100)
 
+class VoiceSettings(BaseModel):
+    rate: float = Field(ge=0.85,le=1.15)
+    pitch: float = Field(ge=0.90,le=1.10)
+
+@router.get('/phone/voice/settings')
+def phone_voice_settings():
+    return request('/voice/settings').json()
+
+@router.post('/phone/voice/settings')
+def phone_voice_configure(data: VoiceSettings):
+    return request('/voice/settings','POST',data.model_dump(),timeout=7).json()
+
 @router.post('/phone/voice/enable')
 def phone_voice_enable():
     return request('/voice/enable','POST',{},timeout=8).json()

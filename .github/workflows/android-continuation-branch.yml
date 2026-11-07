@@ -70,7 +70,7 @@ jobs:
           distribution: temurin
           java-version: '21'
       - name: Provision owner Android signer from encrypted GitHub Actions secret
-        if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release-098]')
+        if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release-099]')
         shell: bash
         env:
           ASTERION_OWNER_KEYSTORE_B64: ${{ secrets.ASTERION_ANDROID_DEBUG_KEYSTORE_B64 }}
@@ -129,15 +129,15 @@ jobs:
         working-directory: android
         run: gradle --no-daemon --console=plain :app:compileReleaseJavaWithJavac
       - name: Build owner-compatible native APK entirely on GitHub Actions
-        if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release-098]')
+        if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release-099]')
         working-directory: android
         run: gradle --no-daemon --console=plain :app:assembleRelease
       - name: Validate Android app identity and archive
-        if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release-098]')
+        if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release-099]')
         run: |
           test -s android/app/build/outputs/apk/release/app-release.apk
-          grep -q "versionName '0.9.8'" android/app/build.gradle
-          grep -q "versionCode 908" android/app/build.gradle
+          grep -q "versionName '0.9.9'" android/app/build.gradle
+          grep -q "versionCode 909" android/app/build.gradle
           test -s android/app/src/main/java/com/asterion/control/PhoneGitBridge.java
           test -s android/app/src/main/java/com/asterion/control/AndroidMcp.java
           sha256sum android/app/build/outputs/apk/release/app-release.apk
@@ -151,7 +151,7 @@ jobs:
           fi
           "$SDK/build-tools/35.0.0/zipalign" -c -v 4 android/app/build/outputs/apk/release/app-release.apk
       - name: Audit non-debuggable release APK signing identity versus installed v0.8.6 baseline
-        if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release-098]')
+        if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release-099]')
         shell: bash
         run: |
           set -euo pipefail
@@ -176,19 +176,19 @@ jobs:
             exit 1
           fi
       - uses: actions/upload-artifact@v4
-        if: success() && (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release-098]'))
+        if: success() && (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release-099]'))
         with:
-          name: Asterion-Control-v0.9.8-OWNER-SIGNED-RELEASE
+          name: Asterion-Control-v0.9.9-OWNER-SIGNED-RELEASE
           path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
 
       - name: Publish verified in-place Android update to the canonical app feed
-        if: success() && (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release-098]'))
+        if: success() && (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release-099]'))
         shell: bash
         run: |
           set -euo pipefail
-          VERSION='0.9.8'
-          PKG='Asterion-Control-v0.9.8-release.apk'
+          VERSION='0.9.9'
+          PKG='Asterion-Control-v0.9.9-release.apk'
           ROOT="${RUNNER_TEMP}/asterion-release-feed"
           git fetch --no-tags origin main
           git worktree add --detach "$ROOT" origin/main
@@ -196,19 +196,19 @@ jobs:
           cp android/app/build/outputs/apk/release/app-release.apk "$ROOT/dist/$PKG"
           # Compatibility filename ONLY: exact same non-debuggable release APK.
           # Required because v0.8.8 validates this historical suffix.
-          cp "$ROOT/dist/$PKG" "$ROOT/dist/Asterion-Control-v0.9.8-debug.apk"
+          cp "$ROOT/dist/$PKG" "$ROOT/dist/Asterion-Control-v0.9.9-debug.apk"
           (
             cd "$ROOT/dist"
-            sha256sum "$PKG" > 'SHA256SUMS-v0.9.8.txt'
+            sha256sum "$PKG" > 'SHA256SUMS-v0.9.9.txt'
           )
           python - "$ROOT/dist" <<'PY'
           import hashlib,json,pathlib,sys
           root=pathlib.Path(sys.argv[1])
-          source=root/'Asterion-Control-v0.9.8-release.apk'
+          source=root/'Asterion-Control-v0.9.9-release.apk'
           data={
-            "version_code":908,
-            "version_name":"0.9.8",
-            "apk_url":"https://raw.githubusercontent.com/Azrazieliz/Asterion-Comander/main/dist/Asterion-Control-v0.9.8-release.apk",
+            "version_code":909,
+            "version_name":"0.9.9",
+            "apk_url":"https://raw.githubusercontent.com/Azrazieliz/Asterion-Comander/main/dist/Asterion-Control-v0.9.9-release.apk",
             "sha256":hashlib.file_digest(source.open('rb'),'sha256').hexdigest(),
             "size_bytes":source.stat().st_size,
           }
@@ -221,8 +221,8 @@ jobs:
           print("UPDATE_SHA256="+data["sha256"])
           PY
           git -C "$ROOT" add dist/latest.json dist/latest-release.json "dist/$PKG" \
-            dist/Asterion-Control-v0.9.8-debug.apk dist/SHA256SUMS-v0.9.8.txt
+            dist/Asterion-Control-v0.9.9-debug.apk dist/SHA256SUMS-v0.9.9.txt
           if ! git -C "$ROOT" diff --cached --quiet; then
-            git -C "$ROOT" -c user.name='asterion-control-actions' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m "Publish owner-signed Control v0.9.8 verified release update"
+            git -C "$ROOT" -c user.name='asterion-control-actions' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m "Publish owner-signed Control v0.9.9 verified release update"
             git -C "$ROOT" push origin HEAD:main
           fi
