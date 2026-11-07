@@ -138,34 +138,14 @@ public final class ControlAccessibilityService extends AccessibilityService {
     }catch(Exception e){output[0]=chatOutcome(false,false,
       "ChatGPT keyboard unavailable: "+e.getClass().getSimpleName());done.countDown();}
   }
-  private final java.util.concurrent.ExecutorService handoff =
-      java.util.concurrent.Executors.newSingleThreadExecutor();
-  private final java.util.concurrent.atomic.AtomicBoolean resumeScheduled =
-      new java.util.concurrent.atomic.AtomicBoolean(false);
-  private long lastResumeProbe = 0L;
   @Override public void onAccessibilityEvent(AccessibilityEvent e) {
     AppObservation.event(getApplicationContext(),e);
-    // A queued, owner-enabled checkpoint can resume when ChatGPT becomes visible.
-    // Never inject text into a different application or into an occupied composer.
-    if (e == null || !"com.openai.chatgpt".contentEquals(e.getPackageName() == null
-        ? "" : e.getPackageName())) return;
-    long now = android.os.SystemClock.elapsedRealtime();
-    if (now - lastResumeProbe < 4000L || !resumeScheduled.compareAndSet(false, true)) return;
-    lastResumeProbe = now;
-    handoff.execute(() -> {
-      try {
-        ContinuationLedger ledger = ContinuationLedger.get(getApplicationContext());
-        if ("queued".equals(ledger.recover().optString("state"))
-            && ledger.status().optBoolean("enabled")) {
-          // Send only the operator-queued checkpoint; never generate the next turn.
-          // Delay: allow ChatGPT's chat composer and navigation to settle.
-          Thread.sleep(1600);
-          ledger.dispatch();
-        }
-      } catch (Exception ignored) {
-        // Status remains queued or failed for explicit inspection. No retry loop.
-      } finally { resumeScheduled.set(false); }
-    });
+    // Direct voice request: the actual ChatGPT writing bar must be visible.
+    // Do not invent a follow-up or dispatch any old checkpoint automatically.
+    if(e==null||!"com.openai.chatgpt".contentEquals(
+        e.getPackageName()==null?"":e.getPackageName()))return;
+    VoiceDialogueService voice=VoiceDialogueService.active;
+    if(voice!=null)voice.onChatWindowVisible();
   }
   private AccessibilityNodeInfo findEditable(AccessibilityNodeInfo node, int depth) {
     if (node == null || depth > 24) return null;
