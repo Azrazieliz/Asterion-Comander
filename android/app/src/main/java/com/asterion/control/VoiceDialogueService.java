@@ -86,6 +86,8 @@ public final class VoiceDialogueService extends Service {
   private volatile boolean ambientEnabled=false;
   private volatile boolean ambientCapture=false;
   private volatile boolean ambientAwaitingCommand=false;
+  private volatile long lastWakePhraseAtMs=0L;
+  private volatile boolean pendingRestored=false;
   private volatile boolean preferSystemRecognizer=false;
   private volatile int ambientErrors=0;
   private volatile int recognizedWakeCount=0;
@@ -157,14 +159,23 @@ public final class VoiceDialogueService extends Service {
     String command="";
     if(ambientAwaitingCommand){
       ambientAwaitingCommand=false;
-      command=speech;
+      if(System.currentTimeMillis()-lastWakePhraseAtMs<=12000L)
+        command=speech;
     }else if(match.matches()){
       command=match.group(1).trim();
       recognizedWakeCount++;
-      if(command.isEmpty())ambientAwaitingCommand=true;
+      if(command.isEmpty()){
+        ambientAwaitingCommand=true;
+        lastWakePhraseAtMs=System.currentTimeMillis();
+      }
     }
     if(!command.isEmpty()){
       pendingOwnerSpeech=command;
+      try{PendingVoiceStore.save(this,command);}
+      catch(Exception saveFailure){
+        lastVoiceDispatch="recognized_not_persisted";
+        state("awaiting_device","Voice command held in memory only");
+      }
       lastVoiceDispatch="recognized_ambient_wake";
       onChatWindowVisible();
     }else if(ambientEnabled){
@@ -276,6 +287,9 @@ public final class VoiceDialogueService extends Service {
     naturalRate=Math.max(0.85f,Math.min(1.15f,saved.getFloat("rate",0.96f)));
     naturalPitch=Math.max(0.90f,Math.min(1.10f,saved.getFloat("pitch",1.00f)));
     super.onCreate();
+    pendingOwnerSpeech=PendingVoiceStore.restore(this);
+    pendingRestored=!pendingOwnerSpeech.isEmpty();
+    if(pendingRestored)lastVoiceDispatch="restored_pending_voice";
     unlockedReceiver=new BroadcastReceiver(){
       @Override public void onReceive(Context context,Intent intent){
         if(active==VoiceDialogueService.this)onChatWindowVisible();
@@ -330,6 +344,7 @@ public final class VoiceDialogueService extends Service {
       getSharedPreferences("voice_style",MODE_PRIVATE).edit()
         .putBoolean(ALWAYS_ON_PREF,false).apply();
       ambientEnabled=false;cancelAmbient();stopAmbientWake();
+      pendingOwnerSpeech="";PendingVoiceStore.clear(this);
       stopSelf();return START_NOT_STICKY;
     }
     if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){
@@ -338,6 +353,7 @@ public final class VoiceDialogueService extends Service {
     startForeground(NOTIFICATION_ID,notification(),
       ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
     active=this;
+    if(pendingRestored)ui.postDelayed(this::onChatWindowVisible,600L);
     ambientEnabled=getSharedPreferences("voice_style",MODE_PRIVATE)
       .getBoolean(ALWAYS_ON_PREF,true);
     if(ambientEnabled){
@@ -379,6 +395,7 @@ public final class VoiceDialogueService extends Service {
     boolean wasRunning=active!=null;
     owner.getSharedPreferences("voice_style",MODE_PRIVATE).edit()
       .putBoolean(ALWAYS_ON_PREF,false).apply();
+    PendingVoiceStore.clear(owner);
     owner.stopService(new Intent(owner,VoiceDialogueService.class));
     return new JSONObject().put("ok",true).put("stop_requested",true).put("was_running",wasRunning);
   }
@@ -617,6 +634,10 @@ public final class VoiceDialogueService extends Service {
           releaseAudioFocus();
           releaseCpuForExchange();
           pendingOwnerSpeech=transcript;
+          try{PendingVoiceStore.save(VoiceDialogueService.this,transcript);}
+          catch(Exception failure){
+            state("awaiting_device","Voice command not persisted; device storage unavailable");
+          }
           lastVoiceDispatch="recognized";
           onChatWindowVisible();
         }
@@ -728,7 +749,7 @@ public final class VoiceDialogueService extends Service {
       "microphone question only if a response is required.";
     JSONObject result=access.sendChatMessage(message);
     if(result.optBoolean("sent",false)){
-      pendingOwnerSpeech="";
+      pendingOwnerSpeech="";PendingVoiceStore.clear(this);
       transcript="";consumed=true;
       lastVoiceDispatch="submitted_unverified";
       state("delivered","");
@@ -736,7 +757,7 @@ public final class VoiceDialogueService extends Service {
       refreshVoiceNotification();
     }else if(result.optBoolean("uncertain",false)){
       // The gesture may have reached Send. Never double-send it.
-      pendingOwnerSpeech="";
+      pendingOwnerSpeech="";PendingVoiceStore.clear(this);
       lastVoiceDispatch="needs_review";
       state("failed",result.optString("reason","ChatGPT Send not verified"));
       if(ambientEnabled)scheduleAmbient(800L);
@@ -789,6 +810,8 @@ public final class VoiceDialogueService extends Service {
       .put("background_cpu_wake_held",ambientWakeLock!=null&&ambientWakeLock.isHeld())
       .put("last_voice_dispatch",lastVoiceDispatch)
       .put("voice_request_awaiting_send",!pendingOwnerSpeech.isEmpty())
+      .put("pending_voice_recovered",pendingRestored)
+      .put("pending_voice_encrypted",!pendingOwnerSpeech.isEmpty())
       .put("speaker_started",speakerPlaybackStarted)
       .put("speaker_finished",speakerPlaybackCompleted)
       .put("answer_pending_ack","answered".equals(phase)&&!consumed)
