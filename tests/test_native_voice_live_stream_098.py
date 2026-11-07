@@ -7,8 +7,8 @@ ROOT=Path(__file__).resolve().parents[1]
 SRC=ROOT/'android/app/src/main/java/com/asterion/control'
 
 def test_mjpeg_frames_reassemble_across_boundary():
-    jpeg=b'\\xff\\xd8hello\\xff\\xd9'
-    piece=b'--asterionframe\\r\\nContent-Type: image/jpeg\\r\\nContent-Length: 9\\r\\n\\r\\n'+jpeg+b'\\r\\n'
+    jpeg=b'\xff\xd8hello\xff\xd9'
+    piece=b'--asterionframe\r\nContent-Type: image/jpeg\r\nContent-Length: 9\r\n\r\n'+jpeg+b'\r\n'
     buffer=bytearray()
     for part in (piece[:10],piece[10:45],piece[45:]):buffer.extend(part)
     assert _take_mjpeg_frame(buffer)==jpeg
