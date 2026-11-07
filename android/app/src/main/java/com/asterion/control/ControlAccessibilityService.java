@@ -7,6 +7,9 @@ import android.os.Build;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.SurroundingText;
 import android.view.KeyEvent;
+import android.util.DisplayMetrics;
+import android.view.accessibility.AccessibilityWindowInfo;
+import java.util.List;
 import android.graphics.Path;
 import android.graphics.Rect;
 import android.os.Bundle;
@@ -44,6 +47,74 @@ public final class ControlAccessibilityService extends AccessibilityService {
     SurroundingText text=input.getSurroundingText(4096,4096,0);
     return text==null||text.getText()==null?null:text.getText().toString();
   }
+  /** Visible ChatGPT composer action: tap its blue send arrow, just above
+   * the software keyboard. Uses REAL Accessibility gestures, not an invented
+   * keyboard Send key. The owner's draft is never silently replaced. */
+  private boolean tapVisibleBlueArrow(GestureResultCallback callback){
+    AccessibilityNodeInfo root=getRootInActiveWindow();
+    if(root==null||root.getPackageName()==null||
+        !"com.openai.chatgpt".contentEquals(root.getPackageName()))return false;
+    InputMethod ime=getInputMethod();
+    if(ime==null||!ime.getCurrentInputStarted()||chatKeyboard()==null)return false;
+    DisplayMetrics metrics=getResources().getDisplayMetrics();
+    float density=metrics.density;
+    Rect keyboard=new Rect();
+    boolean found=false;
+    List<AccessibilityWindowInfo> windows=getWindows();
+    if(windows!=null)for(AccessibilityWindowInfo w:windows){
+      if(w==null||w.getType()!=AccessibilityWindowInfo.TYPE_INPUT_METHOD)continue;
+      w.getBoundsInScreen(keyboard);
+      if(keyboard.top>metrics.heightPixels/3 &&
+          keyboard.bottom>=metrics.heightPixels-120*density){found=true;break;}
+    }
+    if(!found)return false; // No visible keyboard: never tap guessed buttons.
+    float x=metrics.widthPixels-39*density;
+    float y=keyboard.top-35*density;
+    if(y<metrics.heightPixels*0.38f || y>=keyboard.top ||
+        x<metrics.widthPixels*0.78f || x>=metrics.widthPixels)return false;
+    Path path=new Path();path.moveTo(x,y);
+    GestureDescription gesture=new GestureDescription.Builder()
+      .addStroke(new GestureDescription.StrokeDescription(path,0,65L)).build();
+    return dispatchGesture(gesture,callback,main);
+  }
+  private void verifyChatSend(String message,JSONObject[] output,CountDownLatch done){
+    main.postDelayed(()->{
+      try{
+        InputMethod.AccessibilityInputConnection input=chatKeyboard();
+        String remaining=inputText(input);
+        if(message.equals(remaining))
+          output[0]=chatOutcome(false,false,
+            "ChatGPT text still in composer; Send did not complete");
+        else if(remaining==null)
+          output[0]=chatOutcome(false,true,
+            "ChatGPT keyboard changed; inspect UI before any retry");
+        else output[0]=chatOutcome(true,false,
+          "Blue Send action cleared draft; await visible ChatGPT reply");
+      }catch(Exception e){output[0]=chatOutcome(false,true,
+        "ChatGPT send result uncertain: "+e.getClass().getSimpleName());
+      }finally{done.countDown();}
+    },850L);
+  }
+  private void sendBlueArrowOrAccessibleButton(String message,
+      JSONObject[] output,CountDownLatch done){
+    AccessibilityNodeInfo root=getRootInActiveWindow();
+    AccessibilityNodeInfo accessible=root==null?null:findSend(root,0);
+    if(accessible!=null&&accessible.performAction(AccessibilityNodeInfo.ACTION_CLICK)){
+      verifyChatSend(message,output,done);return;
+    }
+    boolean requested=tapVisibleBlueArrow(new GestureResultCallback(){
+      @Override public void onCompleted(GestureDescription gesture){
+        verifyChatSend(message,output,done);
+      }
+      @Override public void onCancelled(GestureDescription gesture){
+        output[0]=chatOutcome(false,true,"Blue Send tap cancelled; inspect draft");
+        done.countDown();
+      }
+    });
+    if(!requested){output[0]=chatOutcome(false,false,
+      "Visible ChatGPT keyboard/blue Send arrow not confirmed; draft preserved");
+      done.countDown();}
+  }
   private void keyboardChatSend(String message,JSONObject[] output,CountDownLatch done){
     try{
       InputMethod.AccessibilityInputConnection keyboard=chatKeyboard();
@@ -51,52 +122,25 @@ public final class ControlAccessibilityService extends AccessibilityService {
         "ChatGPT keyboard not focused; tap message field first");done.countDown();return;}
       String before=inputText(keyboard);
       if(before==null){output[0]=chatOutcome(false,false,
-        "ChatGPT IME text unavailable; refusing blind text injection");done.countDown();return;}
+        "ChatGPT keyboard text unavailable; refuse blind injection");done.countDown();return;}
       if(!before.isEmpty()&&!message.equals(before)){
         output[0]=chatOutcome(false,false,
-          "ChatGPT composer contains user text; refusing overwrite");done.countDown();return;
-      }
-      if(before.isEmpty())keyboard.commitText(message,1,null);
+          "Existing user draft preserved; refusing to overwrite");done.countDown();return;}
+      if(before.isEmpty()&&!keyboard.commitText(message,1,null)){
+        output[0]=chatOutcome(false,false,
+          "Keyboard refused text input; no Send tap");done.countDown();return;}
       main.postDelayed(()->{
         try{
           InputMethod.AccessibilityInputConnection next=chatKeyboard();
           if(next==null||!message.equals(inputText(next))){
-            output[0]=chatOutcome(false,true,"IME text not verified; inspect composer");done.countDown();return;
-          }
-          AccessibilityNodeInfo root=getRootInActiveWindow();
-          AccessibilityNodeInfo send=root==null?null:findSend(root,0);
-          if(send!=null){
-            if(!send.performAction(AccessibilityNodeInfo.ACTION_CLICK)){
-              output[0]=chatOutcome(false,true,"Send button click refused");done.countDown();return;
-            }
-          }else{
-            EditorInfo editor=getInputMethod().getCurrentInputEditorInfo();
-            if(editor==null||(editor.imeOptions&EditorInfo.IME_MASK_ACTION)!=EditorInfo.IME_ACTION_SEND){
-              output[0]=chatOutcome(false,false,
-                "Keyboard draft prepared but no Send action offered; do not press Enter blindly");
-              done.countDown();return;
-            }
-            next.performEditorAction(EditorInfo.IME_ACTION_SEND);
-          }
-          // Native IME action may be asynchronous. Do not claim a sent turn if
-          // the same draft remains; never automatically replay uncertain sends.
-          main.postDelayed(()->{
-            InputMethod.AccessibilityInputConnection current=chatKeyboard();
-            String remaining=inputText(current);
-            if(message.equals(remaining))
-              output[0]=chatOutcome(false,false,"Keyboard draft remains; send not confirmed");
-            else if(remaining==null)
-              output[0]=chatOutcome(false,true,"Keyboard focus changed; inspect before retry");
-            else
-              output[0]=chatOutcome(true,false,
-                "IME Send action accepted and draft cleared; model reply still unverified");
-            done.countDown();
-          },650L);
+            output[0]=chatOutcome(false,true,
+              "ChatGPT composer text not verified; no Send tap");done.countDown();return;}
+          sendBlueArrowOrAccessibleButton(message,output,done);
         }catch(Exception e){output[0]=chatOutcome(false,true,
-          "Keyboard send uncertain: "+e.getClass().getSimpleName());done.countDown();}
-      },350L);
+          "Keyboard action uncertain: "+e.getClass().getSimpleName());done.countDown();}
+      },260L);
     }catch(Exception e){output[0]=chatOutcome(false,false,
-      "ChatGPT native keyboard unavailable: "+e.getClass().getSimpleName());done.countDown();}
+      "ChatGPT keyboard unavailable: "+e.getClass().getSimpleName());done.countDown();}
   }
   private final java.util.concurrent.ExecutorService handoff =
       java.util.concurrent.Executors.newSingleThreadExecutor();
@@ -356,23 +400,13 @@ public final class ControlAccessibilityService extends AccessibilityService {
                 "ChatGPT composer changed during submission; inspect before retry");
               return;
             }
-            AccessibilityNodeInfo send=findSend(after,0);
-            if(send==null){
-              output[0]=chatOutcome(false,false,
-                "No accessible Send control; queued text remains prepared");
-              return;
-            }
-            if(!send.performAction(AccessibilityNodeInfo.ACTION_CLICK)){
-              output[0]=chatOutcome(false,true,
-                "Send click not accepted; queued text may remain");
-              return;
-            }
-            output[0]=chatOutcome(true,false,
-              "Send control clicked; model response remains unverified");
+            sendBlueArrowOrAccessibleButton(message,output,done);
+            return;
           }catch(Exception e){
             output[0]=chatOutcome(false,true,
               "Uncertain ChatGPT composer outcome: "+e.getClass().getSimpleName());
-          }finally{done.countDown();}
+            done.countDown();
+          }
         },400L);
       }catch(Exception e){
         output[0]=chatOutcome(false,false,
