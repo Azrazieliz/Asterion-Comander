@@ -443,6 +443,77 @@ def _launch_argv(argv: list[str], cwd: Path) -> dict:
     return {'id': jobid, 'pid': proc.pid, 'status': 'running'}
 
 
+# Real Windows performance actions only touch jobs launched and tracked by Control.
+# Arbitrary user processes, system services and foreground games are never killed.
+class ManagedJobPriority(BaseModel):
+    mode: Literal['favor_foreground','restore']
+
+
+@app.get('/api/v1/performance/jobs', dependencies=[Depends(require_token)])
+def managed_performance_status():
+    rows = []
+    with COMMAND_LOCK:
+        for key, item in COMMANDS.items():
+            proc = item['proc']
+            if proc.poll() is None:
+                rows.append({
+                    'id': key, 'pid': proc.pid, 'running': True,
+                    'priority_reduced_by_control': '_perf_saved_priority' in item
+                })
+    return {
+        'ok': True, 'managed_jobs_running': len(rows), 'jobs': rows,
+        'adjustment_supported': os.name == 'nt',
+        'scope': 'control_started_jobs_only', 'unrelated_apps_changed': False
+    }
+
+
+@app.post('/api/v1/performance/jobs', dependencies=[Depends(require_token)])
+def manage_performance_priority(data: ManagedJobPriority):
+    if os.name != 'nt':
+        raise HTTPException(503, 'Job priority adjustment is available only on Windows')
+    try:
+        import psutil
+    except ImportError as exc:
+        raise HTTPException(503, 'psutil is required for process priority control') from exc
+    applied, skipped = [], []
+    with COMMAND_LOCK:
+        for key, item in COMMANDS.items():
+            proc = item['proc']
+            if proc.poll() is not None:
+                continue
+            try:
+                target = psutil.Process(proc.pid)
+                current = target.nice()
+                if data.mode == 'favor_foreground':
+                    if '_perf_saved_priority' not in item:
+                        if current == psutil.BELOW_NORMAL_PRIORITY_CLASS:
+                            skipped.append({'id': key, 'reason': 'already_lowered'})
+                            continue
+                        target.nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
+                        item['_perf_saved_priority'] = current
+                        applied.append({'id': key, 'pid': proc.pid, 'action': 'lowered'})
+                    else:
+                        skipped.append({'id': key, 'reason': 'already_managed'})
+                elif '_perf_saved_priority' in item:
+                    # Do not override a subsequent owner/manual change.
+                    if current != psutil.BELOW_NORMAL_PRIORITY_CLASS:
+                        skipped.append({'id': key, 'reason': 'priority_changed_elsewhere'})
+                        continue
+                    target.nice(item['_perf_saved_priority'])
+                    del item['_perf_saved_priority']
+                    applied.append({'id': key, 'pid': proc.pid, 'action': 'restored'})
+                else:
+                    skipped.append({'id': key, 'reason': 'not_managed'})
+            except (psutil.NoSuchProcess, psutil.AccessDenied, OSError) as exc:
+                skipped.append({'id': key, 'reason': type(exc).__name__})
+    return {
+        'ok': True, 'mode': data.mode,
+        'applied': applied, 'skipped': skipped,
+        'scope': 'control_started_jobs_only',
+        'unrelated_apps_changed': False
+    }
+
+
 @app.get('/api/v1/device-health', dependencies=[Depends(require_token)])
 def device_health():
     return host_health()

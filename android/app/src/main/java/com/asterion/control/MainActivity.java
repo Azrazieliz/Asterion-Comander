@@ -40,6 +40,8 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.EditText;
+import android.widget.ArrayAdapter;
+import android.widget.ListView;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -58,6 +60,10 @@ import java.net.DatagramSocket;
 import java.net.DatagramPacket;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Comparator;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -68,7 +74,13 @@ import java.util.concurrent.TimeUnit;
 
 /** Asterion Control · native, phone-first command surface. Technical APIs remain hidden. */
 public final class MainActivity extends Activity {
-  private static final int CAPTURE_REQUEST=112,NOTIFICATION_REQUEST=113,INSTALL_PICK_REQUEST=114;
+  private static volatile java.lang.ref.WeakReference<MainActivity> visibleActivity =
+      new java.lang.ref.WeakReference<>(null);
+  static Activity foregroundActivity() {
+    MainActivity current=visibleActivity.get();
+    return current==null||current.isFinishing()||current.isDestroyed()?null:current;
+  }
+  private static final int CAPTURE_REQUEST=112,NOTIFICATION_REQUEST=113,INSTALL_PICK_REQUEST=114,MICROPHONE_REQUEST=115;
   private final Handler handler=new Handler(Looper.getMainLooper());
   private final ExecutorService io=Executors.newSingleThreadExecutor();
   private SharedPreferences prefs;
@@ -79,8 +91,8 @@ public final class MainActivity extends Activity {
   private final DesignSystem.Icon[] tabIcons=new DesignSystem.Icon[4];
   private final TextView[] tabLabels=new TextView[4];
   private TextView headerStatus,pcConnection,homeAgent,homeBattery,homeMemory,homeThermal;
-  private TextView healthBattery,healthTemp,healthMemory,healthStorage,healthThermal,healthWifi;
-  private TextView remoteConnection,remotePlaceholder,agentConnection,captureConnection,accessConnection,phoneAddress,hostHealth,pairingFeedback,transferFeedback,updateFeedback;
+  private TextView healthBattery,healthTemp,healthMemory,healthStorage,healthThermal,healthWifi,healthActionStatus,pcPerformanceActionStatus;
+  private TextView remoteConnection,remotePlaceholder,agentConnection,captureConnection,accessConnection,phoneAddress,hostHealth,pairingFeedback,transferFeedback,updateFeedback,phoneBridgeFeedback;
   private String activeTransferId=null;
   private DesignSystem.Meter batteryMeter,memoryMeter,storageMeter;
   private EditText serverUrl,serverToken,localAddress;
@@ -93,6 +105,8 @@ public final class MainActivity extends Activity {
   private boolean webStarted=false,hostRefreshing=false;
   private long lastHostRefresh=0;
   private boolean destroyed=false;
+  private boolean runVoiceTestAfterPermission=false;
+  private TextView voiceTestStatus;
   private final Runnable ticker=new Runnable(){@Override public void run(){if(destroyed)return;updateHealth();handler.postDelayed(this,3500);}};
 
   private int dp(float x){return DesignSystem.dp(this,x);}
@@ -236,17 +250,56 @@ public final class MainActivity extends Activity {
     gap(meters,17);wide(meters,t("BATTERY LEVEL",10,DesignSystem.MUTED,true));gap(meters,8);batteryMeter=new DesignSystem.Meter(this,DesignSystem.TEAL);wide(meters,batteryMeter);
     gap(meters,16);wide(meters,t("MEMORY IN USE",10,DesignSystem.MUTED,true));gap(meters,8);memoryMeter=new DesignSystem.Meter(this,DesignSystem.PURPLE);wide(meters,memoryMeter);
     gap(meters,16);wide(meters,t("INTERNAL STORAGE IN USE",10,DesignSystem.MUTED,true));gap(meters,8);storageMeter=new DesignSystem.Meter(this,DesignSystem.WARNING);wide(meters,storageMeter);
-    wide(healthBody,meters);gap(healthBody,12);LinearLayout store=card();healthStorage=t("—",18,DesignSystem.TEXT,true);metricRow(store,"Internal storage",null,healthStorage,DesignSystem.PURPLE);margin(healthBody,store,0);
+    wide(healthBody,meters);gap(healthBody,12);
+    LinearLayout actions=card();
+    rowTitle(actions,"Active performance manager",
+      "Adjust Control workload to respond to heat, RAM pressure, and foreground demands",
+      icon("activity",DesignSystem.TEAL,23));
+    gap(actions,12);
+    healthActionStatus=t("Reading active controls…",12,DesignSystem.MUTED,false);
+    wide(actions,healthActionStatus);gap(actions,12);
+    button(actions,"Prioritize foreground app · 20 min","power",true,()->applyPerformanceAction("boost"));
+    gap(actions,8);
+    button(actions,"Automatic thermal / memory protection","check",false,
+      ()->applyPerformanceAction("automatic"));
+    gap(actions,8);
+    button(actions,"Restore full screen capture quality","monitor",false,
+      ()->applyPerformanceAction("full"));
+    gap(actions,8);
+    button(actions,"Low-overhead Control mode","activity",false,
+      ()->applyPerformanceAction("quiet"));
+    gap(actions,10);
+    wide(actions,t("These actions change real capture frequency, JPEG encoding, and "
+      +"optional observation sampling. Phone input, voice, and continuation remain active. "
+      +"Thermal safety overrides manual modes.",11,DesignSystem.MUTED,false));
+    wide(healthBody,actions);gap(healthBody,12);LinearLayout store=card();healthStorage=t("—",18,DesignSystem.TEXT,true);metricRow(store,"Internal storage",null,healthStorage,DesignSystem.PURPLE);margin(healthBody,store,0);
     gap(healthBody,12);LinearLayout network=card();healthWifi=t("Checking…",17,DesignSystem.TEXT,true);metricRow(network,"Network",null,healthWifi,DesignSystem.TEAL);wide(healthBody,network);
     gap(healthBody,24);wide(healthBody,eyebrow("REMOTE SERVICES"));gap(healthBody,10);
     LinearLayout services=card();agentConnection=serviceLine(services,"Phone agent","power");services.addView(line(),new LinearLayout.LayoutParams(-1,dp(1)));
     captureConnection=serviceLine(services,"Screen sharing","share");services.addView(line(),new LinearLayout.LayoutParams(-1,dp(1)));
     accessConnection=serviceLine(services,"Input access","shield");wide(healthBody,services);
     gap(healthBody,24);wide(healthBody,eyebrow("WINDOWS HEALTH"));gap(healthBody,10);
-    LinearLayout windows=card();hostHealth=t("Connect your Windows agent to see its CPU, memory, storage and temperature sensors.",12,DesignSystem.MUTED,false);wide(windows,hostHealth);wide(healthBody,windows);
+    LinearLayout windows=card();hostHealth=t("Connect your Windows agent to see its CPU, memory, storage and temperature sensors.",12,DesignSystem.MUTED,false);wide(windows,hostHealth);
+    gap(windows,12);
+    pcPerformanceActionStatus=t("Windows job controls adjust only jobs launched through Control.",11,DesignSystem.MUTED,false);
+    wide(windows,pcPerformanceActionStatus);
+    gap(windows,10);
+    button(windows,"Favor PC foreground apps","activity",true,
+      ()->managePcPerformance("favor_foreground"));
+    gap(windows,8);
+    button(windows,"Restore managed PC job priority","check",false,
+      ()->managePcPerformance("restore"));
+    wide(healthBody,windows);
     return scroll(healthBody);
   }
   private TextView serviceLine(LinearLayout card,String title,String iconName){LinearLayout row=h();row.setPadding(0,dp(11),0,dp(11));row.addView(icon(iconName,DesignSystem.PURPLE,20));TextView titleText=t(title,13,DesignSystem.TEXT,true);titleText.setPadding(dp(14),0,0,0);row.addView(titleText,new LinearLayout.LayoutParams(0,-2,1));TextView value=t("Checking",12,DesignSystem.MUTED,false);row.addView(value);wide(card,row);return value;}
+  private void repairDeviceLink(){
+    if(!prefs.getString("token","").isEmpty()&&!prefs.getString("url","").isEmpty()){
+      startAgent();
+      handler.postDelayed(()->{if(AgentService.running)registerPhone();
+        else setPairingFeedback("Phone service did not start; enable phone access.");},1500);
+    }else discoverComputer();
+  }
   private View scrollDevices(){
     devicesBody=v();wide(devicesBody,eyebrow("SECURE DEVICE ACCESS"));
     sectionTitle(devicesBody,"Your connections.","Control your own devices without cables or repeated setup.");gap(devicesBody,18);
@@ -255,14 +308,8 @@ public final class MainActivity extends Activity {
     LinearLayout summary=card();summary.setBackground(DesignSystem.gradient(this,0xFF28334B,0xFF182A38,23));
     rowTitle(summary,"Windows computer","Your remote desktop and device resources",icon("monitor",DesignSystem.PURPLE,25));
     gap(summary,12);remoteConnection=t("Checking saved connection…",12,DesignSystem.MUTED,false);wide(summary,remoteConnection);
-    gap(summary,16);twoActions(summary,"Open desktop","monitor",()->show(1),"Reconnect","refresh",()->{save();checkHost();});
+    gap(summary,16);twoActions(summary,"Open desktop","monitor",()->show(1),"Repair connection","refresh",this::repairDeviceLink);
     gap(summary,10);button(summary,"Find my Windows computer","devices",true,this::discoverComputer);
-    gap(summary,9);button(summary,"Repair connection","refresh",false,()->{
-      if(!prefs.getString("token","").isEmpty()&&!prefs.getString("url","").isEmpty()){
-        startAgent();
-        handler.postDelayed(()->{if(AgentService.running)registerPhone();else setPairingFeedback("Phone service did not start. Enable phone access in this screen.");},1500);
-      }else discoverComputer();
-    });
     gap(summary,10);pairingFeedback=t("Your phone is the controller. Connect once; the Windows worker follows.",12,DesignSystem.MUTED,false);
     pairingFeedback.setMaxLines(5);wide(summary,pairingFeedback);
     wide(devicesBody,summary);
@@ -272,10 +319,75 @@ public final class MainActivity extends Activity {
     gap(phone,12);phoneAddress=t("Checking phone access…",12,DesignSystem.MUTED,false);wide(phone,phoneAddress);
     gap(phone,16);button(phone,"Enable phone remote control","shield",true,this::enablePhoneControl);
     gap(phone,9);button(phone,"Share screen · Android permission","share",false,this::beginCapture);
-    gap(phone,9);button(phone,"Connect ChatGPT directly","check",false,this::showMcpConnection);
+    gap(phone,9);button(phone,"Check direct Control link","activity",false,this::showAwayFromHomeStatus);
      gap(phone,9);button(phone,"Keep access active during long sessions","power",false,this::showBatterySetup);
      gap(phone,9);button(phone,"Disable phone access","power",false,()->{stopService(new Intent(this,CaptureService.class));stopAgent();});
     wide(devicesBody,phone);
+
+    gap(devicesBody,12);LinearLayout privateBridge=card();
+    rowTitle(privateBridge,"Direct phone relay",
+      "Private GitHub command channel · no MCP, tunnel, or Windows worker",
+      icon("shield",DesignSystem.TEAL,23));
+    gap(privateBridge,10);
+    phoneBridgeFeedback=t(PhoneGitBridge.enabled(this)
+      ?"Enabled · awaiting live polling receipt"
+      :"Not enabled · phone cannot receive private queue commands",
+      12,DesignSystem.MUTED,false);
+    wide(privateBridge,phoneBridgeFeedback);
+    gap(privateBridge,12);
+    button(privateBridge,"Enable private phone relay","check",true,this::enablePrivatePhoneRelay);
+    gap(privateBridge,9);
+    button(privateBridge,"Check live relay status","activity",false,this::showPrivatePhoneRelayStatus);
+    gap(privateBridge,9);
+    button(privateBridge,"Disable phone relay","power",false,this::disablePrivatePhoneRelay);
+    gap(privateBridge,9);
+    wide(privateBridge,t("Optional owner-authorized fallback. A repository-scoped GitHub token "
+      +"is encrypted on this phone and never sent to ChatGPT. The app checks "
+      +"only the private Asterion-Control-Bridge command queue and returns "
+      +"execution receipts. Phone permissions still apply.",
+      11,DesignSystem.MUTED,false));
+    wide(devicesBody,privateBridge);
+
+    gap(devicesBody,12);LinearLayout handoff=card();
+    rowTitle(handoff,"ChatGPT checkpoint continuation",
+      "Phone-owned · no AI model or paid API inside Control",icon("refresh",DesignSystem.TEAL,22));
+    gap(handoff,12);
+    button(handoff,"Enable checkpoint continuation","check",true,this::enableCheckpointContinuation);
+    gap(handoff,9);button(handoff,"Pause all continuation","power",false,this::pauseCheckpointContinuation);
+    gap(handoff,9);button(handoff,"Inspect operator checkpoint","activity",false,this::showCycleStatus);
+    gap(handoff,9);
+    wide(handoff,t("Only a queued, spec-referenced checkpoint is sent. Existing drafts are never overwritten; Android and ChatGPT limits still apply.",11,DesignSystem.MUTED,false));
+    wide(devicesBody,handoff);
+
+    gap(devicesBody,12);LinearLayout observation=card();
+    rowTitle(observation,"Cross-app screen observation",
+      "Local screen evidence & events · no embedded AI",icon("activity",DesignSystem.TEAL,23));
+    gap(observation,12);
+    button(observation,"Observe selected application","share",true,this::startAsterionObservation);
+    gap(observation,9);button(observation,"Stop observation","power",false,this::stopAsterionObservation);
+    gap(observation,9);
+    wide(observation,t("Requires Android screen-sharing approval. Records only the explicitly selected foreground application; Control does not analyze or replace app engines.",11,DesignSystem.MUTED,false));
+    wide(devicesBody,observation);
+
+    gap(devicesBody,12);LinearLayout voice=card();
+    rowTitle(voice,"Spoken questions during gameplay",
+      "Android speaker → on-device recognition → transcript",icon("activity",DesignSystem.PURPLE,22));
+    gap(voice,12);button(voice,"Enable spoken questions","check",true,this::startVoiceQuestions);
+    gap(voice,9);button(voice,"Test speaker and microphone now","activity",true,
+      this::testVoiceDialogue);
+    gap(voice,8);voiceTestStatus=t("Not tested on this device",12,DesignSystem.MUTED,false);
+    wide(voice,voiceTestStatus);
+    gap(voice,9);button(voice,"Stop microphone session","power",false,()->{
+      stopService(new Intent(this,VoiceDialogueService.class));
+      toast("Voice question session stopped");
+    });
+    gap(voice,9);button(voice,"Inspect speech / answer status","activity",false,
+      this::showVoiceAnswerStatus);
+    gap(voice,9);wide(voice,t("The speaker asks the question first; microphone recognition "
+      +"stops on answer, error or timeout. The external ChatGPT operator reads "
+      +"the answer through Control and acknowledges it before another question.",
+      11,DesignSystem.MUTED,false));
+    wide(devicesBody,voice);
 
     gap(devicesBody,12);LinearLayout transfer=card();
     rowTitle(transfer,"Direct Wi-Fi file transfer","PC → Phone · Files are saved to Downloads/Asterion Control",icon("download",DesignSystem.TEAL,24));
@@ -319,6 +431,86 @@ public final class MainActivity extends Activity {
   private void transferStatus(String message){
     if(transferFeedback!=null)transferFeedback.setText(message);
   }
+  private void enablePrivatePhoneRelay(){
+    // Credentials are entered directly into the native app, never in a chat or
+    // GitHub command file. Existing encrypted credentials can be reused.
+    try{
+      JSONObject state=PhoneGitBridge.status(this);
+      if(state.optBoolean("enabled")){
+        showPrivatePhoneRelayStatus();return;
+      }
+      if(state.optBoolean("token_present")){
+        new AlertDialog.Builder(this)
+          .setTitle("Enable direct phone relay")
+          .setMessage("Reuse the existing encrypted repository credential? No Windows worker, tunnel, or MCP is needed.")
+          .setPositiveButton("Enable",(dialog,which)->configurePrivatePhoneRelay("",true))
+          .setNegativeButton("Cancel",null).show();
+        return;
+      }
+    }catch(Exception e){toast("Phone bridge status unavailable");return;}
+    EditText credential=input("",true,"Fine-grained GitHub token");
+    LinearLayout layout=v();layout.setPadding(dp(18),dp(10),dp(18),0);
+    wide(layout,t("Create a GitHub token restricted to the private "
+      +"Azrazieliz/Asterion-Control-Bridge repository, with Contents: Read and write. "
+      +"Paste it here only. It is encrypted in Android Keystore storage.",
+      12,DesignSystem.MUTED,false));
+    gap(layout,12);wide(layout,credential);
+    new AlertDialog.Builder(this).setTitle("Enable direct phone relay")
+      .setView(layout)
+      .setPositiveButton("Enable",(dialog,which)->{
+        String token=credential.getText().toString().trim();
+        credential.setText("");
+        if(token.isEmpty()){toast("A repository-scoped token is required");return;}
+        configurePrivatePhoneRelay(token,true);
+      }).setNegativeButton("Cancel",null).show();
+  }
+  private void configurePrivatePhoneRelay(String token,boolean enabled){
+    if(phoneBridgeFeedback!=null)phoneBridgeFeedback.setText("Configuring private phone relay...");
+    io.execute(()->{
+      try{
+        JSONObject state=PhoneGitBridge.configure(this,token,enabled);
+        runOnUiThread(()->{
+          if(destroyed)return;
+          if(phoneBridgeFeedback!=null)phoneBridgeFeedback.setText(
+            state.optBoolean("enabled")?"Enabled · checking private command queue":"Relay disabled");
+          if(enabled)startAgent();
+          showPrivatePhoneRelayStatus();
+        });
+      }catch(Exception e){
+        runOnUiThread(()->{
+          if(phoneBridgeFeedback!=null)phoneBridgeFeedback.setText(
+            "Unable to configure relay: "+e.getClass().getSimpleName());
+        });
+      }
+    });
+  }
+  private void showPrivatePhoneRelayStatus(){
+    try{
+      JSONObject state=PhoneGitBridge.status(this);
+      boolean enabled=state.optBoolean("enabled");
+      long polled=state.optLong("last_poll_ms",0);
+      long success=state.optLong("last_success_ms",0);
+      String text=(enabled?"Enabled":"Disabled")
+        +" · credential: "+(state.optBoolean("token_present")?"saved":"missing")
+        +" · phone service: "+(AgentService.running?"running":"stopped")
+        +"\nLast poll: "+(polled>0?new java.util.Date(polled).toString():"never")
+        +"\nLast success: "+(success>0?new java.util.Date(success).toString():"never")
+        +"\nCompleted commands: "+state.optLong("completed",0)
+        +"\nLast error: "+state.optString("last_error","none");
+      if(phoneBridgeFeedback!=null)phoneBridgeFeedback.setText(
+        enabled?(success>0?"Connected to private queue":"Enabled · not yet verified"):
+        "Disabled");
+      new AlertDialog.Builder(this).setTitle("Private phone relay status")
+        .setMessage(text).setPositiveButton("Close",null).show();
+    }catch(Exception e){toast("Relay status unavailable");}
+  }
+  private void disablePrivatePhoneRelay(){
+    new AlertDialog.Builder(this).setTitle("Disable phone relay")
+      .setMessage("Stop polling the private command queue? The encrypted token will remain saved for later reactivation.")
+      .setPositiveButton("Disable",(dialog,which)->configurePrivatePhoneRelay("",false))
+      .setNegativeButton("Cancel",null).show();
+  }
+
   private void promptWifiTransfer(){
     if(prefs.getString("url","").isEmpty()||prefs.getString("token","").isEmpty()){
       toast("Pair your Windows computer first");return;
@@ -608,6 +800,17 @@ public final class MainActivity extends Activity {
     if(healthTemp!=null)healthTemp.setText(rawTemp<0?"—":String.format(Locale.US,"%.1f°",rawTemp/10.0));
     if(healthMemory!=null)healthMemory.setText(String.format(Locale.US,"%.1f GB",m.availMem/1e9));
     if(healthThermal!=null){healthThermal.setText(thermalText);healthThermal.setTextColor(tint);}
+    if(healthActionStatus!=null){
+      JSONObject p=PerformanceManager.status(this);
+      int every=p.optInt("capture_interval_ms",90);
+      String details="Mode: "+p.optString("requested_mode","automatic")+
+        " · "+p.optString("reason","normal")+
+        "\nScreen capture: "+every+" ms/frame, JPEG "+p.optInt("jpeg_quality",62)+
+        "\nObservation interval: "+p.optLong("observation_interval_ms",5000)+" ms"+
+        "\nFrames encoded: "+p.optLong("frames_encoded")+
+        " · saved by frame skipping: "+p.optLong("frames_skipped");
+      healthActionStatus.setText(details);
+    }
     if(healthStorage!=null)healthStorage.setText(String.format(Locale.US,"%.1f GB free of %.0f GB",fs.getAvailableBytes()/1e9,fs.getTotalBytes()/1e9));
     if(healthWifi!=null)healthWifi.setText(networkName());
     if(batteryMeter!=null)batteryMeter.setProgress(percent<0?0:(float)(percent/100));
@@ -629,6 +832,51 @@ public final class MainActivity extends Activity {
     if(headerStatus!=null)headerStatus.setText(AgentService.running?"SHARING ON":"ON DEVICE");
     if(!hostRefreshing&&(currentTab==0||currentTab==2)&&System.currentTimeMillis()-lastHostRefresh>12000){lastHostRefresh=System.currentTimeMillis();checkHost();}
   }catch(Exception ignored){} }
+  private void applyPerformanceAction(String mode){
+    try{
+      JSONObject result="boost".equals(mode)?
+        PerformanceManager.prioritizeForegroundNow(this):
+        PerformanceManager.setMode(this,mode);
+      if(result.optBoolean("ok")){
+        updateHealth();
+        toast("Control workload: "+result.optString("reason","updated"));
+      }else toast("Control performance action did not complete");
+    }catch(Exception e){toast("Performance action rejected: "+e.getClass().getSimpleName());}
+  }
+  private void managePcPerformance(String mode){
+    String url=prefs.getString("url","").replaceAll("/+$","");
+    String token=prefs.getString("token","");
+    if(url.isEmpty()||token.isEmpty()){
+      toast("Pair the Windows Control agent first");return;
+    }
+    io.execute(()->{
+      String result;
+      java.net.HttpURLConnection connection=null;
+      try{
+        connection=(java.net.HttpURLConnection)new java.net.URL(
+          url+"/api/v1/performance/jobs").openConnection();
+        connection.setRequestMethod("POST");
+        connection.setConnectTimeout(4000);connection.setReadTimeout(6000);
+        connection.setDoOutput(true);
+        connection.setRequestProperty("Authorization","Bearer "+token);
+        connection.setRequestProperty("Content-Type","application/json");
+        byte[] payload=new JSONObject().put("mode",mode).toString()
+          .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        try(java.io.OutputStream out=connection.getOutputStream()){out.write(payload);}
+        if(connection.getResponseCode()!=200)throw new IllegalStateException(
+          "Windows denied priority change (HTTP "+connection.getResponseCode()+")");
+        JSONObject reply=new JSONObject(new String(connection.getInputStream().readNBytes(16384),
+          java.nio.charset.StandardCharsets.UTF_8));
+        if(!reply.optBoolean("ok"))throw new IllegalStateException("No confirmed priority action");
+        result="PC jobs adjusted: "+reply.optJSONArray("applied").length()+
+          " · unchanged: "+reply.optJSONArray("skipped").length()+
+          "\nScope: Control-started Windows processes only";
+      }catch(Exception e){result="PC job priority unavailable: "+e.getClass().getSimpleName();}
+      finally{if(connection!=null)connection.disconnect();}
+      final String receipt=result;
+      runOnUiThread(()->{if(pcPerformanceActionStatus!=null)pcPerformanceActionStatus.setText(receipt);});
+    });
+  }
   private String thermalName(int level){switch(level){case PowerManager.THERMAL_STATUS_NONE:return "Nominal";case PowerManager.THERMAL_STATUS_LIGHT:return "Light";case PowerManager.THERMAL_STATUS_MODERATE:return "Moderate";case PowerManager.THERMAL_STATUS_SEVERE:return "Severe";case PowerManager.THERMAL_STATUS_CRITICAL:return "Critical";case PowerManager.THERMAL_STATUS_EMERGENCY:return "Emergency";case PowerManager.THERMAL_STATUS_SHUTDOWN:return "Shutdown";default:return "Unavailable";}}
   private String networkName(){try{ConnectivityManager cm=(ConnectivityManager)getSystemService(CONNECTIVITY_SERVICE);Network n=cm.getActiveNetwork();NetworkCapabilities cap=cm.getNetworkCapabilities(n);if(cap==null)return "Offline";if(cap.hasTransport(NetworkCapabilities.TRANSPORT_WIFI))return "Wi-Fi connected";if(cap.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR))return "Mobile data";if(cap.hasTransport(NetworkCapabilities.TRANSPORT_VPN))return "VPN connected";if(cap.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))return "Ethernet";return "Connected";}catch(Exception e){return "Unavailable";}}
   private void checkHost(){String url=prefs.getString("url","").replaceAll("/+$","");String token=prefs.getString("token","");
@@ -664,58 +912,194 @@ public final class MainActivity extends Activity {
     handler.postDelayed(this::updateHealth,450);
     toast("Phone agent disabled");
   }
-  private void copyPrivateConnection(String label,String data,boolean secret){
-    ClipboardManager clipboard=(ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
-    ClipData clip=ClipData.newPlainText(label,data);
-    if(secret&&Build.VERSION.SDK_INT>=33){
-      android.os.PersistableBundle extras=new android.os.PersistableBundle();
-      extras.putBoolean(ClipDescription.EXTRA_IS_SENSITIVE,true);
-      clip.getDescription().setExtras(extras);
-    }
-    clipboard.setPrimaryClip(clip);
-    toast(label+" copied");
+  private void showAwayFromHomeStatus(){
+    try{
+      JSONObject network=TransportConnectivity.report(this);
+      JSONObject direct=PhoneDirectMcp.status();
+      boolean ready=direct.optBoolean("connected",false);
+      String report="Network: "+network.optString("network","offline")+
+        "\nInternet validated: "+network.optBoolean("validated")+
+        "\nDirect authenticated connection: "+ready+
+        "\nState: "+direct.optString("phase","stopped")+
+        "\nLast direct success: "+direct.optLong("last_success_ms",0)+
+        "\nLast error: "+direct.optString("last_error","none");
+      new AlertDialog.Builder(this).setTitle("Direct mobile-data Control")
+        .setMessage(report).setPositiveButton("Close",null).show();
+    }catch(Exception e){toast("Direct connection status unavailable");}
   }
-  /** Explicit owner action only. Credentials are never logged or sent to GitHub. */
-  private void showMcpConnection(){
-    final String url=prefs.getString("url","").replaceAll("/+$","");
-    final String bearer=prefs.getString("token","");
-    if(url.isEmpty()||bearer.isEmpty()){
-      toast("Pair the Windows worker once in Connect first");
+  private void showCycleStatus(){
+    try{
+      JSONObject ledger=ContinuationLedger.get(this).status();
+      String info="Controller: ChatGPT (external)"
+        +"\nAndroid-owned automatic cycles: disabled"
+        +"\nAccessibility active: "+(ControlAccessibilityService.active!=null)
+        +"\nAgent service active: "+AgentService.running
+        +"\nContinuation enabled: "+ledger.optBoolean("enabled")
+        +"\nCheckpoint phase: "+ledger.optString("state","idle")
+        +"\nLast checkpoint: "+ledger.optString("last_checkpoint","none")
+        +"\nLast dispatch error: "+ledger.optString("last_error","none");
+      new AlertDialog.Builder(this).setTitle("ChatGPT operator checkpoint status")
+        .setMessage(info).setPositiveButton("Close",null).show();
+    }catch(Exception e){toast("Checkpoint status unavailable");}
+  }
+  private void testVoiceDialogue(){
+    if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){
+      runVoiceTestAfterPermission=true;
+      requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},MICROPHONE_REQUEST);
       return;
     }
-    setPairingFeedback("Getting ChatGPT connector details over your private device link…");
-    io.execute(()->{
-      HttpURLConnection connection=null;
-      try{
-        connection=(HttpURLConnection)new URL(url+"/api/v1/mcp-connection").openConnection();
-        connection.setRequestMethod("POST");connection.setDoOutput(true);
-        connection.setConnectTimeout(5000);connection.setReadTimeout(8000);
-        connection.setRequestProperty("Authorization","Bearer "+bearer);
-        connection.setRequestProperty("Content-Type","application/json");
-        try(OutputStream os=connection.getOutputStream()){os.write("{}".getBytes(StandardCharsets.UTF_8));}
-        int status=connection.getResponseCode();
-        if(status!=200)throw new IllegalArgumentException("Connection service HTTP "+status);
-        JSONObject details=new JSONObject(new String(connection.getInputStream().readNBytes(8192),StandardCharsets.UTF_8));
-        String endpoint=details.getString("server_url"),secret=details.getString("api_key");
-        if(!endpoint.startsWith("https://")||secret.length()<43)throw new IllegalArgumentException("Invalid connector details");
-        runOnUiThread(()->{
-          LinearLayout layout=v();layout.setPadding(dp(18),dp(12),dp(18),dp(7));
-          TextView desc=t("ChatGPT direct MCP trial. This is a temporary HTTPS address; connect once using Bearer API key authentication. The key remains on your phone.",12,DesignSystem.MUTED,false);
-          wide(layout,desc);gap(layout,15);
-          EditText address=input(endpoint,false,"MCP server URL");
-          address.setTextIsSelectable(true);wide(layout,address);
-          gap(layout,8);button(layout,"Copy server URL","check",false,()->copyPrivateConnection("Server URL",endpoint,false));
-          gap(layout,12);button(layout,"Copy connection key","shield",true,()->copyPrivateConnection("Connection key",secret,true));
-          gap(layout,10);wide(layout,t("Only paste the key into ChatGPT's private plugin connection screen. Never post it in a chat or repository.",11,DesignSystem.MUTED,false));
-          new AlertDialog.Builder(this).setTitle("Connect ChatGPT to Asterion Control")
-            .setView(layout).setPositiveButton("Close",null).show();
-          setPairingFeedback("Direct MCP setup available. Connect the plugin in ChatGPT.");
-        });
-      }catch(Exception e){
-        final String message=e.getMessage()==null?e.getClass().getSimpleName():e.getMessage();
-        runOnUiThread(()->setPairingFeedback("Direct ChatGPT setup unavailable: "+message));
-      }finally{if(connection!=null)connection.disconnect();}
+    try {
+      Intent test=new Intent(this,VoiceDialogueService.class).setAction("TEST");
+      startForegroundService(test);
+      if(voiceTestStatus!=null)voiceTestStatus.setText("Starting audible test question…");
+      monitorVoiceTest(System.currentTimeMillis()+65000L);
+    }catch(Exception e){
+      if(voiceTestStatus!=null)voiceTestStatus.setText("Test start failed: "+e.getClass().getSimpleName());
+    }
+  }
+  private void monitorVoiceTest(long until){
+    handler.postDelayed(()->{
+      if(destroyed||voiceTestStatus==null)return;
+      VoiceDialogueService service=VoiceDialogueService.active;
+      try {
+        if(service!=null){
+          JSONObject report=service.report();
+          String phase=report.optString("phase","initializing");
+          String answer=report.optString("transcript","");
+          String problem=report.optString("error","");
+          String backend=report.optString("recognizer_backend","none");
+          String speaker=report.optBoolean("speaker_finished")?
+            "Speaker completed":report.optBoolean("speaker_started")?
+            "Speaker started":"Speaker not confirmed";
+          voiceTestStatus.setText("Voice test: "+phase+" | "+speaker+" | speech: "+backend+
+            (answer.isEmpty()?"":" — heard: "+answer)+
+            (problem.isEmpty()?"":" — "+problem));
+          if("answered".equals(phase)||"failed".equals(phase)||
+             "unavailable".equals(phase))return;
+        }
+      }catch(Exception ignored){}
+      if(System.currentTimeMillis()<until)monitorVoiceTest(until);
+      else voiceTestStatus.setText("Voice test timed out; no successful transcript");
+    },350);
+  }
+  private void showVoiceAnswerStatus(){
+    try{
+      VoiceDialogueService session=VoiceDialogueService.active;
+      if(session==null){toast("Speech session not enabled");return;}
+      JSONObject report=session.report();
+      String message="Phase: "+report.optString("phase")+
+        "\nSpeaker started: "+report.optBoolean("speaker_started")+
+        "\nSpeaker completed: "+report.optBoolean("speaker_finished")+
+        "\nOffline recognition available: "+report.optBoolean("on_device_recognition")+
+        "\nMicrophone listening: "+report.optBoolean("microphone_active")+
+        "\nAnswer pending acknowledgment: "+report.optBoolean("answer_pending_ack")+
+        "\nRecognized answer: "+report.optString("transcript","")+
+        "\nError: "+report.optString("error","none");
+      new AlertDialog.Builder(this).setTitle("Speaker and microphone status")
+        .setMessage(message).setPositiveButton("Close",null).show();
+    }catch(Exception e){toast("Voice status unavailable");}
+  }
+  private void startVoiceQuestions(){
+    if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){
+      requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},MICROPHONE_REQUEST);
+      return;
+    }
+    try{startForegroundService(new Intent(this,VoiceDialogueService.class));
+      toast("Voice questions enabled. Microphone listens only after a question");}
+    catch(Exception e){toast("Android could not start the voice session");}
+  }
+  private void startAsterionObservation(){
+    // The user selects an installed app by its actual label, not by typing
+    // implementation package identifiers. Control remains a tool interface.
+    List<Map.Entry<String,String>> all=new ArrayList<>();
+    for(Map.Entry<String,String> item:AppCatalog.launchable(this).entrySet()){
+      String pkg=item.getKey();
+      if(pkg.equals("com.openai.chatgpt")||pkg.equals("com.asterion.control")
+        ||pkg.startsWith("com.android.")||pkg.startsWith("com.google.android.")
+        ||pkg.startsWith("com.samsung.android.")||pkg.startsWith("com.sec.android."))
+        continue;
+      all.add(item);
+    }
+    all.sort(Comparator.comparing(x->x.getValue().toLowerCase(Locale.ROOT)));
+    if(all.isEmpty()){toast("No eligible installed applications found");return;}
+    LinearLayout container=v();pad(container,12,10);
+    EditText search=input("",false,"Search installed applications");
+    wide(container,search);
+    gap(container,9);
+    ListView selection=new ListView(this);
+    selection.setFastScrollEnabled(true);
+    container.addView(selection,new LinearLayout.LayoutParams(-1,dp(370)));
+    List<Map.Entry<String,String>> visible=new ArrayList<>(all);
+    List<String> names=new ArrayList<>();
+    for(Map.Entry<String,String> item:visible)names.add(item.getValue());
+    ArrayAdapter<String> adapter=new ArrayAdapter<>(this,
+      android.R.layout.simple_list_item_1,names);
+    selection.setAdapter(adapter);
+    search.addTextChangedListener(new android.text.TextWatcher(){
+      @Override public void beforeTextChanged(CharSequence s,int start,int count,int after){}
+      @Override public void onTextChanged(CharSequence s,int start,int before,int count){
+        String term=s.toString().trim().toLowerCase(Locale.ROOT);
+        visible.clear();
+        adapter.clear();
+        for(Map.Entry<String,String> item:all){
+          if(term.isEmpty()||item.getValue().toLowerCase(Locale.ROOT).contains(term)){
+            visible.add(item);
+            adapter.add(item.getValue());
+          }
+        }
+        adapter.notifyDataSetChanged();
+      }
+      @Override public void afterTextChanged(android.text.Editable editable){}
     });
+    AlertDialog browse=new AlertDialog.Builder(this)
+      .setTitle("Select application to observe").setView(container)
+      .setNegativeButton("Cancel",null).create();
+    selection.setOnItemClickListener((parent,view,position,id)->{
+      if(position<0||position>=visible.size())return;
+      Map.Entry<String,String> chosen=visible.get(position);
+      browse.dismiss();
+      new AlertDialog.Builder(this).setTitle("Observe "+chosen.getValue())
+        .setMessage("Record this application only while it is foreground. Android will request screen capture approval if needed. Protected screens remain protected.")
+        .setPositiveButton("Start",(d,w)->{
+          try{
+            AppObservation.configure(this,true,chosen.getKey());
+            toast("Observation enabled for "+chosen.getValue());
+            if(!CaptureService.active)beginCapture();
+          }catch(Exception e){toast("Could not enable selected app observation");}
+        }).setNegativeButton("Cancel",null).show();
+    });
+    browse.show();
+  }
+  private void stopAsterionObservation(){
+    try{AppObservation.configure(this,false,"");toast("Observation stopped");}
+    catch(Exception e){toast("Observation could not stop");}
+  }
+  private void enableCheckpointContinuation(){
+    new AlertDialog.Builder(this).setTitle("Enable ChatGPT continuation")
+      .setMessage("Asterion Control may send a saved continuation checkpoint in the ChatGPT Android app when you open ChatGPT. This uses your existing app access and is not an API subscription. It never erases an existing draft. You can pause it here at any time.")
+      .setPositiveButton("Enable", (dialog,which)->{
+        try { ContinuationLedger.get(this).configure(true);
+          toast("Checkpoint continuation enabled"); }
+        catch(Exception e){toast("Checkpoint setting could not be saved");}
+      }).setNegativeButton("Cancel",null).show();
+  }
+  private void pauseCheckpointContinuation(){
+    try { ContinuationLedger.get(this).configure(false);
+      toast("Checkpoint continuation paused"); }
+    catch(Exception e){toast("Checkpoint setting could not be saved");}
+  }
+  private void openChatGptCheckpoint(){
+    try {
+      JSONObject state=ContinuationLedger.get(this).status();
+      if(!state.optBoolean("enabled") || !"queued".equals(state.optString("state"))){
+        toast("Enable continuation and queue a checkpoint first");return;
+      }
+      Intent launch=getPackageManager().getLaunchIntentForPackage("com.openai.chatgpt");
+      if(launch==null){toast("ChatGPT Android app not found");return;}
+      startActivity(launch);
+      // An accessibility window event will send only after verifying a blank
+      // ChatGPT composer and a labeled Send action.
+    }catch(Exception e){toast("Cannot open ChatGPT checkpoint");}
   }
   private void showBatterySetup(){
     new AlertDialog.Builder(this).setTitle("Keep Asterion Control active")
@@ -728,6 +1112,7 @@ public final class MainActivity extends Activity {
   }
   @Override protected void onResume(){
     super.onResume();
+    visibleActivity = new java.lang.ref.WeakReference<>(this);
     if(prefs!=null&&!destroyed&&getSharedPreferences("agent",MODE_PRIVATE)
        .getBoolean(AgentService.PREF_REMOTE_ENABLED,false)){
       if(!AgentService.running)startAgent();
@@ -737,6 +1122,23 @@ public final class MainActivity extends Activity {
     }
   }
   @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results){super.onRequestPermissionsResult(request,permissions,results);
+    if(request==MICROPHONE_REQUEST){
+      if(results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED){
+        if(runVoiceTestAfterPermission){runVoiceTestAfterPermission=false;testVoiceDialogue();}
+        else startVoiceQuestions();
+      }else{
+        runVoiceTestAfterPermission=false;
+        if(voiceTestStatus!=null)
+          voiceTestStatus.setText("Voice test blocked: Android microphone permission denied");
+        new AlertDialog.Builder(this).setTitle("Microphone permission required")
+          .setMessage("Android did not grant microphone access. The speaker can run separately, but no spoken answer can be captured until microphone access is granted.")
+          .setPositiveButton("App permissions",(dialog,which)->{
+            startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+              Uri.parse("package:"+getPackageName())));
+          }).setNegativeButton("Close",null).show();
+      }
+      return;
+    }
     if(request==NOTIFICATION_REQUEST&&results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED){
       startAgent();
       if(!prefs.getString("token","").isEmpty())handler.postDelayed(()->{if(AgentService.running)registerPhone();},1400);
@@ -824,5 +1226,9 @@ public final class MainActivity extends Activity {
   private static boolean sameOrigin(String a,String b){try{URL u=new URL(a),v=new URL(b);int p=u.getPort()<0?u.getDefaultPort():u.getPort();int q=v.getPort()<0?v.getDefaultPort():v.getPort();return u.getProtocol().equals(v.getProtocol())&&u.getHost().equalsIgnoreCase(v.getHost())&&p==q;}catch(Exception ex){return false;}}
   private static String ipAddress(){try{for(NetworkInterface n:Collections.list(NetworkInterface.getNetworkInterfaces())){if(!n.isUp()||n.isLoopback())continue;for(java.net.InetAddress a:Collections.list(n.getInetAddresses())){if(a instanceof Inet4Address&&!a.isLoopbackAddress()&&a.isSiteLocalAddress())return a.getHostAddress();}}}catch(Exception ignored){}return "Unavailable";}
   @Override public void onBackPressed(){if(currentTab==1&&web!=null&&web.canGoBack())web.goBack();else if(currentTab!=0)show(0);else super.onBackPressed();}
+  @Override protected void onPause(){
+    if(visibleActivity.get()==this)visibleActivity = new java.lang.ref.WeakReference<>(null);
+    super.onPause();
+  }
   @Override protected void onDestroy(){destroyed=true;handler.removeCallbacks(ticker);io.shutdownNow();if(web!=null){web.destroy();}super.onDestroy();}
 }

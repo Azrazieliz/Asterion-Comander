@@ -1,7 +1,8 @@
 # Asterion Control Windows agent. Android is the primary interface.
 # LAN only; use an encrypted private tunnel for access across networks.
 $ErrorActionPreference='Stop'
-Set-Location (Join-Path $PSScriptRoot '..')
+$root=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+Set-Location $root
 $venv='.\.venv\Scripts\python.exe'
 if (-not (Test-Path $venv)) { py -3 -m venv .venv }
 if (-not (Test-Path $venv)) {throw 'Python environment unavailable'}
@@ -26,14 +27,56 @@ $addresses=Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | 
   ($_.IPAddress -like '192.168.*' -or $_.IPAddress -like '10.*' -or $_.IPAddress -like '172.*' -or $_.IPAddress -like '100.*')
 }
 $bind=if($env:ASTERION_LAN_IP){$env:ASTERION_LAN_IP}elseif($addresses){@($addresses)[0].IPAddress}else{'127.0.0.1'}
-Write-Host ('Asterion Control | Windows agent '+$bind+':8911')
-Write-Host 'Find your PC from Android. Use the one-time code below for first pairing only.'
+# Control's source of truth for the current private endpoint.
+$endpoint='http://'+$bind+':8911'
+[System.IO.File]::WriteAllText(
+  (Join-Path $settings 'agent-host.txt'),$endpoint,
+  (New-Object System.Text.UTF8Encoding($false))
+)
+Write-Host ('Asterion Control Windows agent '+$endpoint)
 $pinFile=Join-Path $settings 'pairing-code.txt'
-Remove-Item $pinFile -ErrorAction SilentlyContinue
-$job=Start-Process -FilePath $venv -ArgumentList '-m','uvicorn','asterion_remote.app:app','--host',$bind,'--port','8911' -NoNewWindow -PassThru
-for($n=0;$n -lt 30;$n++){
-  if(Test-Path $pinFile){Write-Host ('ONE-TIME PAIRING CODE: '+(Get-Content $pinFile -Raw)) -ForegroundColor Cyan;break}
-  Start-Sleep -Milliseconds 200
+# No GitHub-based remote-control relay is started in normal operation.
+# Historical bridge scripts remain preserved for explicit migration only.
+$stableSshFlag=Join-Path $settings 'mcp-stable-ssh-enabled.flag'
+$stableSshScript=Join-Path $PSScriptRoot 'start_persistent_ssh_mcp.py'
+if((Test-Path $stableSshFlag) -and (Test-Path $stableSshScript)){
+  Start-Process -FilePath $venv -ArgumentList @($stableSshScript) -WorkingDirectory $root -WindowStyle Hidden | Out-Null
 }
-if(-not(Test-Path $pinFile)){Write-Warning 'Pairing code not yet available. Check the server startup log.'}
-Wait-Process -Id $job.Id
+# Restart the actual native agent after unexpected termination.
+$failureCount=0
+while($true){
+  try {
+    $listener=Get-NetTCPConnection -State Listen -LocalPort 8911 -ErrorAction SilentlyContinue |
+      Select-Object -First 1
+    if($listener){
+      $owner=Get-CimInstance Win32_Process -Filter ("ProcessId="+$listener.OwningProcess) -ErrorAction Stop
+      if(-not $owner -or $owner.CommandLine -notmatch 'uvicorn\s+asterion_remote\.app:app'){
+        throw 'Port 8911 is owned by another process; refusing to interfere'
+      }
+      while(Get-Process -Id $owner.ProcessId -ErrorAction SilentlyContinue){
+        Start-Sleep -Seconds 4
+      }
+    }else{
+      Remove-Item $pinFile -ErrorAction SilentlyContinue
+      $worker=Start-Process -FilePath $venv -ArgumentList @(
+        '-m','uvicorn','asterion_remote.app:app','--host',$bind,'--port','8911'
+      ) -NoNewWindow -PassThru
+      if(-not $worker){throw 'Native Control agent failed to launch'}
+      for($n=0;$n -lt 30;$n++){
+        if($worker.HasExited){throw 'Native Control agent exited during startup'}
+        if(Test-Path $pinFile){
+          Write-Host ('ONE-TIME PAIRING CODE: '+(Get-Content $pinFile -Raw))
+          break
+        }
+        Start-Sleep -Milliseconds 200
+      }
+      Wait-Process -Id $worker.Id
+      Write-Warning ('Native Control agent stopped; restarting PID '+$worker.Id)
+    }
+    $failureCount=0
+  }catch{
+    $failureCount++
+    Write-Warning ('Control recovery: '+$_.Exception.GetType().Name)
+  }
+  Start-Sleep -Seconds ([Math]::Min(30,3+($failureCount*3)))
+}

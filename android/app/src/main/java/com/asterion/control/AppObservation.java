@@ -1,0 +1,216 @@
+package com.asterion.control;
+
+import android.content.Context;
+import android.content.SharedPreferences;
+import android.view.accessibility.AccessibilityEvent;
+import org.json.JSONObject;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.RandomAccessFile;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+/**
+ * Phone-native evidence recorder for user-selected Asterion applications.
+ * Records Android events and bounded MediaProjection samples; no AI inference,
+ * no third-party upload and no access to non-target app content.
+ */
+final class AppObservation {
+  private static final ExecutorService IO=Executors.newSingleThreadExecutor();
+  private static final long MIN_FRAME_MS=5000L, MAX_FRAMES_BYTES=256L*1024*1024;
+  private static final long MAX_LOG_BYTES=8L*1024*1024;
+  private static volatile String foreground="";
+  private static volatile long lastEventMs=0L, lastFrameMs=0L;
+  private static volatile String latestFrame="";
+  private static volatile long eventCount=0, frameCount=0;
+  private AppObservation(){}
+  private static SharedPreferences prefs(Context c){
+    return c.getSharedPreferences("asterion_observation",Context.MODE_PRIVATE);
+  }
+  static boolean enabled(Context c){return prefs(c).getBoolean("enabled",false);}
+  static String target(Context c){return prefs(c).getString("target","");}
+  static synchronized JSONObject configure(Context c,boolean enabled,String packageName) throws Exception {
+    // Asterion Pilot operates third-party Android games (not com.asterion.*).
+    // Record only the owner-selected foreground package, never system UI or ChatGPT.
+    if(enabled && (packageName==null ||
+        !packageName.matches("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*){1,12}") ||
+        packageName.equals("com.openai.chatgpt") ||
+        packageName.equals("com.asterion.control") ||
+        packageName.startsWith("com.android.") ||
+        packageName.startsWith("com.google.android.") ||
+        packageName.startsWith("com.samsung.android.") ||
+        packageName.startsWith("com.sec.android.")))
+      throw new IllegalArgumentException("Choose an explicitly authorized game package");
+    if(!enabled)packageName=target(c);
+    prefs(c).edit().putBoolean("enabled",enabled).putString("target",packageName)
+      .putLong("started_ms",System.currentTimeMillis()).apply();
+    latestFrame="";lastFrameMs=0;lastEventMs=0;eventCount=0;frameCount=0;
+    return status(c);
+  }
+  private static File folder(Context c){
+    File location=c.getExternalFilesDir(null);
+    if(location==null)location=c.getFilesDir();
+    File base=new File(location,"observations");
+    File dir=new File(base,target(c).replace('.','_'));
+    if(!dir.exists())dir.mkdirs();
+    return dir;
+  }
+  static JSONObject status(Context c)throws Exception {
+    return new JSONObject().put("enabled",enabled(c)).put("target",target(c))
+      .put("capture",CaptureService.active)
+      .put("foreground",foreground)
+      .put("frames_sampled_this_session",frameCount)
+      .put("events_sampled_this_session",eventCount)
+      .put("latest_frame",latestFrame)
+      .put("started_ms",prefs(c).getLong("started_ms",0));
+  }
+  private static void append(File file,JSONObject item) {
+    try (FileOutputStream stream=new FileOutputStream(file,true)) {
+      stream.write((item.toString()+"\n").getBytes(StandardCharsets.UTF_8));
+    }catch(Exception ignored){}
+    // Long-running observation must not grow unbounded when the owner leaves
+    // game recording enabled for days. IO is serialized by a single executor.
+    if(file.length()>MAX_LOG_BYTES)rotateLog(file);
+  }
+  private static void rotateLog(File file){
+    File staged=new File(file.getParentFile(),file.getName()+".rotating");
+    try(RandomAccessFile input=new RandomAccessFile(file,"r")){
+      long skip=Math.max(0L,input.length()-MAX_LOG_BYTES/2L);
+      input.seek(skip);
+      if(skip>0L)input.readLine(); // skip the partial JSONL record
+      try(FileOutputStream output=new FileOutputStream(staged,false)){
+        byte[] buffer=new byte[8192];int count;
+        while((count=input.read(buffer))!=-1)output.write(buffer,0,count);
+        output.getFD().sync();
+      }
+      if(!staged.renameTo(file)){
+        staged.delete();
+        throw new IllegalStateException("Cannot rotate observation record");
+      }
+    }catch(Exception error){
+      staged.delete();
+    }
+  }
+  static void event(Context c,AccessibilityEvent e) {
+    if(e==null)return;
+    String pkg=e.getPackageName()==null?"":e.getPackageName().toString();
+    foreground=pkg;
+    if(!enabled(c)||!pkg.equals(target(c)))return;
+    long now=System.currentTimeMillis();
+    if(now-lastEventMs<800)return; // cap noisy accessibility event writes
+    lastEventMs=now;
+    int type=e.getEventType();
+    long epoch=now;
+    IO.execute(()->{
+      try{
+        append(new File(folder(c),"events.jsonl"),new JSONObject()
+          .put("time_ms",epoch).put("package",pkg)
+          .put("event_type",type));
+        eventCount++;
+      }catch(Exception ignored){}
+    });
+  }
+  static void sample(Context c) {
+    if(!enabled(c)||!CaptureService.active)return;
+    long now=System.currentTimeMillis();
+    if(now-lastFrameMs<Math.max(MIN_FRAME_MS,PerformanceManager.observationIntervalMs()))return;
+    ControlAccessibilityService access=ControlAccessibilityService.active;
+    if(access==null || !target(c).equals(access.currentPackage()))return;
+    if(!target(c).equals(foreground))return;
+    if(now-CaptureService.latestAtMs>1200L || CaptureService.latestAtMs<=0L)return;
+    byte[] frame=CaptureService.latest;
+    if(frame==null||frame.length<2048)return;
+    byte[] bytes=frame.clone();
+    // Recheck before storing to reduce cross-app frame mix-ups at app switches.
+    if(!target(c).equals(access.currentPackage()))return;
+    lastFrameMs=now;
+    IO.execute(()->{
+      try {
+        File dir=folder(c);
+        File file=new File(dir,"frame-"+now+".jpg");
+        try(FileOutputStream out=new FileOutputStream(file)){out.write(bytes);}
+        byte[] digest=MessageDigest.getInstance("SHA-256").digest(bytes);
+        StringBuilder sha=new StringBuilder();
+        for(byte b:digest)sha.append(String.format(java.util.Locale.ROOT,"%02x",b&255));
+        append(new File(dir,"frames.jsonl"),new JSONObject()
+          .put("time_ms",now).put("package",target(c))
+          .put("frame",file.getName()).put("bytes",bytes.length).put("sha256",sha.toString()));
+        latestFrame=file.getName();frameCount++;
+        trim(dir);
+      }catch(Exception ignored){}
+    });
+  }
+  static JSONObject recentEvents(Context c,int limit)throws Exception {
+    limit=Math.max(1,Math.min(limit,80));
+    File log=new File(folder(c),"events.jsonl");
+    org.json.JSONArray items=new org.json.JSONArray();
+    if(!log.isFile())return new JSONObject().put("events",items);
+    java.util.ArrayDeque<String> ring=new java.util.ArrayDeque<>();
+    try(java.io.BufferedReader reader=new java.io.BufferedReader(new java.io.InputStreamReader(
+        new java.io.FileInputStream(log),StandardCharsets.UTF_8))){
+      String line;
+      while((line=reader.readLine())!=null){
+        if(ring.size()==limit)ring.removeFirst();
+        ring.addLast(line);
+      }
+    }
+    for(String line:ring)try{items.put(new JSONObject(line));}catch(Exception ignored){}
+    return new JSONObject().put("events",items).put("target",target(c));
+  }
+  /** Recently recorded frames that have not been pruned by the storage quota.
+   * No guessing based on application time; metadata is persisted by the device.
+   */
+  static JSONObject timeline(Context c,int limit)throws Exception {
+    limit=Math.max(1,Math.min(limit,100));
+    File dir=folder(c);
+    File log=new File(dir,"frames.jsonl");
+    org.json.JSONArray entries=new org.json.JSONArray();
+    if(!log.isFile())return new JSONObject().put("target",target(c))
+      .put("frames",entries).put("retention_bytes",MAX_FRAMES_BYTES);
+    java.util.ArrayDeque<JSONObject> ring=new java.util.ArrayDeque<>();
+    try(java.io.BufferedReader reader=new java.io.BufferedReader(new java.io.InputStreamReader(
+      new java.io.FileInputStream(log),StandardCharsets.UTF_8))){
+      String line;
+      while((line=reader.readLine())!=null){
+        try{
+          JSONObject item=new JSONObject(line);
+          String name=item.optString("frame","");
+          if(!name.matches("frame-[0-9]{10,15}\\.jpg"))continue;
+          File image=new File(dir,name);
+          if(!image.isFile()||image.length()<2048||image.length()>1500000)continue;
+          if(ring.size()>=limit)ring.removeFirst();
+          ring.addLast(item);
+        }catch(Exception ignored){}
+      }
+    }
+    for(JSONObject entry:ring)entries.put(entry);
+    return new JSONObject().put("target",target(c)).put("frames",entries)
+      .put("retention_bytes",MAX_FRAMES_BYTES);
+  }
+  static byte[] recordedFrame(Context c,String name)throws Exception {
+    if(name==null||!name.matches("frame-[0-9]{10,15}\\.jpg"))return null;
+    File file=new File(folder(c),name);
+    if(!file.isFile()||file.length()<2048||file.length()>1500000)return null;
+    try(java.io.FileInputStream stream=new java.io.FileInputStream(file)){
+      return stream.readAllBytes();
+    }
+  }
+  static byte[] latestRecordedFrame(Context c)throws Exception {
+    return recordedFrame(c,latestFrame);
+  }
+  private static void trim(File dir) {
+    File[] frames=dir.listFiles((d,name)->name.startsWith("frame-")&&name.endsWith(".jpg"));
+    if(frames==null)return;
+    Arrays.sort(frames,Comparator.comparing(File::getName));
+    long total=0;for(File frame:frames)total+=frame.length();
+    for(File frame:frames){
+      if(total<=MAX_FRAMES_BYTES)break;
+      long bytes=frame.length();
+      if(frame.delete())total-=bytes;
+    }
+  }
+}

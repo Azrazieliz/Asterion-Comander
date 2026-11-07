@@ -6,9 +6,36 @@ android {
     applicationId 'com.asterion.control'
     minSdk 29
     targetSdk 35
-    versionCode 806
-    versionName '0.8.6'
+    versionCode 910
+    versionName '0.9.10'
   }
-  buildTypes { release { minifyEnabled false } }
+  // CI must explicitly use the original installed application's signing key.
+  // Never silently substitute a runner-generated debug identity.
+  signingConfigs {
+    // Owner release is distinct from Gradle's debug build type. Android must
+    // retain the ORIGINAL signing certificate for non-destructive upgrades.
+    ownerRelease {
+      def originalKey = System.getenv('ASTERION_OWNER_KEYSTORE_PATH')
+      if (originalKey != null && !originalKey.trim().isEmpty()) {
+        storeFile file(originalKey)
+        storePassword 'android'
+        keyAlias 'androiddebugkey'
+        keyPassword 'android'
+      }
+    }
+  }
+  buildTypes {
+    debug { debuggable true }
+    release {
+      // Real non-debuggable APK variant, signed with the installed app's
+      // ORIGINAL certificate to preserve seamless in-place upgrades.
+      // A new key would require uninstalling the existing application.
+      debuggable false
+      minifyEnabled true
+      shrinkResources true
+      proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+      signingConfig signingConfigs.ownerRelease
+    }
+  }
   compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }

@@ -29,6 +29,9 @@ TOOLS = [
     spec('remote_health', 'Inspect the Asterion Remote agent and its capabilities'),
     spec('remote_system', 'Read PC CPU, memory, disk and uptime metrics'),
     spec('remote_processes', 'List processes running on the connected PC'),
+    spec('control_pc_performance_status','Read currently active Control-managed Windows jobs and priority state'),
+    spec('control_pc_performance_mode','Lower or restore priority for Control-managed Windows jobs only',
+         {'mode':{'type':'string','enum':['favor_foreground','restore']}},['mode']),
     spec('remote_list_files', 'Browse files inside the configured PC root', {'path': STR}),
     spec('remote_search_files', 'Search filenames inside the PC root', {'q': STR, 'path': STR}, ['q']),
     spec('remote_read_file', 'Read a UTF-8 file inside the allowed PC root', {'path': STR}, ['path']),
@@ -44,12 +47,43 @@ TOOLS = [
          {'action': {'type': 'string', 'enum': ['click','double_click','right_click','move','drag','scroll','type','hotkey','press','mouse_down','mouse_up']},
           'x':INT,'y':INT,'to_x':INT,'to_y':INT,'text':STR,'keys':{'type':'array','items':STR},'amount':INT, 'monitor':INT}, ['action']),
     spec('control_phone_status','Read paired native Android agent status; requires no ADB'),
+    spec('control_phone_bridge_status','Legacy alias for direct Android TLS connection state'),
+    spec('control_phone_direct_status','Inspect phone-initiated authenticated WSS MCP readiness'),
     spec('control_phone_health','Read native Android CPU, memory, battery and thermal indicators'),
+    spec('control_phone_performance_status','Read Android capture/observation workload policy and actual pressure'),
+    spec('control_phone_performance_mode','Set Android resource mode automatic, foreground, full or quiet',
+         {'mode': {'type':'string','enum':['automatic','foreground','full','quiet']}},['mode']),
+    spec('control_phone_performance_optimize','Prioritize foreground Android performance for 20 minutes'),
     spec('control_phone_screen','Capture a single current native Android MediaProjection frame'),
     spec('control_phone_ui','Read native Android accessibility UI hierarchy'),
     spec('control_phone_input','Send action to the authorized Android agent without ADB',
          {'action': {'type':'string','enum':['tap','swipe','long_press','back','home','recents','notifications','type','click_text']},
           'x':INT,'y':INT,'x2':INT,'y2':INT,'duration_ms':INT,'text':STR},['action']),
+    spec('control_phone_network_status','Read Android cellular, VPN and remote transport status'),
+    spec('control_phone_voice_ack','Acknowledge spoken answer and erase local transcript',
+         {'question_id':STR},['question_id']),
+    spec('control_phone_cycle_status','Read checkpoint cycle status'),
+    spec('control_phone_voice_status','Read permissioned Android foreground voice dialogue state and transcript'),
+    spec('control_phone_voice_question','Speak a bounded question on Samsung, then listen once using on-device recognition',
+         {'text':STR,'locale':STR},['text']),
+    spec('control_phone_observation_status','Read user-selected Asterion game observation state on Samsung'),
+    spec('control_phone_observation_events','Read timestamped event metadata from the user-selected Asterion app'),
+    spec('control_phone_observation_frame','Read the latest recorded native Android gameplay frame'),
+    spec('control_phone_observation_timeline','List retained Android gameplay observation frame timestamps'),
+    spec('control_phone_observation_get_frame','Retrieve one retained Android gameplay screenshot by recorded ID',
+         {'frame_id':STR},['frame_id']),
+    spec('control_phone_apps','Discover installed launchable Android apps for cross-project work'),
+    spec('control_phone_app_launch','Request opening an installed Android application while Control is foreground (not verified launch)',
+         {'package':STR},['package']),
+    spec('control_phone_continuation_ack','Acknowledge a checkpoint only after this ChatGPT operator actually observes the next response',
+         {'checkpoint_id':STR,'response_receipt':STR},['checkpoint_id','response_receipt']),
+    spec('control_phone_continuation_cancel','Cancel a queued or failed phone checkpoint, not one already sent'),
+    spec('control_phone_chat_new','Click an accessible New chat control when ChatGPT is foreground and the existing draft is blank; operator must verify UI'),
+    spec('control_phone_continuation_status','Inspect the Android-owned checkpoint lifecycle (requires device opt-in)'),
+    spec('control_phone_continuation_queue','Queue one spec-referenced ChatGPT app continuation on the phone; requires owner opt-in',
+         {'project':STR,'checkpoint_id':STR,'priority_tier':{'type':'string','enum':['5*','6*','7*']},
+          'spec_reference':STR,'message':STR},['project','checkpoint_id','priority_tier','spec_reference','message']),
+    spec('control_phone_continuation_dispatch','Attempt guarded queued checkpoint submission in foreground ChatGPT'),
     spec('control_session_start','Start a bounded persistent Control-side interaction session (no ChatGPT turn per gesture)',
         {'device':{'type':'string','enum':['phone','pc']},
          'steps':{'type':'array','minItems':1,'maxItems':80,'items':{
@@ -91,6 +125,9 @@ def invoke_tool(name: str, args: dict):
     if name == 'remote_health': return remote.health()
     if name == 'remote_system': return remote.system()
     if name == 'remote_processes': return remote.processes(100)
+    if name == 'control_pc_performance_status': return remote.managed_performance_status()
+    if name == 'control_pc_performance_mode':
+        return remote.manage_performance_priority(remote.ManagedJobPriority(**args))
     if name == 'remote_list_files': return remote.list_files(args.get('path', '.'))
     if name == 'remote_search_files': return remote.search_files(args['q'],args.get('path','.'),100)
     if name == 'remote_read_file': return remote.read_file(args['path'])
@@ -106,9 +143,21 @@ def invoke_tool(name: str, args: dict):
     if name == 'control_phone_status':
         from .native_routes import phone_status
         return phone_status()
+    if name == 'control_phone_bridge_status':
+        from .native_routes import phone_bridge_status
+        return phone_bridge_status()
     if name == 'control_phone_health':
         from .native_routes import phone_health
         return phone_health()
+    if name == 'control_phone_performance_status':
+        from .native_routes import phone_performance_status
+        return phone_performance_status()
+    if name == 'control_phone_performance_mode':
+        from .native_routes import phone_performance_mode, PerformanceMode
+        return phone_performance_mode(PerformanceMode(**args))
+    if name == 'control_phone_performance_optimize':
+        from .native_routes import phone_performance_optimize
+        return phone_performance_optimize()
     if name == 'control_phone_screen':
         from .native_routes import phone_screen
         return phone_screen()
@@ -119,6 +168,62 @@ def invoke_tool(name: str, args: dict):
         from .native_routes import phone_input
         from .phone_bridge import PhoneInput
         return phone_input(PhoneInput(**args))
+    if name == 'control_phone_voice_status':
+        from .native_routes import phone_voice_status
+        return phone_voice_status()
+    if name == 'control_phone_voice_question':
+        from .native_routes import phone_voice_question, VoiceQuestion
+        return phone_voice_question(VoiceQuestion(**args))
+    if name == 'control_phone_network_status':
+        from .native_routes import phone_network_status
+        return phone_network_status()
+    if name == 'control_phone_voice_ack':
+        from .native_routes import phone_voice_ack, VoiceAcknowledgment
+        return phone_voice_ack(VoiceAcknowledgment(**args))
+    if name == 'control_phone_cycle_status':
+        from .native_routes import phone_cycle_status
+        return phone_cycle_status()
+    if name.startswith('control_phone_cycle_'):
+        raise ValueError('Android-owned cycles retired; ChatGPT must queue, dispatch and acknowledge each checkpoint')
+    if name == 'control_phone_observation_status':
+        from .native_routes import phone_observation_status
+        return phone_observation_status()
+    if name == 'control_phone_observation_events':
+        from .native_routes import phone_observation_events
+        return phone_observation_events()
+    if name == 'control_phone_observation_timeline':
+        from .native_routes import phone_observation_timeline
+        return phone_observation_timeline()
+    if name == 'control_phone_observation_get_frame':
+        from .native_routes import phone_observation_get_frame
+        return phone_observation_get_frame(args['frame_id'])
+    if name == 'control_phone_observation_frame':
+        from .native_routes import phone_observation_frame
+        return phone_observation_frame()
+    if name == 'control_phone_apps':
+        from .native_routes import phone_apps
+        return phone_apps()
+    if name == 'control_phone_app_launch':
+        from .native_routes import phone_app_launch, AppLaunch
+        return phone_app_launch(AppLaunch(**args))
+    if name == 'control_phone_continuation_ack':
+        from .native_routes import phone_continuation_ack, CheckpointAcknowledgment
+        return phone_continuation_ack(CheckpointAcknowledgment(**args))
+    if name == 'control_phone_continuation_cancel':
+        from .native_routes import phone_continuation_cancel
+        return phone_continuation_cancel()
+    if name == 'control_phone_chat_new':
+        from .native_routes import phone_chat_new
+        return phone_chat_new()
+    if name == 'control_phone_continuation_status':
+        from .native_routes import phone_continuation_status
+        return phone_continuation_status()
+    if name == 'control_phone_continuation_queue':
+        from .native_routes import phone_continuation_queue, ContinuationRequest
+        return phone_continuation_queue(ContinuationRequest(**args))
+    if name == 'control_phone_continuation_dispatch':
+        from .native_routes import phone_continuation_dispatch
+        return phone_continuation_dispatch()
     if name == 'control_session_start':
         from .interaction_sessions import SessionRequest, start
         return start(SessionRequest(**args))
