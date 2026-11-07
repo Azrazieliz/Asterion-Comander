@@ -1,34 +1,68 @@
-# Asterion Control: shared Android execution interface (v1)
-Status: implementation contract, not a frozen requirement or proof of on-device acceptance.
+# Asterion Control native cross-app bridge — protocol v1
 
-## Identity and responsibility
-Asterion Control is an authenticated, deterministic **tool** for ChatGPT to operate the owner's Android-first Asterion ecosystem. It is not a second AI system or game-playing engine. The Android UI is a limited settings and permission surface. Application intelligence stays in ChatGPT and in the existing per-project app engines. Windows is optional/subordinate.
+**Status (2026-11-07):** Control-side implementation is in the Android development branch. Other Asterion apps have received **requests only**, not source changes. The partner-provider handshake, actual actions, and recovery are unverified on a device until at least one app implements the protocol.
 
-## Native phone endpoints
-Agent at `http://<private-paired-android-ip>:8973`; requires bearer token, private Wi-Fi, VPN or loopback. **Plain HTTP must never be published directly to the internet.** A stable authenticated HTTPS ingress into ChatGPT remains required.
+## Principle
 
-- `POST /mcp`: stateless JSON-RPC (`initialize`, `ping`, `tools/list`, `tools/call`); native Android MCP tool catalog provided by `AndroidMcp.java`.
-- `GET /health`, `GET /ui`, `GET /screen`, `GET /stream`, `POST /input`: existing native device interfaces.
-- `GET /apps`: installed launchable packages plus labels. `POST /apps/launch` with `{"package":"..."}`: dispatch app launch only while Control's Activity is foreground. A dispatched Intent is **not** verified app foreground success.
-- `GET /continuation/status`, `POST /continuation/queue`, `POST /continuation/dispatch`, `POST /continuation/ack`, `POST /continuation/cancel`: phone-owned persistent checkpoint state.
-- `GET /observation/status`, `GET /observation/events`, `GET /observation/frame`: opt-in evidence from only the selected foreground application, after Android MediaProjection grant. No AI inference inside Control.
-- `GET /voice/status`, `POST /voice/question`: owner-started Android foreground speaker and one-shot on-device speech recognition, no paid speech API.
+Asterion Control is the owner's phone-control, transport, and authenticated MCP operator. It never replaces an application engine. Project-specific capabilities remain in that app. No unrestricted shell, cross-app logcat, shared secrets, root access, or automatic cross-app approvals.
 
-## Continuation lifecycle
-1. ChatGPT uses actual GitHub canonical files and progress to formulate a bounded checkpoint with project, checkpoint ID, 5*/6*/7* source reference and next steps.
-2. The phone's user-enabled queue persists it atomically; duplicate checkpoint IDs are rejected.
-3. When the owner-enabled ChatGPT app is visible and contains an empty accessible composer, Control attempts to type and send the continuation. It does **not** claim model acceptance on Send click.
-4. A real subsequent ChatGPT response is acknowledged through `/continuation/ack`, with checkpoint ID and concrete receipt marker; then a following checkpoint may be queued.
-5. Ambiguous send/timeouts require review; never auto-resend, overwrite a user's draft or pretend ChatGPT limits are removed. Pausing preserves the previous lifecycle state.
+## Discovery and local consent
 
-## Cross-app boundaries
-- **Asterion Pilot / Game:** Canonical autonomous game-playing Android app. Direct live perception, learning, scheduling, objectives and verified completion belong to Pilot. Control may externally observe gameplay or invoke authorized operations but must NOT replace Pilot with screenshot-driven navigation.
-- **Game Codex:** Authority for sourced game mechanics, characters, data and approved cross-app evidence contracts.
-- **Asterion Art/Core/Downloader/Sound/Adaptive Study/NoWorld/KK/3D:** Preserve each project's existing engine, assets, signing and repository. Control provides the generic screen, input, app catalogue, files, worker and routine-execution surfaces only when authorized.
-- **Windows worker:** Optional native build/resource workflow; remote desktop, scripts and file transfer remain separate MCP tools. Do not treat a Windows agent as Android's primary operating head.
+The partner app must be visible as an installed launchable package and register a ContentProvider with **exact authority** `<partnerPackage>.asterion.bridge`, exported only with independent caller identity and owner authorization checks. Control checks `ProviderInfo.packageName` against that exact package, verifies the app's **APK signing certificate SHA-256**, and requires the owner to explicitly approve it from Control's **Asterion app integrations → Manage app access** screen. Approval is pinned to that certificate. A changed signer invalidates consent.
 
-## MCP gateway
-The HTTPS bridge is authenticated and merges native phone and optional Windows tool catalogs. Phone-owned tools route to the Android MCP service; PC-only tools route to the Windows worker. The existing temporary Cloudflare trial remains a deployment dependency. **A stable HTTPS endpoint plus actual ChatGPT connector authentication is still required.**
+Remote clients **cannot approve, change or bypass app permissions**. Partners must independently verify the caller UID/package/signature and implement their own owner authorization, allowlisted operations, limits, and privacy rules.
 
-## Reporting and acceptance
-Distinguish `implemented`, `CI compiled`, `installed`, `on-device tested`, and `verified`. The user's Samsung has installed v0.8.6, while v0.8.7 is development code. A CI debug signer may differ from the installed signing key; do not claim an update is possible without verifying certificate continuity. Never modify frozen 7* or project-specific masters without exact authorization.
+For Android 11+ package visibility, Control discovers apps through the existing Launcher catalog and resolves their declared providers. Providers not visible to the OS will not appear. The partner team must verify actual discovery on the target Android version.
+
+## Android IPC contract
+
+For Android ContentResolver on `content://<partnerPackage>.asterion.bridge`:
+
+| `ContentResolver.call` method | Bundle input | Bundle output |
+|---|---|---|
+| `asterion.v1.invoke` | `protocol_version=1`, `request_id`, `action`, `payload_json` | `result_json` (JSON string, maximum 8 KB) |
+| `asterion.v1.status` | `protocol_version=1`, `request_id` | `result_json` |
+| `asterion.v1.cancel` | `protocol_version=1`, `request_id` | `result_json` |
+
+The partner's `result_json` is a JSON object with `ok` (boolean), `status` (lowercase snake_case; e.g. `accepted`, `running`, `completed`, `failed`, `cancel_requested`), and optional bounded `result` or `reason`. The partner must idempotently key operations by `request_id`, maintain meaningful progress, and never claim cancellation was completed just because a cancel request was received.
+
+Control persists an operation receipt **before** dispatch. If Binder fails or times out, it returns `outcome_unknown` / `retry_safe=false` and forbids replay with that ID. Duplicate request IDs are rejected, including when sent for a different app/action. Control's binder wait is bounded (7 s invoke, 6 s operation); this does not guarantee the remote action stopped. Only the partner owns completion and cancellation semantics.
+
+Input restrictions: package must match an installed launcher app's exact name; action ID lower-case dot/hyphen/underscore, max 80; request IDs 8–100 safe characters; JSON payload max 4096 characters; partner result max 8192 characters. No arbitrary shell commands, intents, URIs or arbitrary file paths are exposed by this bridge.
+
+## Authenticated transport interfaces
+
+- `GET /app-bridge/apps` — list partner-provider availability and locally approved state.
+- `POST /app-bridge/invoke` — `{"package":"...","action":"...","request_id":"...","payload":{}}`.
+- `POST /app-bridge/operation` — `{"package":"...","request_id":"...","cancel":false}` (or `cancel:true`).
+- Native MCP: `control_phone_app_bridges`, `control_phone_app_invoke`, `control_phone_app_operation`.
+- Optional authenticated Windows proxy: `/phone/app-bridge/apps`, `/phone/app-bridge/invoke`, `/phone/app-bridge/operation`.
+
+These endpoints remain subject to the existing paired bearer, private-LAN/VPN, authenticated MCP gateway, and on-device per-partner approval. Do not expose the raw Android HTTP service publicly.
+
+## Partner repository requests (requests ONLY)
+
+Created issues:
+- [Asterion Core #42](https://github.com/Azrazieliz/Asterion-Core/issues/42)
+- [Downloader #20](https://github.com/Azrazieliz/AsterionDownloader/issues/20)
+- [Art #12](https://github.com/Azrazieliz/AsterionArt/issues/12)
+- [Adaptive Study #1](https://github.com/Azrazieliz/Adaptive-Study/issues/1)
+- [Game Central Database #1](https://github.com/Azrazieliz/Game-Central-Database/issues/1)
+- [Cosplay Download #16](https://github.com/Azrazieliz/Cosplay-Download/issues/16)
+- [NoWorld #90](https://github.com/Azrazieliz/NoWorld-False-Horizon/issues/90)
+- [Rounder #15](https://github.com/Azrazieliz/AsterionRounder/issues/15)
+- [Games #2](https://github.com/Azrazieliz/Asterion-Games/issues/2)
+- [3D #1](https://github.com/Azrazieliz/Asterion-3d/issues/1)
+- [KK #1](https://github.com/Azrazieliz/Asterion-kk/issues/1)
+- [Sound #1](https://github.com/Azrazieliz/Asterion-Sound/issues/1)
+
+## Required device acceptance
+
+1. Install an opted-in partner app with the proper provider. Discover it through the Control UI and native MCP.
+2. Verify **unapproved invocation is rejected**.
+3. Authorize locally and verify one non-destructive native partner operation completes with structured result.
+4. Repeat the same request ID: **no second execution**.
+5. Verify running, cancellation, failure, timeout, app update/signature change, lost connection, owner revocation.
+6. Check unchanged project-specific engine, assets, signing, data, and performance.
+
+**Do not report cross-app integration as fully working until these are observed on the real phone.**
