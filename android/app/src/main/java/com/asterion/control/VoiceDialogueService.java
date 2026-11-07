@@ -30,6 +30,8 @@ import java.util.ArrayList;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Owner-started Android foreground speaker -> on-device microphone Q&A.
@@ -60,6 +62,10 @@ public final class VoiceDialogueService extends Service {
   private volatile boolean speakerPlaybackCompleted=false;
   private volatile boolean pendingLocalTest=false;
   private volatile String recognizerBackend="none";
+  private final ExecutorService voiceControlWorker=Executors.newSingleThreadExecutor();
+  private volatile boolean speakOnly=false;
+  private volatile boolean ownerCommandMode=false;
+  private volatile String lastVoiceDispatch="not_started";
   private void localVoiceTest(){
     if(active!=this)return;
     try{
@@ -216,6 +222,7 @@ public final class VoiceDialogueService extends Service {
     if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)
       throw new IllegalStateException("Android microphone consent is missing");
     acquireAudioFocus(); // Android pauses competing music where the player supports focus.
+    speakOnly=false;
     question=text;transcript="";consumed=false;
     speakerPlaybackStarted=false;speakerPlaybackCompleted=false;
     questionId=requestId==null||requestId.isEmpty()?UUID.randomUUID().toString():requestId;
@@ -299,8 +306,11 @@ public final class VoiceDialogueService extends Service {
       @Override public void onDone(String utteranceId){
         if(id.equals(utteranceId)){
           speakerPlaybackCompleted=true;
-          // Release exclusive playback focus before the recognizer opens the microphone.
-          ui.post(()->{releaseAudioFocus();startListening(locale,id);});
+          ui.post(()->{
+            releaseAudioFocus();
+            if(speakOnly){clearDeadline();speakOnly=false;state("ready","");}
+            else startListening(locale,id);
+          });
         }
       }
       @Override public void onError(String utteranceId){
@@ -386,9 +396,15 @@ public final class VoiceDialogueService extends Service {
         microphoneActive=false;clearDeadline();
         ArrayList<String> phrases=results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
         transcript=phrases==null||phrases.isEmpty()?"":phrases.get(0);
-        state(transcript.isEmpty()?"failed":"answered",
+        boolean command=ownerCommandMode;
+        ownerCommandMode=false;
+        state(transcript.isEmpty()?"failed":command?"processing":"answered",
           transcript.isEmpty()?"No recognized speech":"");
         ui.post(()->{if(listener!=null){listener.destroy();listener=null;}});
+        if(command&&!transcript.isEmpty()){
+          final String spoken=transcript;
+          voiceControlWorker.execute(()->dispatchOwnerVoiceRequest(spoken));
+        }
       }
       @Override public void onPartialResults(Bundle results){}
       @Override public void onEvent(int type,Bundle params){}
@@ -401,6 +417,79 @@ public final class VoiceDialogueService extends Service {
     if(offline)request.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE,true);
     state("listening","");
     listener.startListening(request);
+  }
+  /** One explicit owner-initiated voice turn. The recognizer transcribes what the
+   * owner says, then Control sends it into the existing ChatGPT writing bar.
+   * This never creates a queue or fabricates an AI response.
+   */
+  synchronized JSONObject beginOwnerVoiceControl(String locale)throws Exception{
+    if(active!=this)throw new IllegalStateException("Enable voice session first");
+    if(ownerCommandMode)throw new IllegalStateException("Voice command already running");
+    ownerCommandMode=true;
+    try{
+      JSONObject started=ask("What would you like me to do?",locale,
+        "owner-command-"+System.currentTimeMillis());
+      lastVoiceDispatch="listening_for_owner";
+      return started.put("voice_control",true);
+    }catch(Exception e){ownerCommandMode=false;throw e;}
+  }
+  /** Speak an assistant reply without reopening the microphone. Follow-up
+   * questions continue through the existing question/listen endpoint.
+   */
+  synchronized JSONObject sayOnly(String text,String locale)throws Exception{
+    if(active!=this||!speakerReady)throw new IllegalStateException("Speaker not ready");
+    if(text==null||text.isBlank()||text.length()>700||
+       locale==null||!locale.matches("[a-z]{2}(-[A-Z]{2})?"))
+      throw new IllegalArgumentException("Invalid spoken reply");
+    if("listening".equals(phase)||"processing".equals(phase)||"speaking".equals(phase))
+      throw new IllegalStateException("Voice conversation is busy");
+    acquireAudioFocus();
+    speakOnly=true;ownerCommandMode=false;consumed=true;
+    speakerPlaybackStarted=false;speakerPlaybackCompleted=false;
+    String id="spoken-reply-"+System.currentTimeMillis();
+    questionId=id;question=text;transcript="";
+    state("speaking","");
+    ui.post(()->{scheduleDeadline(id,SPEAKER_TIMEOUT_MS);speakNow(text,locale,id);});
+    return new JSONObject().put("ok",true).put("phase","speaking").put("speech_id",id);
+  }
+  private void dispatchOwnerVoiceRequest(String spoken){
+    ControlAccessibilityService access=ControlAccessibilityService.active;
+    if(access==null){
+      lastVoiceDispatch="accessibility_unavailable";
+      state("failed","ChatGPT input access unavailable for voice request");
+      return;
+    }
+    // Restore actual ChatGPT application; do not send into another app.
+    for(int attempt=0;attempt<12;attempt++){
+      if(active!=this)return;
+      if(!"com.openai.chatgpt".equals(access.currentPackage()))
+        access.requestChatForeground();
+      else{
+        JSONObject focus=access.prepareChatKeyboard();
+        if(focus.optBoolean("ready",false)){
+          // Spoken text is a user command to ChatGPT, not a queued checkpoint.
+          JSONObject send=access.sendChatMessage(
+            "ASTERION CONTROL — OWNER VOICE REQUEST\n"+
+            "Spoken instruction: "+spoken+"\n"+
+            "Execute the authorized request using Asterion Control. "+
+            "Use the speaker endpoint for a spoken reply, and ask a "+
+            "microphone question only if a response is required.");
+          if(send.optBoolean("sent",false)){
+            lastVoiceDispatch="submitted_unverified";
+            consumed=true;state("delivered","");
+          }else{
+            lastVoiceDispatch="not_sent";
+            state("failed",send.optString("reason","Voice request could not be sent"));
+          }
+          return;
+        }
+      }
+      try{Thread.sleep(650);}catch(InterruptedException e){
+        Thread.currentThread().interrupt();return;
+      }
+    }
+    lastVoiceDispatch="chatgpt_input_unavailable";
+    state("failed","ChatGPT writing bar could not be focused");
   }
   private static String speechError(int code){
     switch(code){
@@ -429,6 +518,8 @@ public final class VoiceDialogueService extends Service {
       .put("phase",phase).put("question_id",questionId)
       .put("question",question).put("transcript",transcript)
       .put("microphone_active",microphoneActive)
+      .put("voice_control_active",ownerCommandMode)
+      .put("last_voice_dispatch",lastVoiceDispatch)
       .put("speaker_started",speakerPlaybackStarted)
       .put("speaker_finished",speakerPlaybackCompleted)
       .put("answer_pending_ack","answered".equals(phase)&&!consumed)
@@ -449,6 +540,7 @@ public final class VoiceDialogueService extends Service {
       if(speaker!=null){speaker.stop();speaker.shutdown();}
       releaseAudioFocus();
     });
+    voiceControlWorker.shutdownNow();
     super.onDestroy();
   }
   @Override public IBinder onBind(Intent intent){return null;}
