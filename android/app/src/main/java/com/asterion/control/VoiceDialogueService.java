@@ -7,6 +7,7 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
@@ -19,10 +20,12 @@ import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
 import android.speech.tts.TextToSpeech;
+import android.speech.tts.Voice;
 import android.speech.tts.UtteranceProgressListener;
 import org.json.JSONObject;
 import java.util.ArrayList;
 import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -39,6 +42,9 @@ public final class VoiceDialogueService extends Service {
   private volatile String questionId="";
   private volatile boolean speakerReady=false;
   private String listeningLocale="en-US";
+  private volatile float naturalRate=0.96f,naturalPitch=1.00f;
+  private volatile String chosenVoice="system_default";
+  private volatile int chosenVoiceQuality=-1;
   private static final int NOTIFICATION_ID=2107;
   private static final long SPEAKER_TIMEOUT_MS=90000L;
   private static final long ANSWER_TIMEOUT_MS=45000L;
@@ -87,6 +93,9 @@ public final class VoiceDialogueService extends Service {
     phase=value;error=message;updatedAt=System.currentTimeMillis();
   }
   @Override public void onCreate(){
+    SharedPreferences saved=getSharedPreferences(VOICE_PREFS,MODE_PRIVATE);
+    naturalRate=Math.max(0.85f,Math.min(1.15f,saved.getFloat("rate",0.96f)));
+    naturalPitch=Math.max(0.90f,Math.min(1.10f,saved.getFloat("pitch",1.00f)));
     super.onCreate();
     speaker=new TextToSpeech(this,status->{
       speakerReady=status==TextToSpeech.SUCCESS;
@@ -192,16 +201,61 @@ public final class VoiceDialogueService extends Service {
     return new JSONObject().put("ok",true).put("question_id",id)
       .put("phase","acknowledged");
   }
+  private static final String VOICE_PREFS="voice_style";
+  /** Default to an installed, high-quality OFFLINE voice for the requested accent.
+   * Never substitute another country/accent silently or require network audio. */
+  private void applyNaturalVoice(Locale language){
+    if(speaker==null)return;
+    try{
+      Set<Voice> installed=speaker.getVoices();
+      Voice best=null;
+      if(installed!=null)for(Voice candidate:installed){
+        if(candidate==null||candidate.isNetworkConnectionRequired() ||
+            candidate.getLocale()==null ||
+            !candidate.getLocale().toLanguageTag().equalsIgnoreCase(language.toLanguageTag()))continue;
+        if(candidate.getFeatures()!=null &&
+            candidate.getFeatures().contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED))continue;
+        if(best==null||candidate.getQuality()>best.getQuality())best=candidate;
+      }
+      if(best!=null&&best.getQuality()>=Voice.QUALITY_HIGH)speaker.setVoice(best);
+    }catch(Exception ignored){/* Retain Android's selected locale voice. */}
+    Voice applied=speaker.getVoice();
+    chosenVoice=applied==null?"system_default":applied.getName();
+    chosenVoiceQuality=applied==null?-1:applied.getQuality();
+    speaker.setSpeechRate(naturalRate);
+    speaker.setPitch(naturalPitch);
+  }
+  synchronized JSONObject voiceSettings()throws Exception{
+    return new JSONObject().put("ok",true).put("rate",naturalRate)
+      .put("pitch",naturalPitch).put("voice",chosenVoice)
+      .put("voice_quality",chosenVoiceQuality)
+      .put("locale",listeningLocale)
+      .put("offline_voice_preferred",true);
+  }
+  synchronized JSONObject configureVoiceSettings(JSONObject input)throws Exception{
+    if(input==null)throw new IllegalArgumentException("Missing voice preferences");
+    double r=input.optDouble("rate",0.96),p=input.optDouble("pitch",1.0);
+    if(!Double.isFinite(r)||r<0.85||r>1.15||!Double.isFinite(p)||p<0.90||p>1.10)
+      throw new IllegalArgumentException("Rate must be 0.85–1.15 and pitch 0.90–1.10");
+    if("speaking".equals(phase)||"listening".equals(phase)||"processing".equals(phase))
+      throw new IllegalStateException("Finish current spoken exchange before changing voice");
+    naturalRate=(float)r;naturalPitch=(float)p;
+    getSharedPreferences(VOICE_PREFS,MODE_PRIVATE).edit()
+      .putFloat("rate",naturalRate).putFloat("pitch",naturalPitch).apply();
+    if(speaker!=null){speaker.setSpeechRate(naturalRate);speaker.setPitch(naturalPitch);}
+    return voiceSettings();
+  }
   private void speakNow(String text,String locale,String id){
     if(active!=this)return;
     Locale language=Locale.forLanguageTag(locale);
     speaker.setAudioAttributes(new android.media.AudioAttributes.Builder()
-      .setUsage(android.media.AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
+      .setUsage(android.media.AudioAttributes.USAGE_ASSISTANT)
       .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH).build());
     int languageResult=speaker.setLanguage(language);
     if(languageResult==TextToSpeech.LANG_MISSING_DATA || languageResult==TextToSpeech.LANG_NOT_SUPPORTED){
       clearDeadline();state("failed","Requested speech voice data is unavailable");return;
     }
+    applyNaturalVoice(language);
     speaker.setOnUtteranceProgressListener(new UtteranceProgressListener(){
       @Override public void onStart(String utteranceId){
         if(id.equals(utteranceId))speakerPlaybackStarted=true;
@@ -342,7 +396,9 @@ public final class VoiceDialogueService extends Service {
       .put("on_device_recognition",Build.VERSION.SDK_INT>=31
          && SpeechRecognizer.isOnDeviceRecognitionAvailable(this))
        .put("android_system_recognition",SpeechRecognizer.isRecognitionAvailable(this))
-       .put("recognizer_backend",recognizerBackend);
+       .put("recognizer_backend",recognizerBackend)
+      .put("voice",chosenVoice).put("voice_quality",chosenVoiceQuality)
+      .put("speech_rate",naturalRate).put("speech_pitch",naturalPitch);
   }
   @Override public void onDestroy(){
     active=null;
