@@ -33,4 +33,4 @@ def test_no_unprompted_windows_or_tunnel_requirement():
     assert "api.github.com/repos/" in bridge
     assert "MCP" not in bridge[bridge.index("static void poll("):bridge.index("private static void pruneFinishedCommand")]
     assert "control_phone_" in bridge
-    assert "phone_"+'_' in "phone_"
+    assert 'OPS.put("phone_"+name,"control_phone_"+name)' in bridge
