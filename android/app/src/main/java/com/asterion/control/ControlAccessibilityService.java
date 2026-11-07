@@ -433,7 +433,7 @@ public final class ControlAccessibilityService extends AccessibilityService {
     return output[0];
   }
   @Override public void onInterrupt() { }
-  @Override public void onDestroy() { if(active == this) active = null; handoff.shutdownNow(); super.onDestroy(); }
+  @Override public void onDestroy() { if(active == this) active = null; super.onDestroy(); }
   public boolean action(JSONObject a) {
     final String cmd = a.optString("action", "");
     final CountDownLatch done = new CountDownLatch(1);
