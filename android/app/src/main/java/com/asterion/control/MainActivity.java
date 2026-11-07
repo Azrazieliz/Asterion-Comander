@@ -293,6 +293,13 @@ public final class MainActivity extends Activity {
     return scroll(healthBody);
   }
   private TextView serviceLine(LinearLayout card,String title,String iconName){LinearLayout row=h();row.setPadding(0,dp(11),0,dp(11));row.addView(icon(iconName,DesignSystem.PURPLE,20));TextView titleText=t(title,13,DesignSystem.TEXT,true);titleText.setPadding(dp(14),0,0,0);row.addView(titleText,new LinearLayout.LayoutParams(0,-2,1));TextView value=t("Checking",12,DesignSystem.MUTED,false);row.addView(value);wide(card,row);return value;}
+  private void repairDeviceLink(){
+    if(!prefs.getString("token","").isEmpty()&&!prefs.getString("url","").isEmpty()){
+      startAgent();
+      handler.postDelayed(()->{if(AgentService.running)registerPhone();
+        else setPairingFeedback("Phone service did not start; enable phone access.");},1500);
+    }else discoverComputer();
+  }
   private View scrollDevices(){
     devicesBody=v();wide(devicesBody,eyebrow("SECURE DEVICE ACCESS"));
     sectionTitle(devicesBody,"Your connections.","Control your own devices without cables or repeated setup.");gap(devicesBody,18);
@@ -301,14 +308,8 @@ public final class MainActivity extends Activity {
     LinearLayout summary=card();summary.setBackground(DesignSystem.gradient(this,0xFF28334B,0xFF182A38,23));
     rowTitle(summary,"Windows computer","Your remote desktop and device resources",icon("monitor",DesignSystem.PURPLE,25));
     gap(summary,12);remoteConnection=t("Checking saved connection…",12,DesignSystem.MUTED,false);wide(summary,remoteConnection);
-    gap(summary,16);twoActions(summary,"Open desktop","monitor",()->show(1),"Reconnect","refresh",()->{save();checkHost();});
+    gap(summary,16);twoActions(summary,"Open desktop","monitor",()->show(1),"Repair connection","refresh",this::repairDeviceLink);
     gap(summary,10);button(summary,"Find my Windows computer","devices",true,this::discoverComputer);
-    gap(summary,9);button(summary,"Repair connection","refresh",false,()->{
-      if(!prefs.getString("token","").isEmpty()&&!prefs.getString("url","").isEmpty()){
-        startAgent();
-        handler.postDelayed(()->{if(AgentService.running)registerPhone();else setPairingFeedback("Phone service did not start. Enable phone access in this screen.");},1500);
-      }else discoverComputer();
-    });
     gap(summary,10);pairingFeedback=t("Your phone is the controller. Connect once; the Windows worker follows.",12,DesignSystem.MUTED,false);
     pairingFeedback.setMaxLines(5);wide(summary,pairingFeedback);
     wide(devicesBody,summary);
@@ -318,7 +319,7 @@ public final class MainActivity extends Activity {
     gap(phone,12);phoneAddress=t("Checking phone access…",12,DesignSystem.MUTED,false);wide(phone,phoneAddress);
     gap(phone,16);button(phone,"Enable phone remote control","shield",true,this::enablePhoneControl);
     gap(phone,9);button(phone,"Share screen · Android permission","share",false,this::beginCapture);
-    gap(phone,9);button(phone,"Authorize ChatGPT (one-time code)","check",false,this::showMcpConnection);
+    gap(phone,9);button(phone,"Check direct Control link","activity",false,this::showAwayFromHomeStatus);
      gap(phone,9);button(phone,"Keep access active during long sessions","power",false,this::showBatterySetup);
      gap(phone,9);button(phone,"Disable phone access","power",false,()->{stopService(new Intent(this,CaptureService.class));stopAgent();});
     wide(devicesBody,phone);
@@ -353,36 +354,10 @@ public final class MainActivity extends Activity {
     gap(handoff,12);
     button(handoff,"Enable checkpoint continuation","check",true,this::enableCheckpointContinuation);
     gap(handoff,9);button(handoff,"Pause all continuation","power",false,this::pauseCheckpointContinuation);
-    gap(handoff,9);button(handoff,"Open ChatGPT for queued checkpoint","share",false,this::openChatGptCheckpoint);
+    gap(handoff,9);button(handoff,"Inspect operator checkpoint","activity",false,this::showCycleStatus);
     gap(handoff,9);
     wide(handoff,t("Only a queued, spec-referenced checkpoint is sent. Existing drafts are never overwritten; Android and ChatGPT limits still apply.",11,DesignSystem.MUTED,false));
     wide(devicesBody,handoff);
-
-    gap(devicesBody,12);LinearLayout cycles=card();
-    rowTitle(cycles,"ChatGPT-operated checkpoints",
-      "ChatGPT decides every step; Control transports commands and receipts",
-      icon("refresh",DesignSystem.TEAL,22));
-    gap(cycles,12);
-    button(cycles,"Inspect operator checkpoint","activity",true,this::showCycleStatus);
-    gap(cycles,8);
-    wide(cycles,t("Control does not create ChatGPT turns or run independent cycles. "
-      +"The connected ChatGPT operator queues one authorized checkpoint, "
-      +"receives the result and explicitly decides the next operation.",
-      11,DesignSystem.MUTED,false));
-    wide(devicesBody,cycles);
-
-    gap(devicesBody,12);LinearLayout mobile=card();
-    rowTitle(mobile,"Direct cellular MCP",
-      "Phone-initiated encrypted connection · no GitHub polling",
-      icon("shield",DesignSystem.TEAL,23));
-    gap(mobile,12);
-    wide(mobile,t("Your already paired phone connects over cellular or Wi-Fi to "
-      +"the authenticated Control MCP gateway. The native service and phone-local "
-      +"voice/cycle engine remain on Android.",
-      11,DesignSystem.MUTED,false));
-    gap(mobile,10);button(mobile,"Check direct remote readiness","activity",true,
-      this::showAwayFromHomeStatus);
-    wide(devicesBody,mobile);
 
     gap(devicesBody,12);LinearLayout observation=card();
     rowTitle(observation,"Cross-app screen observation",
@@ -937,115 +912,6 @@ public final class MainActivity extends Activity {
     handler.postDelayed(this::updateHealth,450);
     toast("Phone agent disabled");
   }
-  private void copyPrivateConnection(String label,String data,boolean secret){
-    ClipboardManager clipboard=(ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
-    ClipData clip=ClipData.newPlainText(label,data);
-    if(secret&&Build.VERSION.SDK_INT>=33){
-      android.os.PersistableBundle extras=new android.os.PersistableBundle();
-      extras.putBoolean(ClipDescription.EXTRA_IS_SENSITIVE,true);
-      clip.getDescription().setExtras(extras);
-    }
-    clipboard.setPrimaryClip(clip);
-    toast(label+" copied");
-  }
-  /** The already connected Samsung owner requests a one-use approval code
-   * over the authenticated TLS gateway. No reusable gateway secret is copied.
-   */
-  private void showPhoneApproval(){
-    setPairingFeedback("Requesting a one-time ChatGPT approval code over direct cellular MCP…");
-    io.execute(()->{
-      HttpURLConnection request=null;
-      try{
-        request=(HttpURLConnection)new URL(
-          "https://wise-eagle-c8b55706.tunnl.gg/oauth/phone-approval").openConnection();
-        request.setRequestMethod("POST");request.setDoOutput(true);
-        request.setConnectTimeout(6000);request.setReadTimeout(9000);
-        request.setRequestProperty("Authorization","Bearer "+AgentService.token(this));
-        request.setRequestProperty("Content-Type","application/json");
-        try(OutputStream out=request.getOutputStream()){
-          out.write("{}".getBytes(StandardCharsets.UTF_8));
-        }
-        if(request.getResponseCode()!=200)
-          throw new IllegalStateException("Owner approval HTTP "+request.getResponseCode());
-        JSONObject result=new JSONObject(new String(
-          request.getInputStream().readNBytes(4096),StandardCharsets.UTF_8));
-        String code=result.getString("authorization_code");
-        String endpoint=result.getString("server_url");
-        if(code.length()<32||code.length()>256||
-            !"https://wise-eagle-c8b55706.tunnl.gg/mcp".equals(endpoint))
-          throw new IllegalStateException("Invalid signed Control approval response");
-        runOnUiThread(()->{
-          if(destroyed)return;
-          LinearLayout content=v();content.setPadding(dp(18),dp(12),dp(18),dp(7));
-          wide(content,t("Use this short-lived one-time code in the existing "
-            +"Authorize Asterion Control page. It expires in 10 minutes and "
-            +"works once. Do not paste it into a ChatGPT conversation.",
-            12,DesignSystem.MUTED,false));
-          gap(content,12);
-          button(content,"Copy one-time approval code","shield",true,
-            ()->copyPrivateConnection("One-time Control approval",code,true));
-          gap(content,9);
-          wide(content,t("Gateway: "+endpoint,11,DesignSystem.MUTED,false));
-          new AlertDialog.Builder(this).setTitle("Authorize ChatGPT securely")
-            .setView(content).setPositiveButton("Close",null).show();
-          setPairingFeedback("Owner approval ready; finish the ChatGPT authorization page.");
-        });
-      }catch(Exception failure){
-        String reason=failure.getMessage()==null?
-          failure.getClass().getSimpleName():failure.getMessage();
-        runOnUiThread(()->setPairingFeedback(
-          "One-time mobile approval unavailable: "+reason));
-      }finally{if(request!=null)request.disconnect();}
-    });
-  }
-  /** Explicit owner action only. Credentials are never logged or sent to GitHub. */
-  private void showMcpConnection(){
-    try{
-      if(PhoneDirectMcp.status().optBoolean("connected",false)){
-        showPhoneApproval();return;
-      }
-    }catch(Exception ignored){}
-
-    final String url=prefs.getString("url","").replaceAll("/+$","");
-    final String bearer=prefs.getString("token","");
-    if(url.isEmpty()||bearer.isEmpty()){
-      toast("Pair the Windows worker once in Connect first");
-      return;
-    }
-    setPairingFeedback("Getting ChatGPT connector details over your private device link…");
-    io.execute(()->{
-      HttpURLConnection connection=null;
-      try{
-        connection=(HttpURLConnection)new URL(url+"/api/v1/mcp-connection").openConnection();
-        connection.setRequestMethod("POST");connection.setDoOutput(true);
-        connection.setConnectTimeout(5000);connection.setReadTimeout(8000);
-        connection.setRequestProperty("Authorization","Bearer "+bearer);
-        connection.setRequestProperty("Content-Type","application/json");
-        try(OutputStream os=connection.getOutputStream()){os.write("{}".getBytes(StandardCharsets.UTF_8));}
-        int status=connection.getResponseCode();
-        if(status!=200)throw new IllegalArgumentException("Connection service HTTP "+status);
-        JSONObject details=new JSONObject(new String(connection.getInputStream().readNBytes(8192),StandardCharsets.UTF_8));
-        String endpoint=details.getString("server_url"),secret=details.getString("api_key");
-        if(!endpoint.startsWith("https://")||secret.length()<43)throw new IllegalArgumentException("Invalid connector details");
-        runOnUiThread(()->{
-          LinearLayout layout=v();layout.setPadding(dp(18),dp(12),dp(18),dp(7));
-          TextView desc=t("Fallback private-LAN setup. This is the stable HTTPS gateway address; its permanent bearer key must only be entered in the trusted connection UI, never in ChatGPT messages.",12,DesignSystem.MUTED,false);
-          wide(layout,desc);gap(layout,15);
-          EditText address=input(endpoint,false,"MCP server URL");
-          address.setTextIsSelectable(true);wide(layout,address);
-          gap(layout,8);button(layout,"Copy server URL","check",false,()->copyPrivateConnection("Server URL",endpoint,false));
-          gap(layout,12);button(layout,"Copy connection key","shield",true,()->copyPrivateConnection("Connection key",secret,true));
-          gap(layout,10);wide(layout,t("Only paste the key into ChatGPT's private plugin connection screen. Never post it in a chat or repository.",11,DesignSystem.MUTED,false));
-          new AlertDialog.Builder(this).setTitle("Connect ChatGPT to Asterion Control")
-            .setView(layout).setPositiveButton("Close",null).show();
-          setPairingFeedback("Direct MCP setup available. Connect the plugin in ChatGPT.");
-        });
-      }catch(Exception e){
-        final String message=e.getMessage()==null?e.getClass().getSimpleName():e.getMessage();
-        runOnUiThread(()->setPairingFeedback("Direct ChatGPT setup unavailable: "+message));
-      }finally{if(connection!=null)connection.disconnect();}
-    });
-  }
   private void showAwayFromHomeStatus(){
     try{
       JSONObject network=TransportConnectivity.report(this);
@@ -1053,7 +919,7 @@ public final class MainActivity extends Activity {
       boolean ready=direct.optBoolean("connected",false);
       String report="Network: "+network.optString("network","offline")+
         "\nInternet validated: "+network.optBoolean("validated")+
-        "\nDirect encrypted MCP connected: "+ready+
+        "\nDirect authenticated connection: "+ready+
         "\nState: "+direct.optString("phase","stopped")+
         "\nLast direct success: "+direct.optLong("last_success_ms",0)+
         "\nLast error: "+direct.optString("last_error","none");
