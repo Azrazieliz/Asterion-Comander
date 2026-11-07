@@ -76,6 +76,9 @@ final class PendingVoiceStore {
       clear(context);return "";
     }
   }
+  static synchronized boolean hasSaved(Context context){
+    return !prefs(context).getString("ciphertext","").isEmpty();
+  }
   static synchronized void clear(Context context){
     prefs(context).edit().remove("ciphertext").remove("created").commit();
   }
