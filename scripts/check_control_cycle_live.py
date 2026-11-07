@@ -16,6 +16,8 @@ def main():
         data=json.load(reply); code=reply.status
     checkpoint=data.get('checkpoint',{})
     cycle=data.get('cycle',{})
+    if not isinstance(cycle,dict): cycle={}
+    if not isinstance(checkpoint,dict): checkpoint={'state':str(checkpoint)}
     print(json.dumps({
        'phone_api_http':code,
        'controller':data.get('controller'),
