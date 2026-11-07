@@ -342,6 +342,13 @@ public final class MainActivity extends Activity {
       });
     wide(voice,voiceStopAction);wide(devicesBody,voice);
 
+    gap(devicesBody,12);LinearLayout integrations=card();
+    rowTitle(integrations,"Asterion app integrations",
+      "Native commands · per-app consent · no unrestricted access",icon("shield",DesignSystem.TEAL,22));
+    gap(integrations,10);
+    button(integrations,"Manage app access","settings",false,this::showAppBridgeApprovals);
+    wide(devicesBody,integrations);
+
     gap(devicesBody,12);LinearLayout transfer=card();
     rowTitle(transfer,"Direct Wi-Fi file transfer","PC → Phone · Files are saved to Downloads/Asterion Control",icon("download",DesignSystem.TEAL,24));
     gap(transfer,12);button(transfer,"Send a PC file to this phone","share",true,this::promptWifiTransfer);
@@ -1027,6 +1034,45 @@ public final class MainActivity extends Activity {
     try{AppObservation.configure(this,false,"");toast("Observation stopped");}
     catch(Exception e){toast("Observation could not stop");}
   }
+  private void showAppBridgeApprovals(){
+    io.execute(()->{
+      try{
+        org.json.JSONArray apps=AppBridge.list(this).getJSONArray("apps");
+        List<String> packages=new ArrayList<>();
+        List<String> choices=new ArrayList<>();
+        for(int i=0;i<apps.length();i++){
+          JSONObject entry=apps.getJSONObject(i);
+          packages.add(entry.getString("package"));
+          choices.add(entry.getString("name")+
+            (entry.optBoolean("approved")?" — Authorized":" — Not authorized"));
+        }
+        runOnUiThread(()->{
+          if(choices.isEmpty()){
+            new AlertDialog.Builder(this).setTitle("Asterion app integration")
+              .setMessage("No installed apps have declared the native Asterion bridge yet. The app teams have been asked to add it. No apps were modified.")
+              .setPositiveButton("Close",null).show();
+            return;
+          }
+          new AlertDialog.Builder(this).setTitle("App integration access")
+            .setItems(choices.toArray(new String[0]),(dialog,which)->{
+              String pkg=packages.get(which);
+              boolean enabled=choices.get(which).contains(" — Authorized");
+              new AlertDialog.Builder(this).setTitle(enabled?"Revoke app access":"Authorize app bridge")
+                .setMessage("App: "+pkg+"\n"+
+                  (enabled?"This will revoke Control's stored approval.":
+                  "Only this exact installed app signature will be trusted. The app must separately authorize every supported native action."))
+                .setPositiveButton(enabled?"Revoke":"Authorize",(dlg,n)->{
+                  try{
+                    AppBridge.approveLocally(this,pkg,!enabled);
+                    toast(enabled?"App access revoked":"App bridge authorized");
+                  }catch(Exception e){toast("Access change failed: "+e.getMessage());}
+                }).setNegativeButton("Cancel",null).show();
+            }).setNegativeButton("Close",null).show();
+        });
+      }catch(Exception e){runOnUiThread(()->toast("App bridge discovery unavailable"));}
+    });
+  }
+
   private void enableCheckpointContinuation(){
     new AlertDialog.Builder(this).setTitle("Enable ChatGPT continuation")
       .setMessage("Asterion Control may send a saved continuation checkpoint in the ChatGPT Android app when you open ChatGPT. This uses your existing app access and is not an API subscription. It never erases an existing draft. You can pause it here at any time.")
