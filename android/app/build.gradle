@@ -6,8 +6,8 @@ android {
     applicationId 'com.asterion.control'
     minSdk 29
     targetSdk 35
-    versionCode 906
-    versionName '0.9.6'
+    versionCode 907
+    versionName '0.9.7'
   }
   // CI must explicitly use the original installed application's signing key.
   // Never silently substitute a runner-generated debug identity.
