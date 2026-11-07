@@ -153,7 +153,8 @@ public final class VoiceDialogueService extends Service {
   private void state(String value,String message){
     phase=value;error=message;updatedAt=System.currentTimeMillis();
     if("answered".equals(value)||"failed".equals(value)||"acknowledged".equals(value)
-        ||"ready".equals(value)||"delivered".equals(value)) {
+        ||"ready".equals(value)||"delivered".equals(value)
+        ||"awaiting_device".equals(value)) {
       releaseAudioFocus();
       releaseCpuForExchange();
     }
@@ -203,7 +204,9 @@ public final class VoiceDialogueService extends Service {
     return new Notification.Builder(this,"asterion_voice")
       .setSmallIcon(android.R.drawable.ic_btn_speak_now)
       .setContentTitle("Asterion voice control")
-      .setContentText("Ready for voice questions while other apps are open")
+      .setContentText(pendingOwnerSpeech.isEmpty()
+        ?"Ready for voice questions while other apps are open"
+        :"Voice command recognized. Open ChatGPT after unlocking to send.")
       .setVisibility(Notification.VISIBILITY_PUBLIC)
       .addAction(android.R.drawable.ic_btn_speak_now,"Talk to Asterion",talkAction)
       .addAction(android.R.drawable.ic_menu_close_clear_cancel,"Stop",action)
@@ -459,6 +462,8 @@ public final class VoiceDialogueService extends Service {
           transcript.isEmpty()?"No recognized speech":"");
         ui.post(()->{if(listener!=null){listener.destroy();listener=null;}});
         if(command&&!transcript.isEmpty()){
+          releaseAudioFocus();
+          releaseCpuForExchange();
           pendingOwnerSpeech=transcript;
           lastVoiceDispatch="recognized";
           onChatWindowVisible();
@@ -483,6 +488,8 @@ public final class VoiceDialogueService extends Service {
   synchronized JSONObject beginOwnerVoiceControl(String locale)throws Exception{
     if(active!=this)throw new IllegalStateException("Enable voice session first");
     if(ownerCommandMode)throw new IllegalStateException("Voice command already running");
+    if(!pendingOwnerSpeech.isEmpty())
+      throw new IllegalStateException("Previous spoken instruction is waiting for ChatGPT");
     ownerCommandMode=true;
     try{
       JSONObject started=ask("What would you like me to do?",locale,
