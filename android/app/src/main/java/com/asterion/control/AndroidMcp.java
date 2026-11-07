@@ -74,6 +74,10 @@ final class AndroidMcp {
     tools.put(tool("control_phone_voice_status","Read owner-enabled on-device voice question state",null));
     tools.put(tool("control_phone_voice_question","Speak once; listen with owner-enabled microphone",
       args("text","string","locale","string","question_id","string"),"text"));
+    tools.put(tool("control_phone_voice_command","Ask owner for a spoken request and send it via real ChatGPT writing bar",
+      args("locale","string")));
+    tools.put(tool("control_phone_voice_say","Speak the assistant reply without opening microphone",
+      args("text","string","locale","string"),"text"));
     tools.put(tool("control_phone_voice_ack","Acknowledge completed speech answer and erase transcript",
       args("question_id","string"),"question_id"));
     tools.put(tool("control_phone_cycle_status","Read durable ChatGPT checkpoint cycle state",null));
@@ -172,6 +176,16 @@ final class AndroidMcp {
         if(voice==null)throw new IllegalStateException("Owner has not enabled the microphone voice session");
         return textContent(voice.ask(args.getString("text"),args.optString("locale","en-US"),
           args.optString("question_id","")));
+      }
+      case "control_phone_voice_command":{
+        VoiceDialogueService voice=VoiceDialogueService.active;
+        if(voice==null)throw new IllegalStateException("Voice session not enabled");
+        return textContent(voice.beginOwnerVoiceControl(args.optString("locale","en-US")));
+      }
+      case "control_phone_voice_say":{
+        VoiceDialogueService voice=VoiceDialogueService.active;
+        if(voice==null)throw new IllegalStateException("Voice session not enabled");
+        return textContent(voice.sayOnly(args.getString("text"),args.optString("locale","en-US")));
       }
       case "control_phone_voice_ack":{
         VoiceDialogueService voice=VoiceDialogueService.active;
