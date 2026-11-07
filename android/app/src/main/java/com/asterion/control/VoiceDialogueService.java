@@ -11,6 +11,9 @@ import android.content.SharedPreferences;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
+import android.media.AudioManager;
+import android.media.AudioFocusRequest;
+import android.media.AudioAttributes;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -36,6 +39,9 @@ public final class VoiceDialogueService extends Service {
   public static volatile VoiceDialogueService active;
   private final Handler ui=new Handler(Looper.getMainLooper());
   private TextToSpeech speaker;
+  private AudioManager speechAudioManager;
+  private AudioFocusRequest speechAudioRequest;
+  private volatile boolean exclusiveSpeechAudio=false;
   private SpeechRecognizer listener;
   private volatile String phase="stopped", question="", transcript="", error="";
   private volatile long updatedAt=0L;
@@ -89,8 +95,37 @@ public final class VoiceDialogueService extends Service {
     };
     ui.postDelayed(deadline,delay);
   }
+  private void acquireAudioFocus() {
+    speechAudioManager=getSystemService(AudioManager.class);
+    if(speechAudioManager==null)throw new IllegalStateException("Android audio manager unavailable");
+    AudioAttributes use=new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT)
+      .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build();
+    speechAudioRequest=new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
+      .setAudioAttributes(use)
+      .setOnAudioFocusChangeListener(change->{
+        if(change==AudioManager.AUDIOFOCUS_LOSS || change==AudioManager.AUDIOFOCUS_LOSS_TRANSIENT)
+          ui.post(()->{if("speaking".equals(phase)||"listening".equals(phase)){
+            if(speaker!=null)speaker.stop();
+            if(listener!=null)listener.cancel();
+            microphoneActive=false;
+            state("failed","Android audio focus lost");
+          }});
+      },ui).build();
+    exclusiveSpeechAudio=speechAudioManager.requestAudioFocus(speechAudioRequest)
+      ==AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
+    if(!exclusiveSpeechAudio)throw new IllegalStateException("Music or another app denied speech audio focus");
+  }
+  private void releaseAudioFocus(){
+    if(!exclusiveSpeechAudio)return;
+    exclusiveSpeechAudio=false;
+    if(speechAudioManager!=null&&speechAudioRequest!=null)
+      speechAudioManager.abandonAudioFocusRequest(speechAudioRequest);
+    speechAudioRequest=null;
+  }
   private void state(String value,String message){
     phase=value;error=message;updatedAt=System.currentTimeMillis();
+    if("answered".equals(value)||"failed".equals(value)||"acknowledged".equals(value))
+      releaseAudioFocus();
   }
   @Override public void onCreate(){
     SharedPreferences saved=getSharedPreferences(VOICE_PREFS,MODE_PRIVATE);
@@ -180,6 +215,7 @@ public final class VoiceDialogueService extends Service {
       throw new IllegalStateException("No Android speech recognition engine is available");
     if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)
       throw new IllegalStateException("Android microphone consent is missing");
+    acquireAudioFocus(); // Android pauses competing music where the player supports focus.
     question=text;transcript="";consumed=false;
     speakerPlaybackStarted=false;speakerPlaybackCompleted=false;
     questionId=requestId==null||requestId.isEmpty()?UUID.randomUUID().toString():requestId;
@@ -398,7 +434,8 @@ public final class VoiceDialogueService extends Service {
        .put("android_system_recognition",SpeechRecognizer.isRecognitionAvailable(this))
        .put("recognizer_backend",recognizerBackend)
       .put("voice",chosenVoice).put("voice_quality",chosenVoiceQuality)
-      .put("speech_rate",naturalRate).put("speech_pitch",naturalPitch);
+      .put("speech_rate",naturalRate).put("speech_pitch",naturalPitch)
+      .put("exclusive_audio_focus",exclusiveSpeechAudio);
   }
   @Override public void onDestroy(){
     active=null;
@@ -406,6 +443,7 @@ public final class VoiceDialogueService extends Service {
       clearDeadline();microphoneActive=false;
       if(listener!=null){listener.destroy();listener=null;}
       if(speaker!=null){speaker.stop();speaker.shutdown();}
+      releaseAudioFocus();
     });
     super.onDestroy();
   }
