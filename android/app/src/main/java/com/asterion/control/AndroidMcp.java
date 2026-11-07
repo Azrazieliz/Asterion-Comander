@@ -48,6 +48,10 @@ final class AndroidMcp {
       "action","string","x","number","y","number","x2","number","y2","number",
       "duration_ms","integer","text","string"),"action"));
     tools.put(tool("control_phone_apps","Discover launchable installed Android apps",null));
+    tools.put(tool("control_phone_app_bridges","List installed partner app bridges and on-device approval state",null));
+    tools.put(tool("control_phone_app_invoke","Invoke an owner-approved partner action once with a durable idempotency key",
+      args("package","string","action","string","request_id","string","payload","object"),
+      "package","action","request_id"));
     tools.put(tool("control_phone_app_launch","Request app launch when Control is foreground",
       args("package","string"),"package"));
     tools.put(tool("control_phone_chat_new","Request New chat navigation; requires external visual confirmation",null));
@@ -125,6 +129,8 @@ final class AndroidMcp {
         return textContent(new JSONObject().put("ok",access.action(args)));
       }
       case "control_phone_apps":return textContent(AppCatalog.list(owner));
+      case "control_phone_app_bridges":return textContent(AppBridge.list(owner));
+      case "control_phone_app_invoke":return textContent(AppBridge.invoke(owner,args));
       case "control_phone_app_launch":return textContent(AppCatalog.requestLaunch(owner,args.getString("package")));
       case "control_phone_chat_direct":{
         ControlAccessibilityService control=ControlAccessibilityService.active;
