@@ -212,6 +212,13 @@ def phone_voice_say(data:VoiceSay):
 def phone_voice_question(data:VoiceQuestion):
     return request('/voice/question','POST',data.model_dump(),timeout=10.0).json()
 
+class DirectChatMessage(BaseModel):
+    message: str = Field(min_length=1,max_length=3000)
+
+@router.post('/phone/chat/direct')
+def phone_chat_direct(data: DirectChatMessage):
+    return request('/chat/direct','POST',data.model_dump(),timeout=15.0).json()
+
 # Generic application transport for authorized Asterion projects.
 # The Android app must be foreground before dispatching launch intents.
 class AppLaunch(BaseModel):
