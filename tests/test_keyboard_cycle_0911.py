@@ -21,5 +21,5 @@ def test_keyboard_does_not_overwrite_user_draft_or_blindly_hit_enter():
     assert '.put("editor_package"' in s
 def test_release_911_uses_native_keyboard_not_privileged_adb():
     s=(ROOT/"android/app/build.gradle").read_text()
-    assert "versionCode 911" in s and "versionName '0.9.11'" in s
+    assert "versionCode 912" in s and "versionName '0.9.12'" in s
     assert "adb shell input" not in (MAIN/"ControlAccessibilityService.java").read_text()
