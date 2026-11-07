@@ -94,6 +94,7 @@ public final class MainActivity extends Activity {
   private TextView healthBattery,healthTemp,healthMemory,healthStorage,healthThermal,healthWifi,healthActionStatus,pcPerformanceActionStatus;
   private TextView remoteConnection,remotePlaceholder,agentConnection,captureConnection,accessConnection,phoneAddress,hostHealth,pairingFeedback,transferFeedback,updateFeedback,phoneBridgeFeedback;
   private String activeTransferId=null;
+  private LinearLayout phoneAccessAction,phoneCaptureAction,phoneStopAction,transferCancelAction;
   private DesignSystem.Meter batteryMeter,memoryMeter,storageMeter;
   private EditText serverUrl,serverToken,localAddress;
   private WebView web;
@@ -159,6 +160,15 @@ public final class MainActivity extends Activity {
     pages[0]=scrollHome();pages[1]=remotePage();pages[2]=scrollHealth();pages[3]=scrollDevices();
     for(View page:pages){page.setVisibility(View.GONE);stage.addView(page,new FrameLayout.LayoutParams(-1,-1));}
     buildNav();show(0);updateHealth();handler.postDelayed(ticker,3500);
+    // Owner-authorized continuation is persistent and controlled by the internal
+    // ledger. No diagnostic/transport toggles belong on the everyday UI.
+    try{ContinuationLedger.get(this).configure(true);}catch(Exception ignored){}
+    // Only check periodically; Android continues to approve every APK install.
+    long checked=prefs.getLong("last_auto_update_check_ms",0L);
+    if(System.currentTimeMillis()-checked>86400000L){
+      prefs.edit().putLong("last_auto_update_check_ms",System.currentTimeMillis()).apply();
+      handler.postDelayed(()->{if(!destroyed)UpdateManager.check(this,this::showUpdateFeedback);},3000);
+    }
     if(!prefs.getString("url","").isEmpty()&&!prefs.getString("token","").isEmpty()){
       handler.postDelayed(()->{if(AgentService.running)registerPhone();},1500);
     }
@@ -186,20 +196,17 @@ public final class MainActivity extends Activity {
   private ScrollView scroll(LinearLayout body){ScrollView view=new ScrollView(this);view.setFillViewport(false);view.setVerticalScrollBarEnabled(false);body.setPadding(dp(19),dp(14),dp(19),dp(28));view.addView(body);return view;}
   private View scrollHome(){homeBody=v();
     wide(homeBody,eyebrow("YOUR DEVICES · LIVE STATUS"));
-    sectionTitle(homeBody,"Control without limits.","Your computer and phone in one clear workspace.");gap(homeBody,19);
+    sectionTitle(homeBody,"Your devices.","Phone and Windows control, with live status.");gap(homeBody,19);
     LinearLayout hero=card();hero.setBackground(DesignSystem.gradient(this,0xFF342754,0xFF172A42,25));
     LinearLayout r=h();r.addView(squareIcon("monitor",0xFFD4C9FF));LinearLayout copy=v();copy.setPadding(dp(13),0,0,0);
     copy.addView(eyebrow("WINDOWS COMPUTER"));margin(copy,t("LAPTOP-1LI4VRCJ",17,DesignSystem.TEXT,true),5);r.addView(copy,new LinearLayout.LayoutParams(0,-2,1));wide(hero,r);
     pcConnection=t("Checking your computer…",12.5f,DesignSystem.MUTED,false);margin(hero,pcConnection,17);
-    gap(hero,17);button(hero,"Open remote desktop","monitor",true,()->show(1));gap(hero,9);
-    button(hero,"Change connection","settings",false,()->show(3));wide(homeBody,hero);gap(homeBody,12);
+    gap(hero,17);button(hero,"Open remote desktop","monitor",true,()->show(1));wide(homeBody,hero);gap(homeBody,12);
     LinearLayout phone=clickableCard(()->show(3));LinearLayout phoneR=h();phoneR.addView(squareIcon("phone",DesignSystem.TEAL));
     LinearLayout phoneCopy=v();phoneCopy.setPadding(dp(12),0,0,0);phoneCopy.addView(eyebrow("ANDROID · THIS PHONE"));
     margin(phoneCopy,t(Build.MODEL,15,DesignSystem.TEXT,true),6);
     homeAgent=t("Remote access is off",12,DesignSystem.MUTED,false);margin(phoneCopy,homeAgent,6);
     phoneR.addView(phoneCopy,new LinearLayout.LayoutParams(0,-2,1));phoneR.addView(icon("arrow",DesignSystem.MUTED,19));wide(phone,phoneR);wide(homeBody,phone);
-    gap(homeBody,25);wide(homeBody,eyebrow("ONE-TAP CONTROLS"));gap(homeBody,11);
-    LinearLayout quick=v();twoActions(quick,"Share my screen","share",this::beginCapture,"Allow remote access","power",this::startAgent);wide(homeBody,quick);
     gap(homeBody,26);LinearLayout healthTitle=h();healthTitle.addView(eyebrow("PHONE HEALTH"),new LinearLayout.LayoutParams(0,-2,1));
     TextView details=t("VIEW ALL  ›",11,DesignSystem.PURPLE,true);details.setOnClickListener(w->show(2));healthTitle.addView(details);wide(homeBody,healthTitle);gap(homeBody,11);
     LinearLayout metrics=h();metrics.setGravity(Gravity.TOP);
@@ -251,28 +258,11 @@ public final class MainActivity extends Activity {
     gap(meters,16);wide(meters,t("MEMORY IN USE",10,DesignSystem.MUTED,true));gap(meters,8);memoryMeter=new DesignSystem.Meter(this,DesignSystem.PURPLE);wide(meters,memoryMeter);
     gap(meters,16);wide(meters,t("INTERNAL STORAGE IN USE",10,DesignSystem.MUTED,true));gap(meters,8);storageMeter=new DesignSystem.Meter(this,DesignSystem.WARNING);wide(meters,storageMeter);
     wide(healthBody,meters);gap(healthBody,12);
-    LinearLayout actions=card();
-    rowTitle(actions,"Active performance manager",
-      "Adjust Control workload to respond to heat, RAM pressure, and foreground demands",
-      icon("activity",DesignSystem.TEAL,23));
-    gap(actions,12);
-    healthActionStatus=t("Reading active controls…",12,DesignSystem.MUTED,false);
-    wide(actions,healthActionStatus);gap(actions,12);
-    button(actions,"Prioritize foreground app · 20 min","power",true,()->applyPerformanceAction("boost"));
-    gap(actions,8);
-    button(actions,"Automatic thermal / memory protection","check",false,
-      ()->applyPerformanceAction("automatic"));
-    gap(actions,8);
-    button(actions,"Restore full screen capture quality","monitor",false,
-      ()->applyPerformanceAction("full"));
-    gap(actions,8);
-    button(actions,"Low-overhead Control mode","activity",false,
-      ()->applyPerformanceAction("quiet"));
-    gap(actions,10);
-    wide(actions,t("These actions change real capture frequency, JPEG encoding, and "
-      +"optional observation sampling. Phone input, voice, and continuation remain active. "
-      +"Thermal safety overrides manual modes.",11,DesignSystem.MUTED,false));
-    wide(healthBody,actions);gap(healthBody,12);LinearLayout store=card();healthStorage=t("—",18,DesignSystem.TEXT,true);metricRow(store,"Internal storage",null,healthStorage,DesignSystem.PURPLE);margin(healthBody,store,0);
+    LinearLayout safety=card();rowTitle(safety,"Automatic protection",
+      "Thermal and memory safeguards manage Control overhead",icon("activity",DesignSystem.TEAL,23));
+    gap(safety,9);healthActionStatus=t("Automatic management is active",12,DesignSystem.MUTED,false);
+    wide(safety,healthActionStatus);wide(healthBody,safety);
+    gap(healthBody,12);LinearLayout store=card();healthStorage=t("—",18,DesignSystem.TEXT,true);metricRow(store,"Internal storage",null,healthStorage,DesignSystem.PURPLE);margin(healthBody,store,0);
     gap(healthBody,12);LinearLayout network=card();healthWifi=t("Checking…",17,DesignSystem.TEXT,true);metricRow(network,"Network",null,healthWifi,DesignSystem.TEAL);wide(healthBody,network);
     gap(healthBody,24);wide(healthBody,eyebrow("REMOTE SERVICES"));gap(healthBody,10);
     LinearLayout services=card();agentConnection=serviceLine(services,"Phone agent","power");services.addView(line(),new LinearLayout.LayoutParams(-1,dp(1)));
@@ -280,15 +270,6 @@ public final class MainActivity extends Activity {
     accessConnection=serviceLine(services,"Input access","shield");wide(healthBody,services);
     gap(healthBody,24);wide(healthBody,eyebrow("WINDOWS HEALTH"));gap(healthBody,10);
     LinearLayout windows=card();hostHealth=t("Connect your Windows agent to see its CPU, memory, storage and temperature sensors.",12,DesignSystem.MUTED,false);wide(windows,hostHealth);
-    gap(windows,12);
-    pcPerformanceActionStatus=t("Windows job controls adjust only jobs launched through Control.",11,DesignSystem.MUTED,false);
-    wide(windows,pcPerformanceActionStatus);
-    gap(windows,10);
-    button(windows,"Favor PC foreground apps","activity",true,
-      ()->managePcPerformance("favor_foreground"));
-    gap(windows,8);
-    button(windows,"Restore managed PC job priority","check",false,
-      ()->managePcPerformance("restore"));
     wide(healthBody,windows);
     return scroll(healthBody);
   }
@@ -308,8 +289,10 @@ public final class MainActivity extends Activity {
     LinearLayout summary=card();summary.setBackground(DesignSystem.gradient(this,0xFF28334B,0xFF182A38,23));
     rowTitle(summary,"Windows computer","Your remote desktop and device resources",icon("monitor",DesignSystem.PURPLE,25));
     gap(summary,12);remoteConnection=t("Checking saved connection…",12,DesignSystem.MUTED,false);wide(summary,remoteConnection);
-    gap(summary,16);twoActions(summary,"Open desktop","monitor",()->show(1),"Repair connection","refresh",this::repairDeviceLink);
-    gap(summary,10);button(summary,"Find my Windows computer","devices",true,this::discoverComputer);
+    gap(summary,16);
+    if(prefs.getString("url","").isEmpty())
+      button(summary,"Find Windows computer","devices",true,this::discoverComputer);
+    else button(summary,"Reconnect Windows","refresh",false,this::repairDeviceLink);
     gap(summary,10);pairingFeedback=t("Your phone is the controller. Connect once; the Windows worker follows.",12,DesignSystem.MUTED,false);
     pairingFeedback.setMaxLines(5);wide(summary,pairingFeedback);
     wide(devicesBody,summary);
@@ -317,90 +300,33 @@ public final class MainActivity extends Activity {
     gap(devicesBody,12);LinearLayout phone=card();
     rowTitle(phone,"This Android phone","Optional incoming screen and touch access",icon("phone",DesignSystem.TEAL,23));
     gap(phone,12);phoneAddress=t("Checking phone access…",12,DesignSystem.MUTED,false);wide(phone,phoneAddress);
-    gap(phone,16);button(phone,"Enable phone remote control","shield",true,this::enablePhoneControl);
-    gap(phone,9);button(phone,"Share screen · Android permission","share",false,this::beginCapture);
-    gap(phone,9);button(phone,"Check direct Control link","activity",false,this::showAwayFromHomeStatus);
-     gap(phone,9);button(phone,"Keep access active during long sessions","power",false,this::showBatterySetup);
-     gap(phone,9);button(phone,"Disable phone access","power",false,()->{stopService(new Intent(this,CaptureService.class));stopAgent();});
+    gap(phone,13);phoneAccessAction=v();
+    button(phoneAccessAction,"Grant phone access","shield",true,this::enablePhoneControl);
+    wide(phone,phoneAccessAction);
+    phoneCaptureAction=v();
+    button(phoneCaptureAction,"Start screen sharing","share",false,this::beginCapture);
+    wide(phone,phoneCaptureAction);
+    phoneStopAction=v();
+    button(phoneStopAction,"Stop phone access","power",false,
+      ()->{stopService(new Intent(this,CaptureService.class));stopAgent();});
+    wide(phone,phoneStopAction);
     wide(devicesBody,phone);
 
-    gap(devicesBody,12);LinearLayout privateBridge=card();
-    rowTitle(privateBridge,"Direct phone relay",
-      "Private GitHub command channel · no MCP, tunnel, or Windows worker",
-      icon("shield",DesignSystem.TEAL,23));
-    gap(privateBridge,10);
-    phoneBridgeFeedback=t(PhoneGitBridge.enabled(this)
-      ?"Enabled · awaiting live polling receipt"
-      :"Not enabled · phone cannot receive private queue commands",
-      12,DesignSystem.MUTED,false);
-    wide(privateBridge,phoneBridgeFeedback);
-    gap(privateBridge,12);
-    button(privateBridge,"Enable private phone relay","check",true,this::enablePrivatePhoneRelay);
-    gap(privateBridge,9);
-    button(privateBridge,"Check live relay status","activity",false,this::showPrivatePhoneRelayStatus);
-    gap(privateBridge,9);
-    button(privateBridge,"Disable phone relay","power",false,this::disablePrivatePhoneRelay);
-    gap(privateBridge,9);
-    wide(privateBridge,t("Optional owner-authorized fallback. A repository-scoped GitHub token "
-      +"is encrypted on this phone and never sent to ChatGPT. The app checks "
-      +"only the private Asterion-Control-Bridge command queue and returns "
-      +"execution receipts. Phone permissions still apply.",
-      11,DesignSystem.MUTED,false));
-    wide(devicesBody,privateBridge);
-
-    gap(devicesBody,12);LinearLayout handoff=card();
-    rowTitle(handoff,"ChatGPT checkpoint continuation",
-      "Phone-owned · no AI model or paid API inside Control",icon("refresh",DesignSystem.TEAL,22));
-    gap(handoff,12);
-    button(handoff,"Enable checkpoint continuation","check",true,this::enableCheckpointContinuation);
-    gap(handoff,9);button(handoff,"Pause all continuation","power",false,this::pauseCheckpointContinuation);
-    gap(handoff,9);button(handoff,"Inspect operator checkpoint","activity",false,this::showCycleStatus);
-    gap(handoff,9);
-    wide(handoff,t("Only a queued, spec-referenced checkpoint is sent. Existing drafts are never overwritten; Android and ChatGPT limits still apply.",11,DesignSystem.MUTED,false));
-    wide(devicesBody,handoff);
-
-    gap(devicesBody,12);LinearLayout observation=card();
-    rowTitle(observation,"Cross-app screen observation",
-      "Local screen evidence & events · no embedded AI",icon("activity",DesignSystem.TEAL,23));
-    gap(observation,12);
-    button(observation,"Observe selected application","share",true,this::startAsterionObservation);
-    gap(observation,9);button(observation,"Stop observation","power",false,this::stopAsterionObservation);
-    gap(observation,9);
-    wide(observation,t("Requires Android screen-sharing approval. Records only the explicitly selected foreground application; Control does not analyze or replace app engines.",11,DesignSystem.MUTED,false));
-    wide(devicesBody,observation);
-
-    gap(devicesBody,12);LinearLayout voice=card();
-    rowTitle(voice,"Spoken questions during gameplay",
-      "Android speaker → on-device recognition → transcript",icon("activity",DesignSystem.PURPLE,22));
-    gap(voice,12);button(voice,"Enable spoken questions","check",true,this::startVoiceQuestions);
-    gap(voice,9);button(voice,"Test speaker and microphone now","activity",true,
-      this::testVoiceDialogue);
-    gap(voice,8);voiceTestStatus=t("Not tested on this device",12,DesignSystem.MUTED,false);
-    wide(voice,voiceTestStatus);
-    gap(voice,9);button(voice,"Stop microphone session","power",false,()->{
-      stopService(new Intent(this,VoiceDialogueService.class));
-      toast("Voice question session stopped");
-    });
-    gap(voice,9);button(voice,"Inspect speech / answer status","activity",false,
-      this::showVoiceAnswerStatus);
-    gap(voice,9);wide(voice,t("The speaker asks the question first; microphone recognition "
-      +"stops on answer, error or timeout. The external ChatGPT operator reads "
-      +"the answer through Control and acknowledges it before another question.",
-      11,DesignSystem.MUTED,false));
-    wide(devicesBody,voice);
+    // Private GitHub transport, ChatGPT checkpoints, app observation and
+    // test/debug speech controls continue through authenticated internal APIs.
+    // Do not duplicate internal developer switches in the normal Connect UI.
 
     gap(devicesBody,12);LinearLayout transfer=card();
     rowTitle(transfer,"Direct Wi-Fi file transfer","PC → Phone · Files are saved to Downloads/Asterion Control",icon("download",DesignSystem.TEAL,24));
     gap(transfer,12);button(transfer,"Send a PC file to this phone","share",true,this::promptWifiTransfer);
-    gap(transfer,9);button(transfer,"Cancel active transfer","power",false,this::cancelWifiTransfer);
+    transferCancelAction=v();button(transferCancelAction,"Cancel transfer","power",false,this::cancelWifiTransfer);
+    wide(transfer,transferCancelAction);transferCancelAction.setVisibility(View.GONE);
     gap(transfer,9);transferFeedback=t("No transfer active. Uses the existing private Wi-Fi connection, never GitHub or ADB.",12,DesignSystem.MUTED,false);
     transferFeedback.setMaxLines(6);wide(transfer,transferFeedback);wide(devicesBody,transfer);
 
     gap(devicesBody,12);LinearLayout updater=card();
     rowTitle(updater,"App updates & installation","Update without ADB · Android approval required",icon("download",DesignSystem.TEAL,22));
-    gap(updater,12);button(updater,"Check for Asterion Control updates","refresh",true,
-       ()->UpdateManager.check(this,this::showUpdateFeedback));
-    gap(updater,9);button(updater,"Install an APK from Downloads","download",false,this::pickInstallPackage);
+    gap(updater,12);button(updater,"Install an APK","download",true,this::pickInstallPackage);
     gap(updater,9);updateFeedback=t("Updates download over HTTPS, verify SHA-256 and open Android's installer. Never silent.",12,DesignSystem.MUTED,false);
     updateFeedback.setMaxLines(5);wide(updater,updateFeedback);
     wide(devicesBody,updater);
@@ -430,6 +356,7 @@ public final class MainActivity extends Activity {
   }
   private void transferStatus(String message){
     if(transferFeedback!=null)transferFeedback.setText(message);
+    if(transferCancelAction!=null)transferCancelAction.setVisibility(activeTransferId==null?View.GONE:View.VISIBLE);
   }
   private void enablePrivatePhoneRelay(){
     // Credentials are entered directly into the native app, never in a chat or
@@ -816,6 +743,12 @@ public final class MainActivity extends Activity {
     if(batteryMeter!=null)batteryMeter.setProgress(percent<0?0:(float)(percent/100));
     if(memoryMeter!=null)memoryMeter.setProgress((float)(1.0-(double)m.availMem/(double)m.totalMem));
     if(storageMeter!=null)storageMeter.setProgress((float)(1.0-(double)fs.getAvailableBytes()/(double)fs.getTotalBytes()));
+    if(phoneAccessAction!=null)phoneAccessAction.setVisibility(
+      ControlAccessibilityService.active==null?View.VISIBLE:View.GONE);
+    if(phoneCaptureAction!=null)phoneCaptureAction.setVisibility(
+      CaptureService.active?View.GONE:View.VISIBLE);
+    if(phoneStopAction!=null)phoneStopAction.setVisibility(
+      (AgentService.running||CaptureService.active)?View.VISIBLE:View.GONE);
     if(agentConnection!=null){agentConnection.setText(AgentService.running?"Enabled":"Off");agentConnection.setTextColor(AgentService.running?DesignSystem.TEAL:DesignSystem.MUTED);}
     if(captureConnection!=null){captureConnection.setText(CaptureService.active?"Streaming":"Off");captureConnection.setTextColor(CaptureService.active?DesignSystem.TEAL:DesignSystem.MUTED);}
     if(accessConnection!=null){accessConnection.setText(ControlAccessibilityService.active!=null?"Authorized":"Not enabled");accessConnection.setTextColor(ControlAccessibilityService.active!=null?DesignSystem.TEAL:DesignSystem.MUTED);}
