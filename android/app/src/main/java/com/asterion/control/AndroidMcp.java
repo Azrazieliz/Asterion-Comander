@@ -51,6 +51,8 @@ final class AndroidMcp {
     tools.put(tool("control_phone_app_launch","Request app launch when Control is foreground",
       args("package","string"),"package"));
     tools.put(tool("control_phone_chat_new","Request New chat navigation; requires external visual confirmation",null));
+    tools.put(tool("control_phone_chat_direct","Directly type and tap blue Send in the visible ChatGPT writing bar (no queue)",
+      args("message","string"),"message"));
     tools.put(tool("control_phone_continuation_status","Inspect owner-enabled checkpoint lifecycle",null));
     tools.put(tool("control_phone_continuation_queue","Queue canonical-project-referenced ChatGPT continuation",
       args("project","string","checkpoint_id","string","priority_tier","string",
@@ -124,6 +126,21 @@ final class AndroidMcp {
       }
       case "control_phone_apps":return textContent(AppCatalog.list(owner));
       case "control_phone_app_launch":return textContent(AppCatalog.requestLaunch(owner,args.getString("package")));
+      case "control_phone_chat_direct":{
+        ControlAccessibilityService control=ControlAccessibilityService.active;
+        if(control==null)throw new IllegalStateException("Accessibility not enabled");
+        String message=args.getString("message");
+        if(message.isBlank()||message.length()>3000)
+          throw new IllegalArgumentException("Invalid direct ChatGPT message");
+        if(!"com.openai.chatgpt".equals(control.currentPackage()))
+          return textContent(new JSONObject().put("sent",false).put("stage","foreground_requested")
+            .put("details",control.requestChatForeground()));
+        JSONObject keyboard=control.prepareChatKeyboard();
+        if(!keyboard.optBoolean("ready",false))
+          return textContent(new JSONObject().put("sent",false).put("stage","writing_bar_focus_requested")
+            .put("details",keyboard));
+        return textContent(control.sendChatMessage(message));
+      }
       case "control_phone_chat_new":{
         ControlAccessibilityService service=ControlAccessibilityService.active;
         if(service==null)throw new IllegalStateException("Accessibility not enabled");
