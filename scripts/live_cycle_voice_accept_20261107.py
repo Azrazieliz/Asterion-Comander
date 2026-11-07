@@ -67,7 +67,10 @@ def main():
     _,v=call('/voice/status')
     keys=('enabled','phase','microphone_active','on_device_recognition','android_system_recognition',
           'recognizer_backend','speaker_started','speaker_finished','voice','voice_quality',
-          'exclusive_audio_focus','error')
+          'exclusive_audio_focus','error','always_listening_enabled','ambient_recognizer_active',
+          'wake_word','recognized_wake_count','ambient_recognizer_failures',
+          'background_cpu_wake_held','screen_interactive','device_locked',
+          'voice_request_awaiting_send','last_voice_dispatch')
     print('VOICE',json.dumps({k:v.get(k) for k in keys},separators=(',',':')))
     return 0
 if __name__=='__main__':
