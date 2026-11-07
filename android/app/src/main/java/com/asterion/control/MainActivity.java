@@ -92,7 +92,7 @@ public final class MainActivity extends Activity {
   private final TextView[] tabLabels=new TextView[4];
   private TextView headerStatus,pcConnection,homeAgent,homeBattery,homeMemory,homeThermal;
   private TextView healthBattery,healthTemp,healthMemory,healthStorage,healthThermal,healthWifi,healthActionStatus,pcPerformanceActionStatus;
-  private TextView remoteConnection,remotePlaceholder,agentConnection,captureConnection,accessConnection,phoneAddress,hostHealth,pairingFeedback,transferFeedback,updateFeedback;
+  private TextView remoteConnection,remotePlaceholder,agentConnection,captureConnection,accessConnection,phoneAddress,hostHealth,pairingFeedback,transferFeedback,updateFeedback,phoneBridgeFeedback;
   private String activeTransferId=null;
   private DesignSystem.Meter batteryMeter,memoryMeter,storageMeter;
   private EditText serverUrl,serverToken,localAddress;
@@ -323,6 +323,30 @@ public final class MainActivity extends Activity {
      gap(phone,9);button(phone,"Disable phone access","power",false,()->{stopService(new Intent(this,CaptureService.class));stopAgent();});
     wide(devicesBody,phone);
 
+    gap(devicesBody,12);LinearLayout privateBridge=card();
+    rowTitle(privateBridge,"Direct phone relay",
+      "Private GitHub command channel · no MCP, tunnel, or Windows worker",
+      icon("shield",DesignSystem.TEAL,23));
+    gap(privateBridge,10);
+    phoneBridgeFeedback=t(PhoneGitBridge.enabled(this)
+      ?"Enabled · awaiting live polling receipt"
+      :"Not enabled · phone cannot receive private queue commands",
+      12,DesignSystem.MUTED,false);
+    wide(privateBridge,phoneBridgeFeedback);
+    gap(privateBridge,12);
+    button(privateBridge,"Enable private phone relay","check",true,this::enablePrivatePhoneRelay);
+    gap(privateBridge,9);
+    button(privateBridge,"Check live relay status","activity",false,this::showPrivatePhoneRelayStatus);
+    gap(privateBridge,9);
+    button(privateBridge,"Disable phone relay","power",false,this::disablePrivatePhoneRelay);
+    gap(privateBridge,9);
+    wide(privateBridge,t("Optional owner-authorized fallback. A repository-scoped GitHub token "
+      +"is encrypted on this phone and never sent to ChatGPT. The app checks "
+      +"only the private Asterion-Control-Bridge command queue and returns "
+      +"execution receipts. Phone permissions still apply.",
+      11,DesignSystem.MUTED,false));
+    wide(devicesBody,privateBridge);
+
     gap(devicesBody,12);LinearLayout handoff=card();
     rowTitle(handoff,"ChatGPT checkpoint continuation",
       "Phone-owned · no AI model or paid API inside Control",icon("refresh",DesignSystem.TEAL,22));
@@ -432,6 +456,86 @@ public final class MainActivity extends Activity {
   private void transferStatus(String message){
     if(transferFeedback!=null)transferFeedback.setText(message);
   }
+  private void enablePrivatePhoneRelay(){
+    // Credentials are entered directly into the native app, never in a chat or
+    // GitHub command file. Existing encrypted credentials can be reused.
+    try{
+      JSONObject state=PhoneGitBridge.status(this);
+      if(state.optBoolean("enabled")){
+        showPrivatePhoneRelayStatus();return;
+      }
+      if(state.optBoolean("token_present")){
+        new AlertDialog.Builder(this)
+          .setTitle("Enable direct phone relay")
+          .setMessage("Reuse the existing encrypted repository credential? No Windows worker, tunnel, or MCP is needed.")
+          .setPositiveButton("Enable",(dialog,which)->configurePrivatePhoneRelay("",true))
+          .setNegativeButton("Cancel",null).show();
+        return;
+      }
+    }catch(Exception e){toast("Phone bridge status unavailable");return;}
+    EditText credential=input("",true,"Fine-grained GitHub token");
+    LinearLayout layout=v();layout.setPadding(dp(18),dp(10),dp(18),0);
+    wide(layout,t("Create a GitHub token restricted to the private "
+      +"Azrazieliz/Asterion-Control-Bridge repository, with Contents: Read and write. "
+      +"Paste it here only. It is encrypted in Android Keystore storage.",
+      12,DesignSystem.MUTED,false));
+    gap(layout,12);wide(layout,credential);
+    new AlertDialog.Builder(this).setTitle("Enable direct phone relay")
+      .setView(layout)
+      .setPositiveButton("Enable",(dialog,which)->{
+        String token=credential.getText().toString().trim();
+        credential.setText("");
+        if(token.isEmpty()){toast("A repository-scoped token is required");return;}
+        configurePrivatePhoneRelay(token,true);
+      }).setNegativeButton("Cancel",null).show();
+  }
+  private void configurePrivatePhoneRelay(String token,boolean enabled){
+    if(phoneBridgeFeedback!=null)phoneBridgeFeedback.setText("Configuring private phone relay...");
+    io.execute(()->{
+      try{
+        JSONObject state=PhoneGitBridge.configure(this,token,enabled);
+        runOnUiThread(()->{
+          if(destroyed)return;
+          if(phoneBridgeFeedback!=null)phoneBridgeFeedback.setText(
+            state.optBoolean("enabled")?"Enabled · checking private command queue":"Relay disabled");
+          if(enabled)startAgent();
+          showPrivatePhoneRelayStatus();
+        });
+      }catch(Exception e){
+        runOnUiThread(()->{
+          if(phoneBridgeFeedback!=null)phoneBridgeFeedback.setText(
+            "Unable to configure relay: "+e.getClass().getSimpleName());
+        });
+      }
+    });
+  }
+  private void showPrivatePhoneRelayStatus(){
+    try{
+      JSONObject state=PhoneGitBridge.status(this);
+      boolean enabled=state.optBoolean("enabled");
+      long polled=state.optLong("last_poll_ms",0);
+      long success=state.optLong("last_success_ms",0);
+      String text=(enabled?"Enabled":"Disabled")
+        +" · credential: "+(state.optBoolean("token_present")?"saved":"missing")
+        +" · phone service: "+(AgentService.running?"running":"stopped")
+        +"\nLast poll: "+(polled>0?new java.util.Date(polled).toString():"never")
+        +"\nLast success: "+(success>0?new java.util.Date(success).toString():"never")
+        +"\nCompleted commands: "+state.optLong("completed",0)
+        +"\nLast error: "+state.optString("last_error","none");
+      if(phoneBridgeFeedback!=null)phoneBridgeFeedback.setText(
+        enabled?(success>0?"Connected to private queue":"Enabled · not yet verified"):
+        "Disabled");
+      new AlertDialog.Builder(this).setTitle("Private phone relay status")
+        .setMessage(text).setPositiveButton("Close",null).show();
+    }catch(Exception e){toast("Relay status unavailable");}
+  }
+  private void disablePrivatePhoneRelay(){
+    new AlertDialog.Builder(this).setTitle("Disable phone relay")
+      .setMessage("Stop polling the private command queue? The encrypted token will remain saved for later reactivation.")
+      .setPositiveButton("Disable",(dialog,which)->configurePrivatePhoneRelay("",false))
+      .setNegativeButton("Cancel",null).show();
+  }
+
   private void promptWifiTransfer(){
     if(prefs.getString("url","").isEmpty()||prefs.getString("token","").isEmpty()){
       toast("Pair your Windows computer first");return;
