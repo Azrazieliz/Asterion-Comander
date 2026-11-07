@@ -257,6 +257,22 @@ public final class AgentService extends Service {
       try{json(out,200,VoiceDialogueService.stopFromOwnerApi(this));}
       catch(Exception e){json(out,400,error(e.getMessage()));}return;
     }
+    if(method.equals("POST")&&path.equals("/voice/command")){
+      try {
+        VoiceDialogueService voice=VoiceDialogueService.active;
+        if(voice==null){json(out,503,error("Enable voice session first"));return;}
+        json(out,200,voice.beginOwnerVoiceControl(body.optString("locale","en-US")));
+      }catch(Exception e){json(out,409,error(e.getMessage()));}
+      return;
+    }
+    if(method.equals("POST")&&path.equals("/voice/say")){
+      try {
+        VoiceDialogueService voice=VoiceDialogueService.active;
+        if(voice==null){json(out,503,error("Enable voice session first"));return;}
+        json(out,200,voice.sayOnly(body.getString("text"),body.optString("locale","en-US")));
+      }catch(Exception e){json(out,409,error(e.getMessage()));}
+      return;
+    }
     if(method.equals("POST")&&path.equals("/voice/question")){
       try {
         VoiceDialogueService voice=VoiceDialogueService.active;
