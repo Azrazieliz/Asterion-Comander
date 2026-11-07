@@ -235,10 +235,25 @@ final class ContinuationCycle {
         save();return status();
       }
       if("queued".equals(current)&&"queued".equals(phase)) {
-        // Do not send to any other foreground application.
+        // The actual phone keyboard is the only submission mechanism.
+        // Recover foreground if Android SystemUI or another app interrupted it.
         ControlAccessibilityService access=ControlAccessibilityService.active;
-        if(access!=null&&"com.openai.chatgpt".equals(access.currentPackage())){
-          try{ledger.dispatch();}catch(Exception ignored){}
+        if(access!=null){
+          String foreground=access.currentPackage();
+          if("com.openai.chatgpt".equals(foreground)){
+            try{ledger.dispatch();}catch(Exception e){
+              state.put("last_error","Keyboard handoff deferred: "+e.getClass().getSimpleName());
+              save();
+            }
+          }else{
+            long now=System.currentTimeMillis();
+            if(now-state.optLong("last_foreground_request_ms",0L)>14000L){
+              JSONObject launch=access.requestChatForeground();
+              state.put("last_foreground_request_ms",now)
+                .put("last_foreground_request",launch.optString("reason","requested"));
+              save();
+            }
+          }
         }
       }
       if("submitted_unverified".equals(current)&&"queued".equals(phase)) {
