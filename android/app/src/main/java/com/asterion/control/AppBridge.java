@@ -155,4 +155,50 @@ final class AppBridge {
         .put("retry_safe",false);
     }
   }
+  /** Query an already submitted operation; no action replay occurs. */
+  static JSONObject operation(Context ctx,String pkg,String requestId,boolean cancel)throws Exception{
+    if(!REQUEST_ID.matcher(requestId).matches())throw new IllegalArgumentException("Invalid request ID");
+    provider(ctx,pkg);
+    String cert=prefs(ctx).getString("approved:"+pkg,"");
+    if(cert.isEmpty()||!cert.equals(signer(ctx,pkg)))
+      throw new SecurityException("Bridge approval missing or signing identity changed");
+    String saved=prefs(ctx).getString("request:"+requestId,"");
+    if(!saved.startsWith(pkg+"/")||saved.indexOf('|')<0)
+      throw new IllegalArgumentException("No matching previously submitted request");
+    Bundle extras=new Bundle();
+    extras.putInt("protocol_version",1);
+    extras.putString("request_id",requestId);
+    String operation=cancel?"asterion.v1.cancel":"asterion.v1.status";
+    try{
+      Future<Bundle> executing=CALLS.submit(()->ctx.getContentResolver().call(
+        Uri.parse("content://"+authority(pkg)),operation,requestId,extras));
+      Bundle reply;
+      try{reply=executing.get(6L,TimeUnit.SECONDS);}
+      catch(TimeoutException timeout){
+        executing.cancel(true);
+        throw new IllegalStateException("Partner outcome uncertain");
+      }
+      if(reply==null)throw new IllegalStateException("No partner response");
+      String raw=reply.getString("result_json","");
+      if(raw.length()>8192)throw new IllegalStateException("Partner response too long");
+      JSONObject result=raw.isEmpty()?new JSONObject():new JSONObject(raw);
+      String outcome=result.optString("status",cancel?"cancel_requested":"status_unknown");
+      if(!outcome.matches("[a-z_]{2,35}"))outcome="status_unknown";
+      if(!cancel){
+        String action=saved.substring(pkg.length()+1,saved.indexOf('|'));
+        synchronized(LOCK){
+          prefs(ctx).edit().putString("request:"+requestId,pkg+"/"+action+"|"+outcome).commit();
+        }
+      }
+      return new JSONObject().put("ok",result.optBoolean("ok",true))
+        .put("package",pkg).put("request_id",requestId)
+        .put("status",outcome).put("result",result);
+    }catch(Exception e){
+      return new JSONObject().put("ok",false).put("package",pkg)
+        .put("request_id",requestId).put("status","outcome_unknown")
+        .put("reason","Partner did not confirm "+(cancel?"cancellation":"status")+
+          ": "+e.getClass().getSimpleName()).put("retry_safe",false);
+    }
+  }
+
 }
