@@ -34,6 +34,8 @@ import java.util.ArrayList;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
+import java.util.regex.Matcher;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -78,6 +80,106 @@ public final class VoiceDialogueService extends Service {
   private final AtomicBoolean voiceRequestDispatching=new AtomicBoolean(false);
   private volatile long lastVoiceDispatchAt=0L;
   private BroadcastReceiver unlockedReceiver;
+  static final String ALWAYS_ON_PREF="voice_always_on_enabled";
+  private static final Pattern WAKE_REQUEST=Pattern.compile(
+    "(?i)^\\s*(?:(?:hey|okay|ok)\\s+)?asterion[\\s,:;.!?-]*(.*)$");
+  private volatile boolean ambientEnabled=false;
+  private volatile boolean ambientCapture=false;
+  private volatile boolean ambientAwaitingCommand=false;
+  private volatile boolean preferSystemRecognizer=false;
+  private volatile int ambientErrors=0;
+  private volatile int recognizedWakeCount=0;
+  private Runnable ambientRetry;
+  private PowerManager.WakeLock ambientWakeLock;
+  private Runnable ambientWakeRefresh;
+  private void updateAmbientWake(){
+    if(!ambientEnabled||active!=this)return;
+    PowerManager pm=getSystemService(PowerManager.class);
+    if(pm!=null){
+      if(ambientWakeLock==null)
+        ambientWakeLock=pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"AsterionControl:AmbientVoice");
+      if(!ambientWakeLock.isHeld())ambientWakeLock.acquire(180000L);
+    }
+    ambientWakeRefresh=()->{if(ambientEnabled&&active==this){
+      if(ambientWakeLock!=null&&ambientWakeLock.isHeld())ambientWakeLock.release();
+      updateAmbientWake();
+    }};
+    ui.postDelayed(ambientWakeRefresh,90000L);
+  }
+  private void stopAmbientWake(){
+    if(ambientWakeRefresh!=null)ui.removeCallbacks(ambientWakeRefresh);
+    ambientWakeRefresh=null;
+    if(ambientWakeLock!=null&&ambientWakeLock.isHeld())ambientWakeLock.release();
+  }
+  private void cancelAmbient(){
+    if(ambientRetry!=null)ui.removeCallbacks(ambientRetry);
+    ambientRetry=null;
+    if(ambientCapture){
+      ambientCapture=false;
+      clearDeadline();
+      if(listener!=null){listener.cancel();listener.destroy();listener=null;}
+      microphoneActive=false;
+    }
+  }
+  private void scheduleAmbient(long delayMs){
+    if(ambientRetry!=null)ui.removeCallbacks(ambientRetry);
+    ambientRetry=()->{
+      ambientRetry=null;
+      if(active!=this||!ambientEnabled||!pendingOwnerSpeech.isEmpty()||
+        ownerCommandMode||"speaking".equals(phase)||"processing".equals(phase)||
+        ambientCapture||("answered".equals(phase)&&!consumed))return;
+      if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){
+        state("failed","Android microphone permission revoked");return;
+      }
+      if(!SpeechRecognizer.isRecognitionAvailable(this)&&
+        !(Build.VERSION.SDK_INT>=31&&SpeechRecognizer.isOnDeviceRecognitionAvailable(this))){
+        state("failed","No speech recognition service installed");return;
+      }
+      String id="ambient-"+System.currentTimeMillis();
+      questionId=id;question="";transcript="";consumed=true;
+      ambientCapture=true;
+      boolean offline=!preferSystemRecognizer&&Build.VERSION.SDK_INT>=31
+        &&SpeechRecognizer.isOnDeviceRecognitionAvailable(this);
+      try{beginRecognition("en-US",id,offline);}
+      catch(Exception e){
+        ambientCapture=false;
+        ambientErrors++;
+        state("ambient_retry","Recognition unavailable: "+e.getClass().getSimpleName());
+        scheduleAmbient(Math.min(30000L,1000L*(1L<<Math.min(5,ambientErrors))));
+      }
+    };
+    ui.postDelayed(ambientRetry,delayMs);
+  }
+  private void onAmbientTranscript(String heard){
+    String speech=heard==null?"":heard.trim();
+    Matcher match=WAKE_REQUEST.matcher(speech);
+    String command="";
+    if(ambientAwaitingCommand){
+      ambientAwaitingCommand=false;
+      command=speech;
+    }else if(match.matches()){
+      command=match.group(1).trim();
+      recognizedWakeCount++;
+      if(command.isEmpty())ambientAwaitingCommand=true;
+    }
+    if(!command.isEmpty()){
+      pendingOwnerSpeech=command;
+      lastVoiceDispatch="recognized_ambient_wake";
+      onChatWindowVisible();
+    }else if(ambientEnabled){
+      state("ambient_ready","");
+      scheduleAmbient(300L);
+    }
+  }
+  static void ensureOwnerRequestedAlwaysOn(Context owner){
+    if(owner.checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)
+      return;
+    if(active!=null)return;
+    if(!owner.getSharedPreferences("voice_style",MODE_PRIVATE).getBoolean(ALWAYS_ON_PREF,false))
+      return;
+    try{owner.startForegroundService(new Intent(owner,VoiceDialogueService.class));}
+    catch(RuntimeException e){android.util.Log.w("AsterionVoice","Foreground microphone start denied",e);}
+  }
   private void keepCpuForExchange() {
     PowerManager pm=(PowerManager)getSystemService(POWER_SERVICE);
     if(pm==null)throw new IllegalStateException("Power manager unavailable");
@@ -154,7 +256,7 @@ public final class VoiceDialogueService extends Service {
     phase=value;error=message;updatedAt=System.currentTimeMillis();
     if("answered".equals(value)||"failed".equals(value)||"acknowledged".equals(value)
         ||"ready".equals(value)||"delivered".equals(value)
-        ||"awaiting_device".equals(value)) {
+        ||"awaiting_device".equals(value)||"ambient_ready".equals(value)) {
       releaseAudioFocus();
       releaseCpuForExchange();
     }
@@ -182,6 +284,7 @@ public final class VoiceDialogueService extends Service {
         pendingLocalTest=false;
         ui.post(this::localVoiceTest);
       }
+      if(speakerReady&&ambientEnabled)scheduleAmbient(500L);
       if(speakerReady&&pendingOwnerTalk&&active==this){
         pendingOwnerTalk=false;
         ui.post(()->{
@@ -214,6 +317,9 @@ public final class VoiceDialogueService extends Service {
   }
   @Override public int onStartCommand(Intent intent,int flags,int startId){
     if(intent!=null&&"STOP".equals(intent.getAction())){
+      getSharedPreferences("voice_style",MODE_PRIVATE).edit()
+        .putBoolean(ALWAYS_ON_PREF,false).apply();
+      ambientEnabled=false;cancelAmbient();stopAmbientWake();
       stopSelf();return START_NOT_STICKY;
     }
     if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){
@@ -222,6 +328,14 @@ public final class VoiceDialogueService extends Service {
     startForeground(NOTIFICATION_ID,notification(),
       ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
     active=this;
+    ambientEnabled=getSharedPreferences("voice_style",MODE_PRIVATE)
+      .getBoolean(ALWAYS_ON_PREF,true);
+    if(ambientEnabled){
+      getSharedPreferences("voice_style",MODE_PRIVATE).edit()
+        .putBoolean(ALWAYS_ON_PREF,true).apply();
+      if(ambientWakeRefresh==null)updateAmbientWake();
+      if(speakerReady)scheduleAmbient(400L);
+    }
     if(intent!=null&&"TALK".equals(intent.getAction())){
       pendingOwnerTalk=true;
       if(speakerReady){
@@ -236,7 +350,7 @@ public final class VoiceDialogueService extends Service {
       if(speakerReady){pendingLocalTest=false;ui.post(this::localVoiceTest);}
       else state("initializing","Awaiting Android text-to-speech startup");
     }else if(!speakerReady)state("initializing","");
-    return START_NOT_STICKY;
+    return START_STICKY;
   }
   // Owner-only native API, with Android microphone consent and foreground rules.
   static JSONObject enableFromOwnerApi(Context owner)throws Exception{
@@ -246,11 +360,15 @@ public final class VoiceDialogueService extends Service {
     if(running!=null)return running.report();
     if(MainActivity.foregroundActivity()==null)
       throw new IllegalStateException("Open Asterion Control on phone before enabling voice in the foreground");
+    owner.getSharedPreferences("voice_style",MODE_PRIVATE).edit()
+      .putBoolean(ALWAYS_ON_PREF,true).apply();
     owner.startForegroundService(new Intent(owner,VoiceDialogueService.class));
     return new JSONObject().put("ok",true).put("start_requested",true).put("phase","initializing");
   }
   static JSONObject stopFromOwnerApi(Context owner)throws Exception{
     boolean wasRunning=active!=null;
+    owner.getSharedPreferences("voice_style",MODE_PRIVATE).edit()
+      .putBoolean(ALWAYS_ON_PREF,false).apply();
     owner.stopService(new Intent(owner,VoiceDialogueService.class));
     return new JSONObject().put("ok",true).put("stop_requested",true).put("was_running",wasRunning);
   }
@@ -271,7 +389,9 @@ public final class VoiceDialogueService extends Service {
       if(!text.equals(question))throw new IllegalStateException("Question ID was already used");
       return report();  // Safe retry: never speak a question twice.
     }
-    if("speaking".equals(phase)||"listening".equals(phase)||"processing".equals(phase))
+    if(ambientCapture)cancelAmbient();
+    if("speaking".equals(phase)||("listening".equals(phase)&&!ambientCapture)||
+       ("processing".equals(phase)&&!ambientCapture))
       throw new IllegalStateException("Another voice exchange is active");
     if("answered".equals(phase)&&!consumed)
       throw new IllegalStateException("Previous voice answer has not been acknowledged");
@@ -368,8 +488,10 @@ public final class VoiceDialogueService extends Service {
           speakerPlaybackCompleted=true;
           ui.post(()->{
             releaseAudioFocus();
-            if(speakOnly){clearDeadline();speakOnly=false;state("ready","");}
-            else startListening(locale,id);
+            if(speakOnly){
+              clearDeadline();speakOnly=false;state("ready","");
+              if(ambientEnabled)scheduleAmbient(450L);
+            }else startListening(locale,id);
           });
         }
       }
@@ -414,7 +536,7 @@ public final class VoiceDialogueService extends Service {
     recognizerBackend=offline?"on_device":"android_system";
     listener=offline?SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
       :SpeechRecognizer.createSpeechRecognizer(this);
-    scheduleDeadline(id,ANSWER_TIMEOUT_MS);
+    scheduleDeadline(id,ambientCapture?20000L:ANSWER_TIMEOUT_MS);
     final String backend=recognizerBackend;
     listener.setRecognitionListener(new RecognitionListener(){
       @Override public void onReadyForSpeech(Bundle extras){
@@ -436,6 +558,7 @@ public final class VoiceDialogueService extends Service {
             || code==SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED
             || code==SpeechRecognizer.ERROR_CLIENT)
             && SpeechRecognizer.isRecognitionAvailable(VoiceDialogueService.this)){
+          preferSystemRecognizer=true;
           state("fallback","Offline recognizer unavailable (error "+code+"); trying Android system speech");
           ui.post(()->{
             if(active!=VoiceDialogueService.this||!id.equals(questionId))return;
@@ -448,14 +571,32 @@ public final class VoiceDialogueService extends Service {
           });
           return;
         }
-        clearDeadline();state("failed",speechError(code));
+        clearDeadline();
+        boolean ambient=ambientCapture;
+        ambientCapture=false;
         ui.post(()->{if(listener!=null){listener.destroy();listener=null;}});
+        if(ambient&&ambientEnabled){
+          ambientErrors=code==SpeechRecognizer.ERROR_NO_MATCH||
+            code==SpeechRecognizer.ERROR_SPEECH_TIMEOUT?0:Math.min(6,ambientErrors+1);
+          state("ambient_retry",speechError(code));
+          scheduleAmbient(ambientErrors==0?400L:
+            Math.min(30000L,600L*(1L<<Math.min(5,ambientErrors))));
+        }else state("failed",speechError(code));
       }
       @Override public void onResults(Bundle results){
         if(!id.equals(questionId)||!backend.equals(recognizerBackend))return;
         microphoneActive=false;clearDeadline();
         ArrayList<String> phrases=results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
         transcript=phrases==null||phrases.isEmpty()?"":phrases.get(0);
+        if(ambientCapture){
+          ambientCapture=false;ambientErrors=0;
+          String detected=transcript;
+          transcript="";
+          state("ambient_ready","");
+          ui.post(()->{if(listener!=null){listener.destroy();listener=null;}});
+          onAmbientTranscript(detected);
+          return;
+        }
         boolean command=ownerCommandMode;
         ownerCommandMode=false;
         state(transcript.isEmpty()?"failed":command?"processing":"answered",
@@ -506,6 +647,7 @@ public final class VoiceDialogueService extends Service {
     if(text==null||text.isBlank()||text.length()>700||
        locale==null||!locale.matches("[a-z]{2}(-[A-Z]{2})?"))
       throw new IllegalArgumentException("Invalid spoken reply");
+    if(ambientCapture)cancelAmbient();
     if("listening".equals(phase)||"processing".equals(phase)||"speaking".equals(phase))
       throw new IllegalStateException("Voice conversation is busy");
     acquireAudioFocus();
@@ -626,6 +768,12 @@ public final class VoiceDialogueService extends Service {
       .put("question",question).put("transcript",transcript)
       .put("microphone_active",microphoneActive)
       .put("voice_control_active",ownerCommandMode)
+      .put("always_listening_enabled",ambientEnabled)
+      .put("ambient_recognizer_active",ambientCapture)
+      .put("wake_word","asterion")
+      .put("recognized_wake_count",recognizedWakeCount)
+      .put("ambient_recognizer_failures",ambientErrors)
+      .put("background_cpu_wake_held",ambientWakeLock!=null&&ambientWakeLock.isHeld())
       .put("last_voice_dispatch",lastVoiceDispatch)
       .put("voice_request_awaiting_send",!pendingOwnerSpeech.isEmpty())
       .put("speaker_started",speakerPlaybackStarted)
@@ -653,6 +801,7 @@ public final class VoiceDialogueService extends Service {
       releaseAudioFocus();
       releaseCpuForExchange();
     });
+    ambientEnabled=false;cancelAmbient();stopAmbientWake();
     voiceControlWorker.shutdownNow();
     super.onDestroy();
   }
