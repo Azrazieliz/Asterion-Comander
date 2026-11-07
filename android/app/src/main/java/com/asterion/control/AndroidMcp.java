@@ -52,6 +52,8 @@ final class AndroidMcp {
     tools.put(tool("control_phone_app_invoke","Invoke an owner-approved partner action once with a durable idempotency key",
       args("package","string","action","string","request_id","string","payload","object"),
       "package","action","request_id"));
+    tools.put(tool("control_phone_app_operation","Read status or request cancellation of an already-submitted app operation",
+      args("package","string","request_id","string","cancel","boolean"),"package","request_id"));
     tools.put(tool("control_phone_app_launch","Request app launch when Control is foreground",
       args("package","string"),"package"));
     tools.put(tool("control_phone_chat_new","Request New chat navigation; requires external visual confirmation",null));
@@ -131,6 +133,8 @@ final class AndroidMcp {
       case "control_phone_apps":return textContent(AppCatalog.list(owner));
       case "control_phone_app_bridges":return textContent(AppBridge.list(owner));
       case "control_phone_app_invoke":return textContent(AppBridge.invoke(owner,args));
+      case "control_phone_app_operation":return textContent(AppBridge.operation(owner,
+        args.getString("package"),args.getString("request_id"),args.optBoolean("cancel",false)));
       case "control_phone_app_launch":return textContent(AppCatalog.requestLaunch(owner,args.getString("package")));
       case "control_phone_chat_direct":{
         ControlAccessibilityService control=ControlAccessibilityService.active;
