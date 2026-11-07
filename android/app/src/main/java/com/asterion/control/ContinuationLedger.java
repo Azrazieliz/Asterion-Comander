@@ -130,6 +130,13 @@ final class ContinuationLedger {
     }
     ControlAccessibilityService service = ControlAccessibilityService.active;
     if (service == null) throw new IllegalStateException("Android accessibility unavailable");
+    // The owner specified a real visible ChatGPT keyboard. Do not burn a
+    // dispatch attempt while the reply is still generating or keyboard is hidden.
+    JSONObject composer = service.prepareChatKeyboard();
+    if (!composer.optBoolean("ready",false)) {
+      return new JSONObject().put("ok",false).put("state","queued")
+        .put("reason",composer.optString("reason","Waiting for native ChatGPT keyboard"));
+    }
     String message = state.getJSONObject("pending").getString("message");
     // Save dispatching BEFORE touching another app: a crash cannot cause replay.
     state.put("state", "dispatching")
