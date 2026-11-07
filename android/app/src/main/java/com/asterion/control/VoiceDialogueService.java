@@ -299,7 +299,8 @@ public final class VoiceDialogueService extends Service {
       @Override public void onDone(String utteranceId){
         if(id.equals(utteranceId)){
           speakerPlaybackCompleted=true;
-          ui.post(()->startListening(locale,id));
+          // Release exclusive playback focus before the recognizer opens the microphone.
+          ui.post(()->{releaseAudioFocus();startListening(locale,id);});
         }
       }
       @Override public void onError(String utteranceId){
@@ -362,9 +363,10 @@ public final class VoiceDialogueService extends Service {
         if(!id.equals(questionId)||!backend.equals(recognizerBackend))return;
         microphoneActive=false;
         if(offline && (code==SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE
-            || code==SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED)
+            || code==SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED
+            || code==SpeechRecognizer.ERROR_CLIENT)
             && SpeechRecognizer.isRecognitionAvailable(VoiceDialogueService.this)){
-          state("fallback","Offline recognition language missing; using Android system speech");
+          state("fallback","Offline recognizer unavailable (error "+code+"); trying Android system speech");
           ui.post(()->{
             if(active!=VoiceDialogueService.this||!id.equals(questionId))return;
             try{beginRecognition(locale,id,false);}
@@ -416,6 +418,8 @@ public final class VoiceDialogueService extends Service {
         return "No speech heard before the recognition timeout";
       case SpeechRecognizer.ERROR_AUDIO:
         return "Android microphone audio capture failed";
+      case SpeechRecognizer.ERROR_CLIENT:
+        return "Android recognition service rejected the session (client error 5)";
       default:
         return "Android speech recognition error "+code;
     }
