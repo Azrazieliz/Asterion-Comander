@@ -66,3 +66,12 @@ def test_release_requires_exact_owner_signer_and_uses_existing_update_feed():
     assert "latest-release.json" in text("android/app/src/main/java/com/asterion/control/UpdateManager.java")
     assert "Asterion-Control-v0.9.10-debug.apk" in workflow  # backwards-compatible alias only
     assert "cp \"$ROOT/dist/$PKG\" \"$ROOT/dist/Asterion-Control-v0.9.10-debug.apk\"" in workflow
+
+def test_release_feed_version_code_matches_android_gradle():
+    import re
+    root=Path(__file__).resolve().parents[1]
+    workflow=(root/".github/workflows/android-continuation-branch.yml").read_text()
+    gradle=(root/"android/app/build.gradle").read_text()
+    code=int(re.search(r"versionCode\s+(\d+)",gradle).group(1))
+    feed=int(re.search(r'"version_code":(\d+)',workflow).group(1))
+    assert feed==code, f"Updater feed code {feed} must match signed Android versionCode {code}"
