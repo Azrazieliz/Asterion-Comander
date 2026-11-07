@@ -97,22 +97,19 @@ public final class ControlAccessibilityService extends AccessibilityService {
   }
   private void sendBlueArrowOrAccessibleButton(String message,
       JSONObject[] output,CountDownLatch done){
-    AccessibilityNodeInfo root=getRootInActiveWindow();
-    AccessibilityNodeInfo accessible=root==null?null:findSend(root,0);
-    if(accessible!=null&&accessible.performAction(AccessibilityNodeInfo.ACTION_CLICK)){
-      verifyChatSend(message,output,done);return;
-    }
+    // Owner-required path: actual native Android keyboard -> visible blue Send tap.
+    // Do not substitute Accessibility ACTION_CLICK or an IME "send" key.
     boolean requested=tapVisibleBlueArrow(new GestureResultCallback(){
       @Override public void onCompleted(GestureDescription gesture){
         verifyChatSend(message,output,done);
       }
       @Override public void onCancelled(GestureDescription gesture){
-        output[0]=chatOutcome(false,true,"Blue Send tap cancelled; inspect draft");
+        output[0]=chatOutcome(false,true,"Visible blue Send tap cancelled; inspect draft");
         done.countDown();
       }
     });
     if(!requested){output[0]=chatOutcome(false,false,
-      "Visible ChatGPT keyboard/blue Send arrow not confirmed; draft preserved");
+      "Visible ChatGPT keyboard and blue Send arrow not confirmed; draft preserved");
       done.countDown();}
   }
   private void keyboardChatSend(String message,JSONObject[] output,CountDownLatch done){
@@ -352,64 +349,99 @@ public final class ControlAccessibilityService extends AccessibilityService {
       observeMarkers(node.getChild(i),accepted,complete,flags,spokenQuestion,depth+1,seen);
   }
 
+  /** Focus the real visible ChatGPT composer before attempting native keyboard input.
+   * Returns requested/ready separately; foreground and keyboard state must be
+   * checked again before sending. Never overwrite another user's draft.
+   */
+  JSONObject prepareChatKeyboard(){
+    final CountDownLatch done=new CountDownLatch(1);
+    final JSONObject[] result={new JSONObject()};
+    main.post(()->{
+      try{
+        AccessibilityNodeInfo root=getRootInActiveWindow();
+        if(root==null||root.getPackageName()==null||
+           !"com.openai.chatgpt".contentEquals(root.getPackageName())){
+          result[0]=new JSONObject().put("ready",false).put("reason","ChatGPT is not foreground");
+        }else if(chatKeyboard()!=null){
+          result[0]=new JSONObject().put("ready",true).put("reason","Android keyboard focused");
+        }else{
+          AccessibilityNodeInfo field=findComposer(root);
+          boolean pressed=field!=null&&field.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+          if(!pressed){
+            DisplayMetrics metrics=new DisplayMetrics();
+            android.view.WindowManager wm=(android.view.WindowManager)getSystemService(WINDOW_SERVICE);
+            wm.getDefaultDisplay().getRealMetrics(metrics);
+            // Tap the INPUT REGION, never the trailing Send / Stop control.
+            float x=metrics.widthPixels*0.39f;
+            float y=metrics.heightPixels*0.925f;
+            Path point=new Path();point.moveTo(x,y);
+            GestureDescription gesture=new GestureDescription.Builder()
+              .addStroke(new GestureDescription.StrokeDescription(point,0,70)).build();
+            pressed=dispatchGesture(gesture,new GestureResultCallback(){},main);
+          }
+          result[0]=new JSONObject().put("ready",false)
+            .put("focus_requested",pressed)
+            .put("reason",pressed?"Waiting for visible ChatGPT keyboard":"Composer focus unavailable");
+        }
+      }catch(Exception e){
+        try{result[0]=new JSONObject().put("ready",false)
+          .put("reason","Keyboard preparation failed: "+e.getClass().getSimpleName());}
+        catch(Exception ignored){}
+      }finally{done.countDown();}
+    });
+    try{done.await(3,TimeUnit.SECONDS);}catch(InterruptedException e){Thread.currentThread().interrupt();}
+    return result[0];
+  }
+  /** Request ChatGPT foreground through Android's own launcher intent, or dismiss
+   * a blocking SystemUI shade. Never treat intent dispatch as confirmed focus. */
+  JSONObject requestChatForeground(){
+    final CountDownLatch done=new CountDownLatch(1);
+    final JSONObject[] output={new JSONObject()};
+    main.post(()->{
+      try{
+        AccessibilityNodeInfo root=getRootInActiveWindow();
+        String pkg=root==null||root.getPackageName()==null?"":root.getPackageName().toString();
+        if("com.openai.chatgpt".equals(pkg)){
+          output[0]=new JSONObject().put("requested",false).put("already_foreground",true);
+        }else if("com.android.systemui".equals(pkg)){
+          output[0]=new JSONObject().put("requested",performGlobalAction(GLOBAL_ACTION_BACK))
+            .put("reason","Dismissed SystemUI obstruction; recheck ChatGPT");
+        }else{
+          android.content.Intent intent=getPackageManager().getLaunchIntentForPackage("com.openai.chatgpt");
+          if(intent==null){
+            output[0]=new JSONObject().put("requested",false)
+              .put("reason","ChatGPT launch activity unavailable");
+          }else{
+            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(intent);
+            output[0]=new JSONObject().put("requested",true)
+              .put("verified_foreground",false);
+          }
+        }
+      }catch(Exception e){
+        try{output[0]=new JSONObject().put("requested",false)
+          .put("reason",e.getClass().getSimpleName());}catch(Exception ignored){}
+      }finally{done.countDown();}
+    });
+    try{done.await(3,TimeUnit.SECONDS);}catch(InterruptedException e){Thread.currentThread().interrupt();}
+    return output[0];
+  }
   JSONObject sendChatMessage(String message) {
     final CountDownLatch done=new CountDownLatch(1);
-    final JSONObject[] output={chatOutcome(false,true,"UI dispatch did not finish")};
+    final JSONObject[] output={chatOutcome(false,true,"Native keyboard dispatch did not finish")};
     main.post(()->{
       try {
         AccessibilityNodeInfo root=getRootInActiveWindow();
-        if(root==null || root.getPackageName()==null ||
+        if(root==null||root.getPackageName()==null||
            !"com.openai.chatgpt".contentEquals(root.getPackageName())){
           output[0]=chatOutcome(false,false,"ChatGPT Android app is not foreground");
           done.countDown();return;
         }
-        AccessibilityNodeInfo editor=findComposer(root);
-        if(editor==null){
-          keyboardChatSend(message,output,done);
-          return;
-        }
-        String existing=editor.getText()==null?"":editor.getText().toString();
-        if(!existing.isEmpty() && !existing.equals(message)){
-          output[0]=chatOutcome(false,false,"ChatGPT composer has user text; refusing to overwrite");
-          done.countDown();return;
-        }
-        if(!existing.equals(message)){
-          Bundle input=new Bundle();
-          input.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,message);
-          if(!editor.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,input)){
-            output[0]=chatOutcome(false,false,"ChatGPT composer rejected text");
-            done.countDown();return;
-          }
-        }
-        // Compose send controls may only appear after the next recomposition.
-        // Verify the exact queued text before clicking anything.
-        main.postDelayed(()->{
-          try{
-            AccessibilityNodeInfo after=getRootInActiveWindow();
-            if(after==null||after.getPackageName()==null||
-              !"com.openai.chatgpt".contentEquals(after.getPackageName())){
-              output[0]=chatOutcome(false,false,"ChatGPT is no longer foreground");
-              return;
-            }
-            AccessibilityNodeInfo verify=findComposer(after);
-            String actual=verify==null||verify.getText()==null
-              ?"":verify.getText().toString();
-            if(!message.equals(actual)){
-              output[0]=chatOutcome(false,true,
-                "ChatGPT composer changed during submission; inspect before retry");
-              return;
-            }
-            sendBlueArrowOrAccessibleButton(message,output,done);
-            return;
-          }catch(Exception e){
-            output[0]=chatOutcome(false,true,
-              "Uncertain ChatGPT composer outcome: "+e.getClass().getSimpleName());
-            done.countDown();
-          }
-        },400L);
+        // No ACTION_SET_TEXT injection: send through Android's active keyboard.
+        keyboardChatSend(message,output,done);
       }catch(Exception e){
         output[0]=chatOutcome(false,false,
-          "ChatGPT UI preparation failed: "+e.getClass().getSimpleName());
+          "ChatGPT keyboard dispatch failed: "+e.getClass().getSimpleName());
         done.countDown();
       }
     });
@@ -417,7 +449,7 @@ public final class ControlAccessibilityService extends AccessibilityService {
     try{finished=done.await(11,TimeUnit.SECONDS);}
     catch(InterruptedException e){Thread.currentThread().interrupt();}
     if(!finished)return chatOutcome(false,true,
-      "ChatGPT UI dispatch timed out; inspect before requeue");
+      "Keyboard dispatch timed out; inspect before retry");
     return output[0];
   }
   @Override public void onInterrupt() { }
@@ -435,17 +467,19 @@ public final class ControlAccessibilityService extends AccessibilityService {
         case "type": {
           AccessibilityNodeInfo root = getRootInActiveWindow();
           AccessibilityNodeInfo target = root == null ? null : root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT);
-          if (target != null && target.isEditable()) {
-            Bundle b = new Bundle(); b.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, a.optString("text"));
-            result[0] = target.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,b);
-          }else{
-            InputMethod.AccessibilityInputConnection nativeKeyboard=chatKeyboard();
+          InputMethod.AccessibilityInputConnection nativeKeyboard=chatKeyboard();
+          if(nativeKeyboard!=null){
             String current=inputText(nativeKeyboard);
             String intended=a.optString("text");
             if(current!=null&&current.isEmpty()&&!intended.isEmpty()&&intended.length()<=3800){
               nativeKeyboard.commitText(intended,1,null);
               result[0]=intended.equals(inputText(nativeKeyboard));
             }
+          }else if (target != null && target.isEditable() && !"com.openai.chatgpt".equals(
+              root==null||root.getPackageName()==null?"":root.getPackageName().toString())) {
+            Bundle b = new Bundle();
+            b.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,a.optString("text"));
+            result[0]=target.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,b);
           }
           done.countDown(); return;
         }
