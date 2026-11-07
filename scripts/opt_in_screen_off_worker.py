@@ -114,7 +114,8 @@ class Workspace:
                 path = args["subdir"]
                 if path:
                     safe_path(self.root,path,new=True)
-                names = git(self.root,"ls-files","--",path).splitlines()
+                names = (git(self.root,"ls-files","--",path) if path
+                         else git(self.root,"ls-files")).splitlines()
                 return {"ok":True,"paths":names[:220],"truncated":len(names)>220}
             if name == "repo_read":
                 path = safe_path(self.root,args["path"])
