@@ -247,24 +247,9 @@ public final class VoiceDialogueService extends Service {
     ui.postDelayed(deadline,delay);
   }
   private void acquireAudioFocus() {
-    speechAudioManager=getSystemService(AudioManager.class);
-    if(speechAudioManager==null)throw new IllegalStateException("Android audio manager unavailable");
-    AudioAttributes use=new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT)
-      .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build();
-    speechAudioRequest=new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
-      .setAudioAttributes(use)
-      .setOnAudioFocusChangeListener(change->{
-        if(change==AudioManager.AUDIOFOCUS_LOSS || change==AudioManager.AUDIOFOCUS_LOSS_TRANSIENT)
-          ui.post(()->{if("speaking".equals(phase)||"listening".equals(phase)){
-            if(speaker!=null)speaker.stop();
-            if(listener!=null)listener.cancel();
-            microphoneActive=false;
-            state("failed","Android audio focus lost");
-          }});
-      },ui).build();
-    exclusiveSpeechAudio=speechAudioManager.requestAudioFocus(speechAudioRequest)
-      ==AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
-    if(!exclusiveSpeechAudio)throw new IllegalStateException("Music or another app denied speech audio focus");
+    // Never request audio focus: preserve music/media playback during voice control.
+    exclusiveSpeechAudio=false;
+    speechAudioRequest=null;
   }
   private void releaseAudioFocus(){
     if(!exclusiveSpeechAudio)return;
@@ -355,7 +340,7 @@ public final class VoiceDialogueService extends Service {
     active=this;
     if(pendingRestored)ui.postDelayed(this::onChatWindowVisible,600L);
     ambientEnabled=getSharedPreferences("voice_style",MODE_PRIVATE)
-      .getBoolean(ALWAYS_ON_PREF,true);
+      .getBoolean(ALWAYS_ON_PREF,false);
     if(ambientEnabled){
       getSharedPreferences("voice_style",MODE_PRIVATE).edit()
         .putBoolean(ALWAYS_ON_PREF,true).apply();
@@ -427,7 +412,7 @@ public final class VoiceDialogueService extends Service {
       throw new IllegalStateException("No Android speech recognition engine is available");
     if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)
       throw new IllegalStateException("Android microphone consent is missing");
-    acquireAudioFocus(); // Android pauses competing music where the player supports focus.
+    acquireAudioFocus(); // Preserve music; do not request exclusive audio focus.
     try{keepCpuForExchange();}catch(Exception e){releaseAudioFocus();throw e;}
     speakOnly=false;
     question=text;transcript="";consumed=false;
