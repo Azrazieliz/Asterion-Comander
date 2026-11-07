@@ -34,7 +34,10 @@ def test_phone_controls_remain_in_private_https_and_no_pc_required():
     transport=text("android/app/src/main/java/com/asterion/control/TransportConnectivity.java")
     gateway=text("asterion_remote/mcp_gateway.py")
     assert "PhoneDirectMcp.start(this)" in agent
-    assert "PhoneGitBridge.poll(this)" not in agent
+    assert "phoneBridgePoller.scheduleWithFixedDelay" in agent
+    assert "PhoneGitBridge.poll(this)" in agent
+    assert "phoneBridgePoller.shutdownNow()" in agent
+    assert "cycles.tick()" not in agent
     assert 'setEndpointIdentificationAlgorithm("HTTPS")' in phone
     assert "phone_live_invoke(message)" in gateway
     assert "phone_cloud_relay.submit" not in gateway
