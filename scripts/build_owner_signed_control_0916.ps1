@@ -83,7 +83,7 @@ if($LASTEXITCODE -ne 0){throw 'Cannot inspect Android release package metadata'}
 $joined=$badging -join "`n"
 if($joined -match 'application-debuggable'){throw 'Release APK is debuggable'}
 if($joined -notmatch 'package: name=.com\.asterion\.control.'){throw 'Unexpected Android package ID'}
-if($joined -notmatch 'versionCode=.915.'){throw 'Unexpected APK version code'}
+if($joined -notmatch 'versionCode=.916.'){throw 'Unexpected APK version code'}
 $dest=Join-Path $root 'dist\Asterion-Control-v0.9.16-release.apk'
 Copy-Item $source $dest -Force
 $sha=(Get-FileHash $dest -Algorithm SHA256).Hash.ToLowerInvariant()
