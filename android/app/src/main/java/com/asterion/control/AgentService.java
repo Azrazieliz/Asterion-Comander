@@ -317,6 +317,15 @@ public final class AgentService extends Service {
       catch(Exception e){json(out,400,error("Private bridge status unavailable"));}
       return;
     }
+    if(method.equals("GET")&&path.equals("/app-bridge/apps")){
+      try{json(out,200,AppBridge.list(this));}
+      catch(Exception e){json(out,400,error("App bridge discovery unavailable"));}return;
+    }
+    if(method.equals("POST")&&path.equals("/app-bridge/invoke")){
+      try{json(out,200,AppBridge.invoke(this,body));}
+      catch(SecurityException e){json(out,403,error(e.getMessage()));}
+      catch(Exception e){json(out,400,error(e.getMessage()));}return;
+    }
     if(method.equals("GET")&&path.equals("/apps")){
       try{json(out,200,AppCatalog.list(this));}
       catch(Exception e){json(out,400,error("Application catalogue unavailable"));}return;
