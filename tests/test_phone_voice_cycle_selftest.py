@@ -21,7 +21,7 @@ def test_chatgpt_is_the_operator_and_android_does_not_start_local_cycles():
     activity=java("MainActivity.java")
     agent=java("AgentService.java")
     native=java("AndroidMcp.java")
-    assert '"ChatGPT-operated checkpoints"' in activity
+    assert '"ChatGPT checkpoint continuation"' in activity
     assert '"Run two-turn phone cycle test"' not in activity
     assert 'this::startPhoneCycleTest' not in activity
     assert 'cycles.tick()' not in agent

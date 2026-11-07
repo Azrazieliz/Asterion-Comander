@@ -21,7 +21,7 @@ def test_chatgpt_controls_execution_and_android_returns_checkpoint_receipts():
     native=text("android/app/src/main/java/com/asterion/control/AndroidMcp.java")
     ledger=text("android/app/src/main/java/com/asterion/control/ContinuationLedger.java")
     assert "cycles.tick()" not in agent
-    assert "ChatGPT-operated checkpoints" in main
+    assert "ChatGPT checkpoint continuation" in main
     assert "control_phone_continuation_queue" in native
     assert "control_phone_continuation_dispatch" in native
     assert "control_phone_continuation_ack" in native

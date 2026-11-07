@@ -68,6 +68,8 @@ def test_bootstrap_server_uses_stable_gateway_and_no_raw_secret_over_cellular():
     assert 'mcp-tunnel-url.txt' not in src
     assert "trycloudflare.com" not in src
     assert 'AgentService.token(this)' in android
-    assert 'One-time Control approval' in android
+    assert 'One-time Control approval' not in android
+    assert 'Copy connection key' not in android
+    assert 'Check direct Control link' in android
     assert 'One-time mobile approval unavailable:' in android
     assert "phone_live" not in src

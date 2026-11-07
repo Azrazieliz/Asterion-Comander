@@ -16,7 +16,7 @@ def test_operator_writes_single_checkpoint_and_receipt():
 def test_phone_does_not_run_chatgpt_turns_locally():
     assert 'cycles.tick()' not in java("AgentService.java")
     assert 'Run two-turn phone cycle test' not in java("MainActivity.java")
-    assert 'ChatGPT-operated checkpoints' in java("MainActivity.java")
+    assert 'ChatGPT checkpoint continuation' in java("MainActivity.java")
 
 def test_cellular_connection_is_bound_to_android_active_network():
     direct=java("PhoneDirectMcp.java")

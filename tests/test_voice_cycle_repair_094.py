@@ -21,7 +21,7 @@ def test_android_cycle_runner_is_disabled():
     agent=read("AgentService.java")
     mcp=read("AndroidMcp.java")
     assert 'Run two-turn phone cycle test' not in main
-    assert 'ChatGPT-operated checkpoints' in main
+    assert 'ChatGPT checkpoint continuation' in main
     assert 'cycles.tick()' not in agent
     assert 'controller","chatgpt"' in mcp
     assert 'control_phone_continuation_queue' in mcp
