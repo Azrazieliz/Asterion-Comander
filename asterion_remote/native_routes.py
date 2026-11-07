@@ -20,6 +20,10 @@ def phone_status():
     except Exception:
         return {'paired':True,'reachable':False,'device':pairing['device']}
 
+@router.get('/phone/logcat')
+def phone_own_logcat():
+    return request('/diagnostics/logcat',timeout=5).json()
+
 @router.get('/phone/health')
 def phone_health():return request('/health').json()
 

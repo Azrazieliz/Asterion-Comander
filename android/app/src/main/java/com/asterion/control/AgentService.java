@@ -368,6 +368,10 @@ public final class AgentService extends Service {
       try{json(out,200,PerformanceManager.prioritizeForegroundNow(this));}
       catch(Exception e){json(out,400,error(e.getMessage()));}return;
     }
+    if(method.equals("GET")&&path.equals("/diagnostics/logcat")){
+      try{json(out,200,ownLogcat());}
+      catch(Exception e){json(out,503,error("Own-process logcat unavailable"));}return;
+    }
     if(method.equals("GET")&&path.equals("/health")){json(out,200,health());return;}
     if(method.equals("GET")&&path.equals("/ui")){
       ControlAccessibilityService a=ControlAccessibilityService.active;
@@ -396,6 +400,30 @@ public final class AgentService extends Service {
     }
     json(out,404,error("Unknown endpoint"));
   }catch(Exception e){android.util.Log.w("AsterionAgent","Client closed: "+e.getClass().getSimpleName());}}
+  /** Owner-bearer-authenticated diagnostic, restricted to THIS app process.
+   * Android does not grant ordinary apps other apps' or system-wide logcat.
+   * Bounded output and redaction avoid leaking credentials into receipts.
+   */
+  JSONObject ownLogcat() throws Exception {
+    int pid=android.os.Process.myPid();
+    java.lang.Process process=new ProcessBuilder("logcat","-d","--pid="+pid,
+      "-t","80","-v","brief").redirectErrorStream(true).start();
+    boolean finished=process.waitFor(2,java.util.concurrent.TimeUnit.SECONDS);
+    if(!finished){
+      process.destroyForcibly();
+      throw new IllegalStateException("Own-process logcat timed out");
+    }
+    byte[] raw=process.getInputStream().readNBytes(12288);
+    String lines=new String(raw,StandardCharsets.UTF_8);
+    if(process.exitValue()!=0)
+      return new JSONObject().put("ok",false).put("scope","own_app_pid_only")
+        .put("pid",pid).put("reason","Android logcat command unavailable");
+    lines=lines.replaceAll("(?i)Bearer\\s+[A-Za-z0-9._=\\-]+","Bearer [REDACTED]")
+      .replaceAll("(?i)(token|api_key|secret|password)\\s*[=:]\\s*[^\\s]+","$1=[REDACTED]")
+      .replaceAll("(?i)github_pat_[A-Za-z0-9_]+","[REDACTED]");
+    return new JSONObject().put("ok",true).put("scope","own_app_pid_only")
+      .put("pid",pid).put("truncated",raw.length>=12288).put("log",lines);
+  }
   JSONObject health()throws Exception {
     DisplayMetrics m=new DisplayMetrics();((WindowManager)getSystemService(WINDOW_SERVICE)).getDefaultDisplay().getRealMetrics(m);
     ActivityManager.MemoryInfo mem=new ActivityManager.MemoryInfo();((ActivityManager)getSystemService(ACTIVITY_SERVICE)).getMemoryInfo(mem);

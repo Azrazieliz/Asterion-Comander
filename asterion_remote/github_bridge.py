@@ -52,6 +52,7 @@ ALLOWED={
 
 # Use the owner's existing locally paired Android API; avoid stale Windows proxy routes.
 PHONE_NATIVE={
+ 'phone_logcat':('GET','/diagnostics/logcat'),
  'phone_voice_settings':('GET','/voice/settings'),
  'phone_voice_configure':('POST','/voice/settings'),
  'phone_voice_status':('GET','/voice/status'),
