@@ -26,6 +26,15 @@ class AppBridgeAction(BaseModel):
     request_id: str = Field(min_length=8,max_length=100)
     payload: dict = Field(default_factory=dict)
 
+class AppBridgeOperation(BaseModel):
+    package: str = Field(min_length=3,max_length=180)
+    request_id: str = Field(min_length=8,max_length=100)
+    cancel: bool = False
+
+@router.post('/phone/app-bridge/operation')
+def app_bridge_operation(data:AppBridgeOperation):
+    return request('/app-bridge/operation','POST',data.model_dump(),timeout=11).json()
+
 @router.get('/phone/app-bridge/apps')
 def app_bridges():return request('/app-bridge/apps').json()
 
