@@ -119,6 +119,7 @@ public final class VoiceDialogueService extends Service {
       clearDeadline();
       if(listener!=null){listener.cancel();listener.destroy();listener=null;}
       microphoneActive=false;
+      state("ready","");
     }
   }
   private void scheduleAmbient(long delayMs){
@@ -221,7 +222,16 @@ public final class VoiceDialogueService extends Service {
       if("answered".equals(phase)||"acknowledged".equals(phase))return;
       if(listener!=null){listener.cancel();listener.destroy();listener=null;}
       microphoneActive=false;
-      state("failed","Speech answer timed out; microphone closed");
+      if(ambientCapture&&ambientEnabled){
+        ambientCapture=false;
+        ambientErrors=Math.min(6,ambientErrors+1);
+        state("ambient_retry","Recognition session timed out");
+        scheduleAmbient(Math.min(20000L,1000L*(1L<<Math.min(4,ambientErrors))));
+      }else{
+        state("failed","Speech answer timed out; microphone closed");
+        if(ambientEnabled&&pendingOwnerSpeech.isEmpty())
+          scheduleAmbient(800L);
+      }
     };
     ui.postDelayed(deadline,delay);
   }
@@ -421,6 +431,7 @@ public final class VoiceDialogueService extends Service {
     consumed=true;
     transcript="";question="";
     state("acknowledged","");
+    if(ambientEnabled)scheduleAmbient(600L);
     return new JSONObject().put("ok",true).put("question_id",id)
       .put("phase","acknowledged");
   }
@@ -721,12 +732,14 @@ public final class VoiceDialogueService extends Service {
       transcript="";consumed=true;
       lastVoiceDispatch="submitted_unverified";
       state("delivered","");
+      if(ambientEnabled)scheduleAmbient(800L);
       refreshVoiceNotification();
     }else if(result.optBoolean("uncertain",false)){
       // The gesture may have reached Send. Never double-send it.
       pendingOwnerSpeech="";
       lastVoiceDispatch="needs_review";
       state("failed",result.optString("reason","ChatGPT Send not verified"));
+      if(ambientEnabled)scheduleAmbient(800L);
       refreshVoiceNotification();
     }else{
       lastVoiceDispatch="not_sent";
