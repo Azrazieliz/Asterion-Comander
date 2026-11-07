@@ -60,12 +60,24 @@ def main():
        'last_error':str(cycle.get('last_error',''))[:250],
        'cycle_state':cycle.get('state',''),
        'cycle_index':cycle.get('index',0),
+       'cycle_ack_count':cycle.get('ack_count',0),
        'checkpoint_state':checkpoint.get('state',checkpoint if isinstance(checkpoint,str) else '')
     },separators=(',',':')))
     if code!=200 or data.get('android_autonomous_cycle') is not True:
-        print('ACCEPTANCE_FAIL: installed phone API is not v0.9.13 cycle-capable')
+        print('INSTALL_FAIL: phone does not expose autonomous cycle API')
         return 2
-    print('ACCEPTANCE_PASS: installed phone exposes native autonomous cycle endpoints')
+    print('INSTALL_PASS: native cycle API available')
+    if '--require-cycle-pass' in sys.argv:
+        complete=(cycle.get('cycle_id')=='control-accept-v0913-20261107'
+                  and cycle.get('state')=='finished'
+                  and cycle.get('active') is False
+                  and cycle.get('ack_count',0)>=2)
+        if not complete:
+            print('CYCLE_FAIL: two acknowledged distinct turns and completion not verified')
+            return 4
+        print('CYCLE_PASS: two turns acknowledged and finished')
+    else:
+        print('CYCLE_NOT_VERIFIED: run --require-cycle-pass for strict acceptance')
     return 0
 
 if __name__=='__main__':
