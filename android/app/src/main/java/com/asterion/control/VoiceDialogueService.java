@@ -10,6 +10,8 @@ import android.app.Service;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.Context;
+import android.content.BroadcastReceiver;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
 import android.media.AudioManager;
@@ -34,6 +36,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Owner-started Android foreground speaker -> on-device microphone Q&A.
@@ -71,6 +74,10 @@ public final class VoiceDialogueService extends Service {
   private static final long VOICE_WAKE_MAX_MS=150000L;
   private PowerManager.WakeLock speechWakeLock;
   private volatile boolean pendingOwnerTalk=false;
+  private volatile String pendingOwnerSpeech="";
+  private final AtomicBoolean voiceRequestDispatching=new AtomicBoolean(false);
+  private volatile long lastVoiceDispatchAt=0L;
+  private BroadcastReceiver unlockedReceiver;
   private void keepCpuForExchange() {
     PowerManager pm=(PowerManager)getSystemService(POWER_SERVICE);
     if(pm==null)throw new IllegalStateException("Power manager unavailable");
@@ -156,6 +163,16 @@ public final class VoiceDialogueService extends Service {
     naturalRate=Math.max(0.85f,Math.min(1.15f,saved.getFloat("rate",0.96f)));
     naturalPitch=Math.max(0.90f,Math.min(1.10f,saved.getFloat("pitch",1.00f)));
     super.onCreate();
+    unlockedReceiver=new BroadcastReceiver(){
+      @Override public void onReceive(Context context,Intent intent){
+        if(active==VoiceDialogueService.this)onChatWindowVisible();
+      }
+    };
+    IntentFilter resume=new IntentFilter();
+    resume.addAction(Intent.ACTION_USER_PRESENT);
+    resume.addAction(Intent.ACTION_SCREEN_ON);
+    if(Build.VERSION.SDK_INT>=33)registerReceiver(unlockedReceiver,resume,Context.RECEIVER_NOT_EXPORTED);
+    else registerReceiver(unlockedReceiver,resume);
     speaker=new TextToSpeech(this,status->{
       speakerReady=status==TextToSpeech.SUCCESS;
       state(speakerReady?"ready":"unavailable",
@@ -442,8 +459,9 @@ public final class VoiceDialogueService extends Service {
           transcript.isEmpty()?"No recognized speech":"");
         ui.post(()->{if(listener!=null){listener.destroy();listener=null;}});
         if(command&&!transcript.isEmpty()){
-          final String spoken=transcript;
-          voiceControlWorker.execute(()->dispatchOwnerVoiceRequest(spoken));
+          pendingOwnerSpeech=transcript;
+          lastVoiceDispatch="recognized";
+          onChatWindowVisible();
         }
       }
       @Override public void onPartialResults(Bundle results){}
@@ -493,44 +511,79 @@ public final class VoiceDialogueService extends Service {
     ui.post(()->{scheduleDeadline(id,SPEAKER_TIMEOUT_MS);speakNow(text,locale,id);});
     return new JSONObject().put("ok",true).put("phase","speaking").put("speech_id",id);
   }
-  private void dispatchOwnerVoiceRequest(String spoken){
+  /** Called when ChatGPT becomes visible or Android reports an unlocked device.
+   * Only one recognized owner command may be outstanding. No resubmission after
+   * an uncertain result, and never operate a locked or inactive display.
+   */
+  void onChatWindowVisible(){
+    if(active!=this||pendingOwnerSpeech.isEmpty())return;
+    long now=android.os.SystemClock.elapsedRealtime();
+    if(now-lastVoiceDispatchAt<1100L||!voiceRequestDispatching.compareAndSet(false,true))return;
+    lastVoiceDispatchAt=now;
+    voiceControlWorker.execute(()->{
+      try{dispatchOwnerVoiceRequest();}
+      finally{voiceRequestDispatching.set(false);}
+    });
+  }
+  private void refreshVoiceNotification(){
+    try{
+      NotificationManager manager=getSystemService(NotificationManager.class);
+      if(manager!=null)manager.notify(NOTIFICATION_ID,notification());
+    }catch(Exception ignored){}
+  }
+  private void dispatchOwnerVoiceRequest(){
+    String spoken=pendingOwnerSpeech;
+    if(active!=this||spoken.isEmpty())return;
+    PowerManager power=(PowerManager)getSystemService(POWER_SERVICE);
+    KeyguardManager lock=(KeyguardManager)getSystemService(KEYGUARD_SERVICE);
+    if(power==null||!power.isInteractive()||(lock!=null&&lock.isDeviceLocked())){
+      lastVoiceDispatch="waiting_for_owner_unlock";
+      state("awaiting_device","Voice request recognized; unlock the phone to send through ChatGPT");
+      refreshVoiceNotification();
+      return;
+    }
     ControlAccessibilityService access=ControlAccessibilityService.active;
     if(access==null){
       lastVoiceDispatch="accessibility_unavailable";
-      state("failed","ChatGPT input access unavailable for voice request");
+      state("awaiting_device","Enable Android accessibility to send the recognized voice request");
+      refreshVoiceNotification();return;
+    }
+    if(!"com.openai.chatgpt".equals(access.currentPackage())){
+      JSONObject outcome=access.requestChatForeground();
+      lastVoiceDispatch="waiting_for_chatgpt_foreground";
+      state("awaiting_device",outcome.optString("reason","Waiting for ChatGPT writing bar"));
+      refreshVoiceNotification();
       return;
     }
-    // Restore actual ChatGPT application; do not send into another app.
-    for(int attempt=0;attempt<12;attempt++){
-      if(active!=this)return;
-      if(!"com.openai.chatgpt".equals(access.currentPackage()))
-        access.requestChatForeground();
-      else{
-        JSONObject focus=access.prepareChatKeyboard();
-        if(focus.optBoolean("ready",false)){
-          // Spoken text is a user command to ChatGPT, not a queued checkpoint.
-          JSONObject send=access.sendChatMessage(
-            "ASTERION CONTROL — OWNER VOICE REQUEST\n"+
-            "Spoken instruction: "+spoken+"\n"+
-            "Execute the authorized request using Asterion Control. "+
-            "Use the speaker endpoint for a spoken reply, and ask a "+
-            "microphone question only if a response is required.");
-          if(send.optBoolean("sent",false)){
-            lastVoiceDispatch="submitted_unverified";
-            consumed=true;state("delivered","");
-          }else{
-            lastVoiceDispatch="not_sent";
-            state("failed",send.optString("reason","Voice request could not be sent"));
-          }
-          return;
-        }
-      }
-      try{Thread.sleep(650);}catch(InterruptedException e){
-        Thread.currentThread().interrupt();return;
-      }
+    JSONObject focused=access.prepareChatKeyboard();
+    if(!focused.optBoolean("ready",false)){
+      lastVoiceDispatch="waiting_for_visible_keyboard";
+      state("awaiting_device","Waiting for visible ChatGPT writing bar and keyboard");
+      return;
     }
-    lastVoiceDispatch="chatgpt_input_unavailable";
-    state("failed","ChatGPT writing bar could not be focused");
+    String message="ASTERION CONTROL — OWNER VOICE REQUEST\n"+
+      "Spoken instruction: "+spoken+"\n"+
+      "Execute the authorized request using Asterion Control. "+
+      "Use the speaker endpoint for a spoken reply, and ask a "+
+      "microphone question only if a response is required.";
+    JSONObject result=access.sendChatMessage(message);
+    if(result.optBoolean("sent",false)){
+      pendingOwnerSpeech="";
+      transcript="";consumed=true;
+      lastVoiceDispatch="submitted_unverified";
+      state("delivered","");
+      refreshVoiceNotification();
+    }else if(result.optBoolean("uncertain",false)){
+      // The gesture may have reached Send. Never double-send it.
+      pendingOwnerSpeech="";
+      lastVoiceDispatch="needs_review";
+      state("failed",result.optString("reason","ChatGPT Send not verified"));
+      refreshVoiceNotification();
+    }else{
+      lastVoiceDispatch="not_sent";
+      state("awaiting_device",result.optString("reason","ChatGPT cannot accept voice text yet"));
+      refreshVoiceNotification();
+    }
   }
   private static String speechError(int code){
     switch(code){
@@ -567,6 +620,7 @@ public final class VoiceDialogueService extends Service {
       .put("microphone_active",microphoneActive)
       .put("voice_control_active",ownerCommandMode)
       .put("last_voice_dispatch",lastVoiceDispatch)
+      .put("voice_request_awaiting_send",!pendingOwnerSpeech.isEmpty())
       .put("speaker_started",speakerPlaybackStarted)
       .put("speaker_finished",speakerPlaybackCompleted)
       .put("answer_pending_ack","answered".equals(phase)&&!consumed)
@@ -581,6 +635,10 @@ public final class VoiceDialogueService extends Service {
   }
   @Override public void onDestroy(){
     active=null;
+    if(unlockedReceiver!=null){
+      try{unregisterReceiver(unlockedReceiver);}catch(Exception ignored){}
+      unlockedReceiver=null;
+    }
     ui.post(()->{
       clearDeadline();microphoneActive=false;
       if(listener!=null){listener.destroy();listener=null;}
