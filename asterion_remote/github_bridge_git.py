@@ -214,7 +214,12 @@ def cycle(key):
     # A finished receipt written just before a previous push failed is
     # publication-only: NEVER execute the corresponding operation again.
     recover_unpublished()
-    for request in tasks:
+    # Execute a bounded command burst against one already-fetched snapshot.
+    # Each result is durably journaled before the next action, then ALL receipts
+    # share one Git commit/fetch/rebase/push instead of one per command.
+    # On a publishing failure recover_unpublished() publishes without replay.
+    batch=[]
+    for request in tasks[:12]:
         identity=request.stem
         # This receipt prevents replay after crashes but is not a success claim.
         write_result(identity,{'id':identity,'ok':False,'status':'running'},publish_now=False)
@@ -241,9 +246,12 @@ def cycle(key):
             reply={'id':identity,'ok':False,'status':'error',
                    'elapsed_ms':round((time.monotonic()-started)*1000),
                    'error':str(exc)[:500]}
-        write_result(identity,reply)
+        write_result(identity,reply,publish_now=False)
+        batch.append(Path('results')/(identity+'.json'))
         print('Asterion Control',identity,reply['status'],flush=True)
-    return len(tasks)
+    if batch:
+        publish(batch)
+    return len(batch)
 
 def main():
     setup()
