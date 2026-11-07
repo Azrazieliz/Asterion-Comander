@@ -21,24 +21,24 @@ from .phone_bridge import load as load_phone_pairing
 def _take_mjpeg_frame(buffer: bytearray) -> bytes | None:
     """Return a complete fresh JPEG from one native authenticated MJPEG stream."""
     import re
-    marker=b'--asterionframe\\r\\n'
+    marker=b'--asterionframe\r\n'
     start=buffer.find(marker)
     if start<0:
         if len(buffer)>len(marker):del buffer[:-len(marker)]
         return None
     if start:del buffer[:start]
-    end=buffer.find(b'\\r\\n\\r\\n',len(marker))
+    end=buffer.find(b'\r\n\r\n',len(marker))
     if end<0:
         if len(buffer)>4096:raise ValueError('Invalid MJPEG frame headers')
         return None
-    match=re.search(rb'(?i)content-length:\\s*(\\d+)',bytes(buffer[len(marker):end]))
+    match=re.search(rb'(?i)content-length:\s*(\d+)',bytes(buffer[len(marker):end]))
     if not match:raise ValueError('Missing MJPEG frame length')
     length=int(match.group(1))
     if not 4<=length<=4_000_000:raise ValueError('MJPEG frame size exceeded')
     done=end+4+length+2
     if len(buffer)<done:return None
     frame=bytes(buffer[end+4:end+4+length])
-    if not frame.startswith(b'\\xff\\xd8') or not frame.endswith(b'\\xff\\xd9'):
+    if not frame.startswith(b'\xff\xd8') or not frame.endswith(b'\xff\xd9'):
         raise ValueError('Malformed JPEG frame')
     del buffer[:done]
     return frame
