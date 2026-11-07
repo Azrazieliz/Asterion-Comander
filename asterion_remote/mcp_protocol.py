@@ -73,6 +73,13 @@ TOOLS = [
     spec('control_phone_observation_get_frame','Retrieve one retained Android gameplay screenshot by recorded ID',
          {'frame_id':STR},['frame_id']),
     spec('control_phone_apps','Discover installed launchable Android apps for cross-project work'),
+    spec('control_phone_app_bridges','Discover installed native partner bridges and local owner approval state'),
+    spec('control_phone_app_invoke','Invoke one locally approved partner action with durable idempotency ID',
+         {'package':STR,'action':STR,'request_id':STR,'payload':{'type':'object'}},
+         ['package','action','request_id']),
+    spec('control_phone_app_operation','Query or request cancellation of one previously submitted partner action',
+         {'package':STR,'request_id':STR,'cancel':{'type':'boolean'}},
+         ['package','request_id']),
     spec('control_phone_app_launch','Request opening an installed Android application while Control is foreground (not verified launch)',
          {'package':STR},['package']),
     spec('control_phone_continuation_ack','Acknowledge a checkpoint only after this ChatGPT operator actually observes the next response',
@@ -203,6 +210,15 @@ def invoke_tool(name: str, args: dict):
     if name == 'control_phone_apps':
         from .native_routes import phone_apps
         return phone_apps()
+    if name == 'control_phone_app_bridges':
+        from .native_routes import app_bridges
+        return app_bridges()
+    if name == 'control_phone_app_invoke':
+        from .native_routes import app_bridge_invoke, AppBridgeAction
+        return app_bridge_invoke(AppBridgeAction(**args))
+    if name == 'control_phone_app_operation':
+        from .native_routes import app_bridge_operation, AppBridgeOperation
+        return app_bridge_operation(AppBridgeOperation(**args))
     if name == 'control_phone_app_launch':
         from .native_routes import phone_app_launch, AppLaunch
         return phone_app_launch(AppLaunch(**args))
