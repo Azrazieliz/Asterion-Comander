@@ -1120,6 +1120,12 @@ public final class MainActivity extends Activity {
       if(!voicePreference.contains(VoiceDialogueService.ALWAYS_ON_PREF))
         voicePreference.edit().putBoolean(VoiceDialogueService.ALWAYS_ON_PREF,true).apply();
       VoiceDialogueService.ensureOwnerRequestedAlwaysOn(this);
+      handler.postDelayed(()->{
+        if(VoiceDialogueService.active!=null){
+          android.app.NotificationManager nm=getSystemService(android.app.NotificationManager.class);
+          if(nm!=null)nm.cancel(RestoreReceiver.VOICE_RECOVERY_NOTIFICATION);
+        }
+      },1800L);
     }
     if(prefs!=null&&!destroyed&&getSharedPreferences("agent",MODE_PRIVATE)
        .getBoolean(AgentService.PREF_REMOTE_ENABLED,false)){
