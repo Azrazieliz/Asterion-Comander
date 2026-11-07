@@ -1,7 +1,7 @@
 {
-    "version_code":  906,
-    "version_name":  "0.9.6",
-    "apk_url":  "https://raw.githubusercontent.com/Azrazieliz/Asterion-Comander/main/dist/Asterion-Control-v0.9.6-debug.apk",
-    "sha256":  "c1998bbc65506c2e058fb0c66d12db2278f19fabd1ea9518e1a03cfd334a0cd5",
-    "size_bytes":  246604
+  "version_code": 907,
+  "version_name": "0.9.7",
+  "apk_url": "https://raw.githubusercontent.com/Azrazieliz/Asterion-Comander/main/dist/Asterion-Control-v0.9.7-debug.apk",
+  "sha256": "99fb23275c4b8108306e2bdf8d5c448d5d7871a8ef78414e5d54a0661a02440f",
+  "size_bytes": 260492
 }
