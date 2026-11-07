@@ -41,10 +41,10 @@ def test_mobile_data_is_allowed_but_requires_real_authorization():
 def test_release_is_a_real_optimized_owner_signed_apk():
     gradle=(ROOT/"android/app/build.gradle").read_text()
     workflow=(ROOT/".github/workflows/android-continuation-branch.yml").read_text()
-    assert "versionCode 906" in gradle
-    assert "versionName '0.9.6'" in gradle
+    assert "versionCode 907" in gradle
+    assert "versionName '0.9.7'" in gradle
     assert "debuggable false" in gradle
     assert "minifyEnabled true" in gradle
     assert "signingConfig signingConfigs.ownerRelease" in gradle
     assert ":app:assembleRelease" in workflow
-    assert "Asterion-Control-v0.9.6-release.apk" in workflow
+    assert "Asterion-Control-v0.9.7-release.apk" in workflow
