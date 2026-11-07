@@ -61,7 +61,10 @@ def test_phone_source_uses_direct_tls_and_phone_owned_cycles():
     cycles = (src / "ContinuationCycle.java").read_text()
     voice = (src / "VoiceDialogueService.java").read_text()
     assert "PhoneDirectMcp.start(this)" in agent
-    assert "PhoneGitBridge.poll(this)" not in agent
+    assert "phoneBridgePoller.scheduleWithFixedDelay" in agent
+    assert "PhoneGitBridge.poll(this)" in agent
+    assert "phoneBridgePoller.shutdownNow()" in agent
+    assert "cycles.tick()" not in agent
     assert "setEndpointIdentificationAlgorithm(\"HTTPS\")" in direct
     assert "sec-websocket-accept" in direct.lower()
     assert "Authorization: Bearer " in direct
