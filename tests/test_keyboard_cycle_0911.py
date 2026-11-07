@@ -13,9 +13,9 @@ def test_input_method_enabled_for_keyboard_fallback():
 def test_keyboard_does_not_overwrite_user_draft_or_blindly_hit_enter():
     s=(MAIN/"ControlAccessibilityService.java").read_text()
     assert 'if(!before.isEmpty()&&!message.equals(before))' in s
-    assert 'IME_ACTION_SEND' in s
-    assert 'Keyboard draft prepared but no Send action offered' in s
-    assert 'Keyboard draft remains; send not confirmed' in s
+    assert 'tapVisibleBlueArrow' in s
+    assert 'Visible ChatGPT keyboard/blue Send arrow not confirmed; draft preserved' in s
+    assert 'ChatGPT text still in composer; Send did not complete' in s
     assert 'No lower-screen ChatGPT composer found' not in s
     assert 'result.put("foreground_package"' in s
     assert '.put("editor_package"' in s
