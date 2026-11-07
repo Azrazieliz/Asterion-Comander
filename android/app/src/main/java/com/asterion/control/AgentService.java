@@ -373,6 +373,31 @@ public final class AgentService extends Service {
       try{json(out,200,continuation.cancel());}
       catch(Exception e){json(out,400,error(e.getMessage()));}return;
     }
+    if(method.equals("POST")&&path.equals("/chat/direct")){
+      try{
+        String message=body.optString("message","");
+        if(message.isBlank()||message.length()>3000)
+          throw new IllegalArgumentException("Direct ChatGPT message must be 1-3000 characters");
+        ControlAccessibilityService control=ControlAccessibilityService.active;
+        if(control==null){json(out,503,error("Accessibility permission unavailable"));return;}
+        if(!"com.openai.chatgpt".equals(control.currentPackage())){
+          JSONObject requested=control.requestChatForeground();
+          json(out,200,new JSONObject().put("sent",false)
+            .put("stage","foreground_requested").put("details",requested));
+        }else{
+          JSONObject keyboard=control.prepareChatKeyboard();
+          if(!keyboard.optBoolean("ready",false)){
+            json(out,200,new JSONObject().put("sent",false)
+              .put("stage","writing_bar_focus_requested").put("details",keyboard));
+          }else{
+            JSONObject outcome=control.sendChatMessage(message);
+            json(out,200,outcome.put("stage",
+              outcome.optBoolean("sent",false)?"submitted_unverified":"input_not_submitted"));
+          }
+        }
+      }catch(Exception e){json(out,400,error(e.getMessage()));}
+      return;
+    }
     if(method.equals("POST")&&path.equals("/chat/new")){
       ControlAccessibilityService control=ControlAccessibilityService.active;
       if(control==null){json(out,503,error("Android Accessibility unavailable"));return;}
