@@ -46,6 +46,10 @@ public final class AgentService extends Service {
   private ContinuationCycle cycles;
   private final java.util.concurrent.ScheduledExecutorService observer =
       java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
+  // Independent worker: GitHub HTTP never stalls local performance observation.
+  // Does nothing until the owner explicitly enables the encrypted private bridge.
+  private final java.util.concurrent.ScheduledExecutorService phoneBridgePoller =
+      java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
    private android.net.ConnectivityManager networkManager;
   private android.net.ConnectivityManager.NetworkCallback networkCallback;
   private final java.util.concurrent.atomic.AtomicLong lastNetworkWake =
@@ -67,8 +71,14 @@ public final class AgentService extends Service {
     observer.scheduleWithFixedDelay(()->{
       try{PerformanceManager.tick(this);AppObservation.sample(this);}catch(Exception ignored){}
     },3,3,java.util.concurrent.TimeUnit.SECONDS);
-    // No GitHub polling: Control uses the phone's authenticated outbound TLS
-    // socket over Wi-Fi and cellular. Start only after owner-enabled agent start.
+    // Optional direct phone-to-GitHub transport. No Windows worker, MCP or
+    // tunnel required. All commands run inside AndroidMcp with local consent.
+    // This scheduler is separate from performance sampling and survives UI close.
+    phoneBridgePoller.scheduleWithFixedDelay(()->{
+      try { PhoneGitBridge.poll(this); }
+      catch(Exception e){android.util.Log.w("AsterionAgent","Phone bridge poll failed",e);}
+    },1,3,java.util.concurrent.TimeUnit.SECONDS);
+    // The standard phone-initiated TLS transport remains separately available.
     try{
       networkManager=(android.net.ConnectivityManager)getSystemService(CONNECTIVITY_SERVICE);
       networkCallback=new android.net.ConnectivityManager.NetworkCallback(){
@@ -392,6 +402,7 @@ public final class AgentService extends Service {
     if(networkManager!=null&&networkCallback!=null){
       try{networkManager.unregisterNetworkCallback(networkCallback);}catch(Exception ignored){}
     }
-    PhoneDirectMcp.stop();clients.shutdownNow();observer.shutdownNow();super.onDestroy();}
+    PhoneDirectMcp.stop();clients.shutdownNow();observer.shutdownNow();
+    phoneBridgePoller.shutdownNow();super.onDestroy();}
   @Override public IBinder onBind(Intent i){return null;}
 }
