@@ -50,6 +50,29 @@ ALLOWED={
  'phone_cycle_confirm_new_chat':('POST','/api/v1/phone/cycles/confirm-new-chat'),
 }
 
+# Use the owner's existing locally paired Android API; avoid stale Windows proxy routes.
+PHONE_NATIVE={
+ 'phone_voice_status':('GET','/voice/status'),
+ 'phone_voice_question':('POST','/voice/question'),
+ 'phone_voice_ack':('POST','/voice/ack'),
+ 'phone_voice_enable':('POST','/voice/enable'),
+ 'phone_voice_stop':('POST','/voice/stop'),
+ 'phone_cycle_status':('GET','/cycles/status'),
+ 'phone_cycle_queue':('POST','/continuation/queue'),
+ 'phone_cycle_dispatch':('POST','/continuation/dispatch'),
+ 'phone_cycle_ack':('POST','/continuation/ack'),
+ 'phone_cycle_cancel':('POST','/continuation/cancel'),
+ 'phone_continuation_status':('GET','/continuation/status'),
+ 'phone_continuation_queue':('POST','/continuation/queue'),
+ 'phone_continuation_dispatch':('POST','/continuation/dispatch'),
+ 'phone_continuation_ack':('POST','/continuation/ack'),
+ 'phone_continuation_cancel':('POST','/continuation/cancel'),
+ 'phone_network_status':('GET','/network/status'),
+ 'phone_performance_status':('GET','/performance/status'),
+ 'phone_performance_mode':('POST','/performance/mode'),
+ 'phone_performance_optimize':('POST','/performance/optimize'),
+}
+
 def git_token():
     r=subprocess.run(['git','credential','fill'],input='protocol=https\nhost=github.com\n\n',
                      text=True,capture_output=True,check=True,timeout=15)
@@ -88,6 +111,12 @@ def pc(path,key,method='GET',body=None,binary=False):
     if not path.startswith('/api/v1/') or '..' in path: raise ValueError('Invalid Control path')
     return http(PC+path,key,method,body,control=True,binary=binary)
 
+def phone_native(path,method='GET',body=None):
+    from .phone_bridge import load
+    paired=load()
+    if not paired:raise RuntimeError('Native phone is not paired on private network')
+    return http(paired['base_url']+path,paired['token'],method,body,control=True)
+
 def run(request,key):
     op=request['op']
     args=request.get('params',{})
@@ -96,6 +125,14 @@ def run(request,key):
         ident=args.get('job_id','')
         if not re.fullmatch('[0-9a-f]{32}',ident):raise ValueError('Invalid job ID')
         return pc('/api/v1/commands/'+ident,key)
+    if op in PHONE_NATIVE:
+        method,path=PHONE_NATIVE[op]
+        if method=='GET' and args:raise ValueError('GET takes no arguments')
+        if op=='phone_voice_question' and (not isinstance(args.get('text'),str)
+            or not 1<=len(args['text'])<=700):raise ValueError('Voice question must contain 1-700 characters')
+        if op=='phone_performance_mode' and args.get('mode') not in ('automatic','foreground','full','quiet'):
+            raise ValueError('Invalid performance mode')
+        return phone_native(path,method,args if method=='POST' else None)
     if op not in ALLOWED:raise ValueError('Unsupported operation')
     method,path=ALLOWED[op]
     if method=='GET' and args:raise ValueError('GET takes no body')
