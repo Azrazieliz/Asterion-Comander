@@ -48,8 +48,7 @@ final class PhoneGitBridge {
       "continuation_ack","continuation_cancel","chat_new","observation_status",
       "observation_events","observation_frame",
       "observation_timeline","observation_get_frame","voice_status","voice_question",
-      "voice_ack","cycle_status","cycle_start","cycle_pause","cycle_resume",
-      "cycle_stop","cycle_confirm_new_chat","network_status"};
+      "voice_ack","cycle_status","network_status"};
     for(String name:names) OPS.put("phone_"+name,"control_phone_"+name);
   }
   private static volatile boolean busy=false;
@@ -280,8 +279,9 @@ final class PhoneGitBridge {
       flush(owner,pat);
       // Prefer the isolated phone-owned queue. The legacy android-* queue
       // remains supported for commands already issued before this upgrade.
-      boolean processed=processDirectory(owner,pat,"commands/android/",true);
-      if(!processed)processDirectory(owner,pat,"commands/",false);
+      // Only the explicitly configured phone-owned queue is accepted.
+      // Never execute abandoned legacy Windows or historical root commands.
+      processDirectory(owner,pat,"commands/android/",true);
       lastSuccessMs=System.currentTimeMillis();lastError="";
     }catch(Exception e){
       lastError=e.getClass().getSimpleName()+": "+String.valueOf(e.getMessage());
@@ -358,7 +358,9 @@ final class PhoneGitBridge {
       try{
         long expiry=command.optLong("expires_at_ms",0);
         long now=System.currentTimeMillis();
-        if(expiry>0&&(expiry<now||expiry-now>180000L)){
+        // A missing expiration is invalid. Legacy files must never become
+        // executable merely because the bridge was enabled much later.
+        if(expiry<=0||expiry<now||expiry-now>180000L){
           receipt=new JSONObject().put("id",id).put("ok",false)
             .put("status","expired").put("error",
               "The remote request expired before Android received it; no action executed");
