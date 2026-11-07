@@ -71,5 +71,5 @@ def test_bootstrap_server_uses_stable_gateway_and_no_raw_secret_over_cellular():
     assert 'One-time Control approval' not in android
     assert 'Copy connection key' not in android
     assert 'Check direct Control link' in android
-    assert 'One-time mobile approval unavailable:' in android
+    assert 'One-time mobile approval unavailable:' not in android
     assert "phone_live" not in src
