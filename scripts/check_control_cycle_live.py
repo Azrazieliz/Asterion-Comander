@@ -23,6 +23,9 @@ def main():
        'controller':data.get('controller'),
        'android_autonomous_cycle':data.get('android_autonomous_cycle',False),
        'cycle_active':cycle.get('active',False),
+       'cycle_id':cycle.get('cycle_id',''),
+       'project':cycle.get('project',''),
+       'last_error':str(cycle.get('last_error',''))[:250],
        'cycle_state':cycle.get('state',''),
        'cycle_index':cycle.get('index',0),
        'checkpoint_state':checkpoint.get('state',checkpoint if isinstance(checkpoint,str) else '')
