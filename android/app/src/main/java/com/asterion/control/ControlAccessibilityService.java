@@ -126,9 +126,8 @@ public final class ControlAccessibilityService extends AccessibilityService {
       if(!before.isEmpty()&&!message.equals(before)){
         output[0]=chatOutcome(false,false,
           "Existing user draft preserved; refusing to overwrite");done.countDown();return;}
-      if(before.isEmpty()&&!keyboard.commitText(message,1,null)){
-        output[0]=chatOutcome(false,false,
-          "Keyboard refused text input; no Send tap");done.countDown();return;}
+      if(before.isEmpty())keyboard.commitText(message,1,null);
+      // commitText is void; verify the resulting editor contents before tapping.
       main.postDelayed(()->{
         try{
           InputMethod.AccessibilityInputConnection next=chatKeyboard();
