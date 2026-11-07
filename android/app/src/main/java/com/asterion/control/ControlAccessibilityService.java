@@ -2,6 +2,11 @@ package com.asterion.control;
 
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.GestureDescription;
+import android.accessibilityservice.InputMethod;
+import android.os.Build;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.SurroundingText;
+import android.view.KeyEvent;
 import android.graphics.Path;
 import android.graphics.Rect;
 import android.os.Bundle;
@@ -18,6 +23,81 @@ public final class ControlAccessibilityService extends AccessibilityService {
   public static volatile ControlAccessibilityService active;
   private final Handler main = new Handler(Looper.getMainLooper());
   @Override protected void onServiceConnected() { super.onServiceConnected(); active = this; }
+  @Override public InputMethod onCreateInputMethod(){return new InputMethod(this);}
+  /** Android 13+ native input connection is available even when ChatGPT's
+   * Compose view does not export a text-editable AccessibilityNodeInfo. */
+  private InputMethod.AccessibilityInputConnection chatKeyboard(){
+    if(Build.VERSION.SDK_INT<33)return null;
+    AccessibilityNodeInfo root=getRootInActiveWindow();
+    if(root==null||root.getPackageName()==null||
+        !"com.openai.chatgpt".contentEquals(root.getPackageName()))return null;
+    InputMethod ime=getInputMethod();
+    if(ime==null||!ime.getCurrentInputStarted())return null;
+    EditorInfo editor=ime.getCurrentInputEditorInfo();
+    if(editor==null||!"com.openai.chatgpt".equals(editor.packageName))return null;
+    if((editor.inputType & 0x0000000f)==0x00000001 &&
+        (editor.inputType & 0x000000f0)==0x00000080)return null; // password
+    return ime.getCurrentInputConnection();
+  }
+  private String inputText(InputMethod.AccessibilityInputConnection input){
+    if(input==null)return null;
+    SurroundingText text=input.getSurroundingText(4096,4096,0);
+    return text==null||text.getText()==null?null:text.getText().toString();
+  }
+  private void keyboardChatSend(String message,JSONObject[] output,CountDownLatch done){
+    try{
+      InputMethod.AccessibilityInputConnection keyboard=chatKeyboard();
+      if(keyboard==null){output[0]=chatOutcome(false,false,
+        "ChatGPT keyboard not focused; tap message field first");done.countDown();return;}
+      String before=inputText(keyboard);
+      if(before==null){output[0]=chatOutcome(false,false,
+        "ChatGPT IME text unavailable; refusing blind text injection");done.countDown();return;}
+      if(!before.isEmpty()&&!message.equals(before)){
+        output[0]=chatOutcome(false,false,
+          "ChatGPT composer contains user text; refusing overwrite");done.countDown();return;
+      }
+      if(before.isEmpty())keyboard.commitText(message,1,null);
+      main.postDelayed(()->{
+        try{
+          InputMethod.AccessibilityInputConnection next=chatKeyboard();
+          if(next==null||!message.equals(inputText(next))){
+            output[0]=chatOutcome(false,true,"IME text not verified; inspect composer");done.countDown();return;
+          }
+          AccessibilityNodeInfo root=getRootInActiveWindow();
+          AccessibilityNodeInfo send=root==null?null:findSend(root,0);
+          if(send!=null){
+            if(!send.performAction(AccessibilityNodeInfo.ACTION_CLICK)){
+              output[0]=chatOutcome(false,true,"Send button click refused");done.countDown();return;
+            }
+          }else{
+            EditorInfo editor=getInputMethod().getCurrentInputEditorInfo();
+            if(editor==null||(editor.imeOptions&EditorInfo.IME_MASK_ACTION)!=EditorInfo.IME_ACTION_SEND){
+              output[0]=chatOutcome(false,false,
+                "Keyboard draft prepared but no Send action offered; do not press Enter blindly");
+              done.countDown();return;
+            }
+            next.performEditorAction(EditorInfo.IME_ACTION_SEND);
+          }
+          // Native IME action may be asynchronous. Do not claim a sent turn if
+          // the same draft remains; never automatically replay uncertain sends.
+          main.postDelayed(()->{
+            InputMethod.AccessibilityInputConnection current=chatKeyboard();
+            String remaining=inputText(current);
+            if(message.equals(remaining))
+              output[0]=chatOutcome(false,false,"Keyboard draft remains; send not confirmed");
+            else if(remaining==null)
+              output[0]=chatOutcome(false,true,"Keyboard focus changed; inspect before retry");
+            else
+              output[0]=chatOutcome(true,false,
+                "IME Send action accepted and draft cleared; model reply still unverified");
+            done.countDown();
+          },650L);
+        }catch(Exception e){output[0]=chatOutcome(false,true,
+          "Keyboard send uncertain: "+e.getClass().getSimpleName());done.countDown();}
+      },350L);
+    }catch(Exception e){output[0]=chatOutcome(false,false,
+      "ChatGPT native keyboard unavailable: "+e.getClass().getSimpleName());done.countDown();}
+  }
   private final java.util.concurrent.ExecutorService handoff =
       java.util.concurrent.Executors.newSingleThreadExecutor();
   private final java.util.concurrent.atomic.AtomicBoolean resumeScheduled =
@@ -242,8 +322,8 @@ public final class ControlAccessibilityService extends AccessibilityService {
         }
         AccessibilityNodeInfo editor=findComposer(root);
         if(editor==null){
-          output[0]=chatOutcome(false,false,"No lower-screen ChatGPT composer found");
-          done.countDown();return;
+          keyboardChatSend(message,output,done);
+          return;
         }
         String existing=editor.getText()==null?"":editor.getText().toString();
         if(!existing.isEmpty() && !existing.equals(message)){
@@ -325,6 +405,14 @@ public final class ControlAccessibilityService extends AccessibilityService {
           if (target != null && target.isEditable()) {
             Bundle b = new Bundle(); b.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, a.optString("text"));
             result[0] = target.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,b);
+          }else{
+            InputMethod.AccessibilityInputConnection nativeKeyboard=chatKeyboard();
+            String current=inputText(nativeKeyboard);
+            String intended=a.optString("text");
+            if(current!=null&&current.isEmpty()&&!intended.isEmpty()&&intended.length()<=3800){
+              nativeKeyboard.commitText(intended,1,null);
+              result[0]=intended.equals(inputText(nativeKeyboard));
+            }
           }
           done.countDown(); return;
         }
@@ -379,7 +467,16 @@ public final class ControlAccessibilityService extends AccessibilityService {
     final JSONObject result = new JSONObject();
     main.post(() -> { try {
       AccessibilityNodeInfo root=getRootInActiveWindow();
-      result.put("available",root!=null);if(root!=null)result.put("root",node(root,0,new int[]{0}));
+      result.put("available",root!=null);
+      result.put("foreground_package",root==null||root.getPackageName()==null?"":root.getPackageName().toString());
+      InputMethod ime=Build.VERSION.SDK_INT>=33?getInputMethod():null;
+      EditorInfo editor=ime==null?null:ime.getCurrentInputEditorInfo();
+      result.put("keyboard",new JSONObject().put("active",ime!=null&&ime.getCurrentInputStarted())
+        .put("editor_package",editor==null?"":editor.packageName)
+        .put("ime_action",editor==null?-1:editor.imeOptions&EditorInfo.IME_MASK_ACTION)
+        .put("draft_empty",editor!=null&&"com.openai.chatgpt".equals(editor.packageName)
+          &&"".equals(inputText(chatKeyboard()))));
+      if(root!=null)result.put("root",node(root,0,new int[]{0}));
     }catch(Exception ignore){} finally {done.countDown();} });
     try{done.await(4,TimeUnit.SECONDS);}catch(InterruptedException e){Thread.currentThread().interrupt();}
     return result;
