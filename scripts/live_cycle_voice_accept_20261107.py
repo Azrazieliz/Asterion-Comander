@@ -58,6 +58,9 @@ def main():
       'index':c.get('index'),'ack_count':c.get('ack_count'),
       'error':c.get('last_error'), 'checkpoint':state.get('checkpoint')}
     print('CYCLE',json.dumps(output,separators=(',',':')))
+    if '--voice-test' in sys.argv:
+        _,spoken=call('/voice/question',{'text':'Asterion Control voice test. Please answer out loud: ready.', 'locale':'en-US', 'question_id':'voice-check-20261107'})
+        print('SPOKEN_TEST',json.dumps({k:spoken.get(k) for k in ('ok','question_id','phase')},separators=(',',':')))
     _,v=call('/voice/status')
     keys=('enabled','phase','microphone_active','on_device_recognition','android_system_recognition',
           'recognizer_backend','speaker_started','speaker_finished','voice','voice_quality',
