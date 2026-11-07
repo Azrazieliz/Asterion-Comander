@@ -5,6 +5,7 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.app.KeyguardManager;
 import android.app.Service;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -19,6 +20,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
@@ -66,6 +68,19 @@ public final class VoiceDialogueService extends Service {
   private volatile boolean speakOnly=false;
   private volatile boolean ownerCommandMode=false;
   private volatile String lastVoiceDispatch="not_started";
+  private static final long VOICE_WAKE_MAX_MS=150000L;
+  private PowerManager.WakeLock speechWakeLock;
+  private volatile boolean pendingOwnerTalk=false;
+  private void keepCpuForExchange() {
+    PowerManager pm=(PowerManager)getSystemService(POWER_SERVICE);
+    if(pm==null)throw new IllegalStateException("Power manager unavailable");
+    if(speechWakeLock==null)
+      speechWakeLock=pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"AsterionControl:VoiceExchange");
+    if(!speechWakeLock.isHeld())speechWakeLock.acquire(VOICE_WAKE_MAX_MS);
+  }
+  private void releaseCpuForExchange(){
+    if(speechWakeLock!=null&&speechWakeLock.isHeld())speechWakeLock.release();
+  }
   private void localVoiceTest(){
     if(active!=this)return;
     try{
@@ -130,8 +145,11 @@ public final class VoiceDialogueService extends Service {
   }
   private void state(String value,String message){
     phase=value;error=message;updatedAt=System.currentTimeMillis();
-    if("answered".equals(value)||"failed".equals(value)||"acknowledged".equals(value))
+    if("answered".equals(value)||"failed".equals(value)||"acknowledged".equals(value)
+        ||"ready".equals(value)||"delivered".equals(value)) {
       releaseAudioFocus();
+      releaseCpuForExchange();
+    }
   }
   @Override public void onCreate(){
     SharedPreferences saved=getSharedPreferences(VOICE_PREFS,MODE_PRIVATE);
@@ -146,6 +164,13 @@ public final class VoiceDialogueService extends Service {
         pendingLocalTest=false;
         ui.post(this::localVoiceTest);
       }
+      if(speakerReady&&pendingOwnerTalk&&active==this){
+        pendingOwnerTalk=false;
+        ui.post(()->{
+          try{beginOwnerVoiceControl("en-US");}
+          catch(Exception e){state("failed","Could not start voice control: "+e.getMessage());}
+        });
+      }
     });
   }
   private Notification notification(){
@@ -155,11 +180,16 @@ public final class VoiceDialogueService extends Service {
     Intent stop=new Intent(this,VoiceDialogueService.class).setAction("STOP");
     PendingIntent action=PendingIntent.getService(this,2107,stop,
       PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
+    Intent talk=new Intent(this,VoiceDialogueService.class).setAction("TALK");
+    PendingIntent talkAction=PendingIntent.getService(this,2108,talk,
+      PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
     return new Notification.Builder(this,"asterion_voice")
       .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-      .setContentTitle("Asterion voice questions enabled")
-      .setContentText("Only listens after a spoken question. Stop at any time.")
-      .addAction(android.R.drawable.ic_menu_close_clear_cancel,"Stop microphone session",action)
+      .setContentTitle("Asterion voice control")
+      .setContentText("Ready for voice questions while other apps are open")
+      .setVisibility(Notification.VISIBILITY_PUBLIC)
+      .addAction(android.R.drawable.ic_btn_speak_now,"Talk to Asterion",talkAction)
+      .addAction(android.R.drawable.ic_menu_close_clear_cancel,"Stop",action)
       .setOngoing(true).build();
   }
   @Override public int onStartCommand(Intent intent,int flags,int startId){
@@ -172,7 +202,16 @@ public final class VoiceDialogueService extends Service {
     startForeground(NOTIFICATION_ID,notification(),
       ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
     active=this;
-    if(intent!=null&&"TEST".equals(intent.getAction())){
+    if(intent!=null&&"TALK".equals(intent.getAction())){
+      pendingOwnerTalk=true;
+      if(speakerReady){
+        pendingOwnerTalk=false;
+        ui.post(()->{
+          try{beginOwnerVoiceControl("en-US");}
+          catch(Exception e){state("failed","Voice start failed: "+e.getMessage());}
+        });
+      }else state("initializing","Waiting for speaker");
+    }else if(intent!=null&&"TEST".equals(intent.getAction())){
       pendingLocalTest=true;
       if(speakerReady){pendingLocalTest=false;ui.post(this::localVoiceTest);}
       else state("initializing","Awaiting Android text-to-speech startup");
@@ -222,6 +261,7 @@ public final class VoiceDialogueService extends Service {
     if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)
       throw new IllegalStateException("Android microphone consent is missing");
     acquireAudioFocus(); // Android pauses competing music where the player supports focus.
+    try{keepCpuForExchange();}catch(Exception e){releaseAudioFocus();throw e;}
     speakOnly=false;
     question=text;transcript="";consumed=false;
     speakerPlaybackStarted=false;speakerPlaybackCompleted=false;
@@ -444,6 +484,7 @@ public final class VoiceDialogueService extends Service {
     if("listening".equals(phase)||"processing".equals(phase)||"speaking".equals(phase))
       throw new IllegalStateException("Voice conversation is busy");
     acquireAudioFocus();
+    try{keepCpuForExchange();}catch(Exception e){releaseAudioFocus();throw e;}
     speakOnly=true;ownerCommandMode=false;consumed=true;
     speakerPlaybackStarted=false;speakerPlaybackCompleted=false;
     String id="spoken-reply-"+System.currentTimeMillis();
@@ -514,7 +555,13 @@ public final class VoiceDialogueService extends Service {
     }
   }
   JSONObject report()throws Exception {
-    return new JSONObject().put("enabled",active==this)
+    PowerManager power=(PowerManager)getSystemService(POWER_SERVICE);
+    KeyguardManager lock=(KeyguardManager)getSystemService(KEYGUARD_SERVICE);
+    return new JSONObject().put("screen_interactive",power!=null&&power.isInteractive())
+      .put("device_locked",lock!=null&&lock.isDeviceLocked())
+      .put("bounded_cpu_wake_held",speechWakeLock!=null&&speechWakeLock.isHeld())
+      .put("screen_off_mode","active_foreground_microphone_session")
+      .put("enabled",active==this)
       .put("phase",phase).put("question_id",questionId)
       .put("question",question).put("transcript",transcript)
       .put("microphone_active",microphoneActive)
@@ -539,6 +586,7 @@ public final class VoiceDialogueService extends Service {
       if(listener!=null){listener.destroy();listener=null;}
       if(speaker!=null){speaker.stop();speaker.shutdown();}
       releaseAudioFocus();
+      releaseCpuForExchange();
     });
     voiceControlWorker.shutdownNow();
     super.onDestroy();
