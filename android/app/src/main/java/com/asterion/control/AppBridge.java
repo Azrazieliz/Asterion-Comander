@@ -15,6 +15,11 @@ import org.json.JSONObject;
 import java.security.MessageDigest;
 import java.util.Map;
 import java.util.regex.Pattern;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /** Opt-in cross-app protocol. Asterion Control is a transport, never a replacement engine.
  * Partner applications MUST independently verify the caller and authorize each action.
@@ -28,6 +33,7 @@ final class AppBridge {
   private static final Pattern ACTION=Pattern.compile("[a-z][a-z0-9_.-]{0,79}");
   private static final Pattern REQUEST_ID=Pattern.compile("[A-Za-z0-9_.:-]{8,100}");
   private static final Object LOCK=new Object();
+  private static final ExecutorService CALLS=Executors.newFixedThreadPool(2);
   private static SharedPreferences prefs(Context ctx){
     return ctx.getSharedPreferences(PREF,Context.MODE_PRIVATE);
   }
@@ -120,8 +126,14 @@ final class AppBridge {
     args.putString("payload_json",data.toString());
     String status="outcome_unknown";
     try{
-      Bundle result=ctx.getContentResolver().call(Uri.parse("content://"+authority(pkg)),
-        "asterion.v1.invoke",null,args);
+      Future<Bundle> executing=CALLS.submit(()->ctx.getContentResolver().call(
+        Uri.parse("content://"+authority(pkg)),"asterion.v1.invoke",null,args));
+      Bundle result;
+      try{result=executing.get(7L,TimeUnit.SECONDS);}
+      catch(TimeoutException timeout){
+        executing.cancel(true);
+        throw new IllegalStateException("Partner bridge timed out; outcome uncertain");
+      }
       if(result==null)throw new IllegalStateException("App returned no result");
       String raw=result.getString("result_json","");
       if(raw.length()>8192)throw new IllegalStateException("Partner result exceeds size limit");
