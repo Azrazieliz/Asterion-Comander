@@ -97,29 +97,45 @@ async def main():
                 return None
 
             try:
-                await act("home_to_launcher",{"action":"home"})
-                await act("open_app_drawer",{"action":"swipe",
-                          "x":540,"y":1840,"x2":540,"y2":580,"duration_ms":260})
-                u,_=await ui()
-                clock=find(u,["Clock"])
-                if not clock:
-                    # Samsung app drawer can paginate horizontally.
-                    await act("next_drawer_page",{"action":"swipe",
-                        "x":900,"y":1050,"x2":250,"y2":1050,"duration_ms":260})
+                # Open the already-running Asterion Control task in native
+                # Recents. Unlike the launcher search, this requires no typing.
+                await act("open_recents_for_Control",{"action":"recents"})
+                control_open=False
+                for attempt in range(4):
                     u,_=await ui()
-                    clock=find(u,["Clock"])
-                if not clock:
-                    search=find(u,["Search","Finder"],bottom=False)
-                    if search:
-                        await tap("open_launcher_search",search)
-                        await act("search_Clock",{"action":"type","text":"Clock"})
-                        u,_=await ui()
-                        clock=find(u,["Clock"])
-                if not clock:
-                    raise RuntimeError("Samsung Clock icon not exposed by launcher accessibility")
-                await tap("launch_Clock",clock)
-                if await until(app,timeout=2.5) is None:
-                    raise RuntimeError("Clock did not become foreground")
+                    b_control=find(u,["Asterion Control"])
+                    if b_control:
+                        # Use the exposed edge of stacked Samsung task cards.
+                        x=min(b_control[2]-10,b_control[0]+22)
+                        y=(b_control[1]+b_control[3])//2
+                        await act("select_Control_recent_"+str(attempt+1),
+                                  {"action":"tap","x":x,"y":y})
+                        if await until("com.asterion.control",1.0) is not None:
+                            control_open=True;break
+                    await act("scroll_recents_to_Control_"+str(attempt+1),
+                              {"action":"swipe","x":275,"y":1070,
+                               "x2":830,"y2":1070,"duration_ms":220})
+                if not control_open:
+                    raise RuntimeError("Asterion Control native task could not be opened")
+
+                # This approved phone-native API launches only an installed app
+                # while Control is visibly foreground; it is not an ADB shell.
+                ts=time.perf_counter()
+                response=await http.post(phone+"/apps/launch",
+                    headers={"Authorization":"Bearer "+bearer},
+                    json={"package":app},timeout=4)
+                response.raise_for_status()
+                launch=response.json()
+                dispatched=launch.get("intent_dispatched") is True
+                actions.append({"step":"launch_Clock_native_app_catalog",
+                                "ok":dispatched,
+                                "rtt_ms":round((time.perf_counter()-ts)*1000,1),
+                                "device_ms":None})
+                if not dispatched:
+                    raise RuntimeError("Owner-approved native launch was denied: "
+                                       +str(launch.get("reason","unknown"))[:90])
+                if await until(app,timeout=3.2) is None:
+                    raise RuntimeError("Clock did not become foreground after native launch")
                 opened=True
                 for title in ("World clock","Stopwatch","Timer","Alarm"):
                     u,_=await ui()
