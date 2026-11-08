@@ -107,6 +107,9 @@ async def main():
                         steps.append(record)
                         if not report.get("ok"):
                             raise RuntimeError("Native action rejected: " + label)
+                        # The real-time bridge enforces >=25 ms between actions.
+                        # Allow Android to complete the gesture and settle its UI.
+                        await asyncio.sleep(0.09)
                         return
 
                 raise TimeoutError("Direct command acknowledgment missing: "+label)
@@ -147,7 +150,14 @@ async def main():
                                      "y":1880,"x2":535,"y2":650,"duration_ms":240})
                         state, _ = await ui()
                         if not await tap_label("open_Settings_from_drawer", state, "Settings"):
-                            raise RuntimeError("Settings icon not accessible in shade or drawer")
+                            # Samsung Finder search is available in most app drawers.
+                            if await tap_label("tap_app_search",state,"Search","Finder"):
+                                state, _ = await ui()
+                                if (state.get("keyboard") or {}).get("active"):
+                                    await action("search_for_Settings",{"action":"type","text":"Settings"})
+                                state, _ = await ui()
+                            if not await tap_label("open_Settings_search_result",state,"Settings"):
+                                raise RuntimeError("Settings icon not accessible in shade or drawer")
 
                 state, _ = await wait_pkg(SETTINGS_PACKAGE)
                 settings_open = True
@@ -194,6 +204,24 @@ async def main():
                     except Exception:
                         break
                     await asyncio.sleep(0.08)
+                if not restore_result:
+                    # Restore the original app through Samsung Recents without
+                    # touching user content or trying to reconstruct a draft.
+                    try:
+                        await action("restore_from_recents", {"action":"recents"})
+                        for attempt in range(3):
+                            state, _ = await ui()
+                            if await tap_label("select_ChatGPT_recent",state,"ChatGPT"):
+                                await asyncio.sleep(0.1)
+                                state, _ = await ui()
+                                if state.get("foreground_package")==original:
+                                    restore_result=True
+                                    break
+                            await action("inspect_next_recent_card", {
+                                "action":"swipe","x":820,"y":1040,
+                                "x2":265,"y2":1040,"duration_ms":220})
+                    except Exception:
+                        pass
                 if not restore_result:
                     state, _ = await ui()
                     if state.get("foreground_package") == original:
