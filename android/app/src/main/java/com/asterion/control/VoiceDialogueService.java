@@ -81,6 +81,19 @@ public final class VoiceDialogueService extends Service {
   private volatile long lastVoiceDispatchAt=0L;
   private BroadcastReceiver unlockedReceiver;
   static final String ALWAYS_ON_PREF="voice_always_on_enabled";
+  static final String MUSIC_SAFE_MIGRATION_PREF="voice_music_safe_migrated_v923";
+  /**
+   * Older builds silently enabled persistent listening on first activity resume.
+   * Force that legacy default off exactly once; future explicit user choices persist.
+   * No microphone permission or service startup is required for this migration.
+   */
+  static void migrateMusicSafePreferences(Context owner){
+    SharedPreferences prefs=owner.getSharedPreferences("voice_style",Context.MODE_PRIVATE);
+    if(!prefs.getBoolean(MUSIC_SAFE_MIGRATION_PREF,false)){
+      prefs.edit().putBoolean(ALWAYS_ON_PREF,false)
+        .putBoolean(MUSIC_SAFE_MIGRATION_PREF,true).apply();
+    }
+  }
   private static final Pattern WAKE_REQUEST=Pattern.compile(
     "(?i)^\\s*(?:(?:hey|okay|ok)\\s+)?asterion[\\s,:;.!?-]*(.*)$");
   private volatile boolean ambientEnabled=false;
@@ -325,6 +338,11 @@ public final class VoiceDialogueService extends Service {
       .setOngoing(true).build();
   }
   @Override public int onStartCommand(Intent intent,int flags,int startId){
+    migrateMusicSafePreferences(this);
+    if(intent==null && !getSharedPreferences("voice_style",MODE_PRIVATE)
+        .getBoolean(ALWAYS_ON_PREF,false)){
+      stopSelf();return START_NOT_STICKY;
+    }
     if(intent!=null&&"STOP".equals(intent.getAction())){
       getSharedPreferences("voice_style",MODE_PRIVATE).edit()
         .putBoolean(ALWAYS_ON_PREF,false).apply();
@@ -365,6 +383,7 @@ public final class VoiceDialogueService extends Service {
   }
   // Owner-only native API, with Android microphone consent and foreground rules.
   static JSONObject enableFromOwnerApi(Context owner)throws Exception{
+    migrateMusicSafePreferences(owner);
     if(owner.checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)
       throw new IllegalStateException("Android microphone permission is required");
     VoiceDialogueService running=active;
