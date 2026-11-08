@@ -51,6 +51,7 @@ public final class RestoreReceiver extends BroadcastReceiver {
         Log.w("AsterionRestore","Android deferred private phone agent",e);
       }
     }
+    VoiceDialogueService.migrateMusicSafePreferences(context);
     if(context.getSharedPreferences("voice_style",Context.MODE_PRIVATE)
        .getBoolean(VoiceDialogueService.ALWAYS_ON_PREF,false)){
       // No background startForegroundService(MICROPHONE) here. Android 14+
