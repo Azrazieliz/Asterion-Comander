@@ -163,7 +163,20 @@ async def main():
                 state, _ = await wait_pkg(SETTINGS_PACKAGE)
                 settings_open = True
 
-                for attempt in range(5):
+                # The Settings launcher may resume its last nested page rather
+                # than its root. Navigate up safely before searching for About.
+                for depth in range(5):
+                    state, _ = await ui()
+                    if (find_bounds(state, "Connections") or
+                        find_bounds(state, "About phone") or
+                        find_bounds(state, "Display")):
+                        break
+                    await action("return_to_Settings_root_" + str(depth+1),
+                                 {"action":"back"})
+                    state, _ = await ui()
+                    if state.get("foreground_package") != SETTINGS_PACKAGE:
+                        raise RuntimeError("Settings home not reached from nested page")
+                for attempt in range(7):
                     state, _ = await ui()
                     if await tap_label("select_About_phone", state, "About phone"):
                         reached_about = True
@@ -174,13 +187,14 @@ async def main():
                 if not reached_about:
                     raise RuntimeError("About phone category not accessible")
 
-                for attempt in range(8):
+                for attempt in range(5):
                     state, _ = await ui()
-                    if find_bounds(state, "Software information"):
-                        if await tap_label("open_Software_information",state,"Software information"):
-                            reached_software = True
-                            break
-                    await asyncio.sleep(0.15)
+                    if await tap_label("open_Software_information",state,"Software information"):
+                        reached_software = True
+                        break
+                    await action("scroll_About_phone_" + str(attempt+1),
+                                 {"action":"swipe","x":510,"y":1750,
+                                  "x2":510,"y2":700,"duration_ms":210})
                 if not reached_software:
                     raise RuntimeError("Software information entry not accessible")
                 state, _ = await ui()
@@ -212,8 +226,15 @@ async def main():
                         await action("restore_from_recents", {"action":"recents"})
                         for attempt in range(3):
                             state, _ = await ui()
-                            if await tap_label("select_ChatGPT_recent",state,"ChatGPT"):
-                                await asyncio.sleep(0.1)
+                            chat_bounds = find_bounds(state,"ChatGPT")
+                            if chat_bounds:
+                                # Samsung overlapping Recents cards: center of
+                                # a rear card can hit the front card. Tap its
+                                # verified visible left strip instead.
+                                await action("select_ChatGPT_recent",{
+                                    "action":"tap",
+                                    "x":min(chat_bounds[2]-15,chat_bounds[0]+55),
+                                    "y":(chat_bounds[1]+chat_bounds[3])//2})
                                 state, _ = await ui()
                                 if state.get("foreground_package")==original:
                                     restore_result=True
@@ -229,8 +250,11 @@ async def main():
                         restore_result=True
 
             total_ms = round((time.perf_counter()-started)*1000,1)
-            print(json.dumps({
-                "transport":"persisted_authenticated_native_WebSocket_no_GitHub_between_actions",
+            timings=[step["roundtrip_ms"] for step in steps
+                     if step.get("ok") and isinstance(step.get("roundtrip_ms"), (float,int))]
+            import statistics
+            summary = {
+                "transport":"direct_authenticated_native_WebSocket",
                 "status":"completed" if reached_software and restore_result and not blocker else "partial",
                 "settings_opened":settings_open,
                 "about_phone_opened":reached_about,
@@ -238,12 +262,19 @@ async def main():
                 "original_app_restored":restore_result,
                 "original_chatgpt_draft_not_edited":True,
                 "existing_draft_at_start":bool(draft_present),
-                "steps":steps,
+                "action_count":len(steps),
+                "successful_actions":sum(1 for step in steps if step.get("ok")),
+                "median_action_ack_ms":round(statistics.median(timings),1) if timings else None,
+                "fastest_action_ack_ms":round(min(timings),1) if timings else None,
+                "slowest_action_ack_ms":round(max(timings),1) if timings else None,
                 "total_workflow_ms":total_ms,
                 "frames_observed_without_screenshots":frames,
                 "first_ui_ms":initial_ui_ms,
+                "steps_first":steps[:8],
+                "steps_last":steps[-6:],
                 "blocker":blocker
-            },ensure_ascii=False,separators=(",",":")),flush=True)
+            }
+            print("DIRECT_APP_WORKFLOW_RESULT "+json.dumps(summary,ensure_ascii=False,separators=(",",":")),flush=True)
 
 
 if __name__ == "__main__":
