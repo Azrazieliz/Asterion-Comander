@@ -41,6 +41,9 @@ public final class AgentService extends Service {
   private ServerSocket server;
   private Thread acceptThread;
   private final ExecutorService clients=Executors.newFixedThreadPool(6);
+  // Continuous native screen-sharing sessions cannot exhaust command workers.
+  private final java.util.concurrent.atomic.AtomicInteger liveStreamClients=
+      new java.util.concurrent.atomic.AtomicInteger(0);
   private TransferStore transfers;
   private ContinuationLedger continuation;
   private ContinuationCycle cycles;
@@ -179,6 +182,20 @@ public final class AgentService extends Service {
       }
     }
     alive=false;running=false;
+  }
+  JSONObject nativeStreamStatus()throws Exception{
+    long frameAt=CaptureService.latestAtMs;
+    long frameAge=frameAt<=0?-1:Math.max(0,System.currentTimeMillis()-frameAt);
+    boolean ready=CaptureService.active&&CaptureService.latest!=null
+        &&frameAge>=0&&frameAge<5000L;
+    return new JSONObject().put("ok",true).put("capture_authorized",CaptureService.active)
+      .put("stream_ready",ready).put("stream_format","multipart/x-mixed-replace")
+      .put("transport","native_android_mediaprojection_mjpeg")
+      .put("stream_path","/stream")
+      .put("requires_bearer_on_private_network",true)
+      .put("frame_width",CaptureService.width).put("frame_height",CaptureService.height)
+      .put("last_frame_age_ms",frameAge).put("frames_encoded",CaptureService.framesEncoded)
+      .put("stream_clients",liveStreamClients.get()).put("stream_client_limit",2);
   }
   private String line(InputStream in)throws Exception{
     ByteArrayOutputStream b=new ByteArrayOutputStream();int c;
@@ -474,16 +491,39 @@ public final class AgentService extends Service {
       if(b==null){json(out,503,error("Start screen sharing on the phone"));return;}
       write(out,200,"image/jpeg",b);return;
     }
+    if(method.equals("GET")&&path.equals("/stream/status")){
+      json(out,200,nativeStreamStatus());return;
+    }
     if(method.equals("GET")&&path.equals("/stream")){
-      out.write("HTTP/1.1 200 OK\r\nContent-Type: multipart/x-mixed-replace; boundary=asterionframe\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n".getBytes(StandardCharsets.UTF_8));out.flush();
-      long lastSentAt=0L;
-      while(alive&&!s.isClosed()){
-        byte[] b=CaptureService.latest;
-        long frameAt=CaptureService.latestAtMs;
-        if(b!=null&&frameAt>lastSentAt){String h="--asterionframe\r\nContent-Type: image/jpeg\r\nContent-Length: "+b.length+"\r\n\r\n";
-          out.write(h.getBytes(StandardCharsets.UTF_8));out.write(b);out.write("\r\n".getBytes(StandardCharsets.UTF_8));out.flush();lastSentAt=frameAt;}
-        Thread.sleep(12);
-      }return;
+      if(!nativeStreamStatus().optBoolean("stream_ready",false)){
+        json(out,503,error("Native MediaProjection stream is inactive or stale"));return;
+      }
+      if(liveStreamClients.incrementAndGet()>2){
+        liveStreamClients.decrementAndGet();
+        json(out,503,error("Live stream viewer limit reached; commands remain available"));return;
+      }
+      try{
+        out.write(("HTTP/1.1 200 OK\r\n"
+          +"Content-Type: multipart/x-mixed-replace; boundary=asterionframe\r\n"
+          +"Cache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n"
+          +"Connection: close\r\n\r\n").getBytes(StandardCharsets.UTF_8));
+        out.flush();
+        long lastSentAt=0L;
+        while(alive&&CaptureService.active&&!s.isClosed()){
+          byte[] frame=CaptureService.latest;
+          long frameAt=CaptureService.latestAtMs;
+          if(frameAt<=0||System.currentTimeMillis()-frameAt>10000L)break;
+          if(frame!=null&&frameAt>lastSentAt){
+            String headers="--asterionframe\r\nContent-Type: image/jpeg\r\nContent-Length: "
+              +frame.length+"\r\n\r\n";
+            out.write(headers.getBytes(StandardCharsets.UTF_8));
+            out.write(frame);out.write("\r\n".getBytes(StandardCharsets.UTF_8));
+            out.flush();lastSentAt=frameAt;
+          }
+          Thread.sleep(35);
+        }
+      }finally{liveStreamClients.decrementAndGet();}
+      return;
     }
     json(out,404,error("Unknown endpoint"));
   }catch(Exception e){android.util.Log.w("AsterionAgent","Client closed: "+e.getClass().getSimpleName());}}
