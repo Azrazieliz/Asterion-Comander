@@ -76,10 +76,11 @@ async def main():
                               "reason": "ChatGPT no longer foreground",
                               "foreground": original}))
             return
-        if keyboard.get("active") and keyboard.get("editor_package") == EXPECTED_PACKAGE                 and keyboard.get("draft_empty") is not True:
-            print(json.dumps({"status": "not_started",
-                              "reason": "An existing ChatGPT draft may be present"}))
-            return
+        # Never edit, clear, or submit any existing ChatGPT draft. Switching
+        # to Android Settings is read-only and leaves the draft untouched.
+        draft_present = (keyboard.get("active")
+                         and keyboard.get("editor_package") == EXPECTED_PACKAGE
+                         and keyboard.get("draft_empty") is not True)
 
         async with connect(STREAM,
                            origin="http://192.168.1.133:8911",
@@ -235,6 +236,8 @@ async def main():
                 "about_phone_opened":reached_about,
                 "software_information_opened":reached_software,
                 "original_app_restored":restore_result,
+                "original_chatgpt_draft_not_edited":True,
+                "existing_draft_at_start":bool(draft_present),
                 "steps":steps,
                 "total_workflow_ms":total_ms,
                 "frames_observed_without_screenshots":frames,
