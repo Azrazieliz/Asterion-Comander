@@ -117,6 +117,32 @@ class LivePhoneOperator:
         self.state=response["state"]
         return describe(self.state)
 
+    async def observe_transition(self,previous: dict, timeout_s: float=1.4):
+        """Do not confuse a gesture acknowledgment with a loaded page.
+
+        Poll actual Android Accessibility state until it changes; then read
+        it once more after settling. If nothing changes, report unverified
+        instead of assuming a tap navigated successfully.
+        """
+        def signature(item):
+            return json.dumps({
+                "foreground_package":item.get("foreground_package"),
+                "keyboard":item.get("keyboard"),
+                "root":item.get("root")
+            },sort_keys=True,ensure_ascii=False)
+        before=signature(previous)
+        deadline=time.monotonic()+timeout_s
+        seen=None
+        while time.monotonic()<deadline:
+            await asyncio.sleep(0.085)
+            seen=await self.inspect()
+            if self.state is not None and signature(self.state)!=before:
+                await asyncio.sleep(0.11)
+                seen=await self.inspect()
+                return {"transition_observed":True,"current":seen}
+        return {"transition_observed":False,"current":seen,
+                "note":"No changed UI confirmed; inspect before deciding next action"}
+
     async def action(self,payload: dict):
         if not self.state_id or self.state is None:
             raise RuntimeError("Inspect the current UI before each action")
@@ -194,14 +220,15 @@ async def main():
                     print(json.dumps(await operator.inspect(),
                                      ensure_ascii=False),flush=True)
                     continue
+                observed_before=operator.state
                 if name=="launch":
                     result=await operator.launch(payload)
                 else:
                     result=await operator.action(payload)
                 print(json.dumps(result,separators=(",",":")),flush=True)
                 if result.get("ok"):
-                    print(json.dumps(await operator.inspect(),
-                                     ensure_ascii=False),flush=True)
+                    outcome=await operator.observe_transition(observed_before)
+                    print(json.dumps(outcome,ensure_ascii=False),flush=True)
                 else:
                     print("Action not confirmed. Inspect before any retry.",
                           flush=True)
