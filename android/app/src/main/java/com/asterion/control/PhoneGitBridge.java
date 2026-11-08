@@ -44,6 +44,7 @@ final class PhoneGitBridge {
   private static final Map<String,String> OPS=new HashMap<>();
   static {
     String[] names={"status","bridge_status","health","screen","stream_status","ui","input","apps","app_launch",
+      "app_bridges","app_invoke","app_operation",
       "continuation_status","continuation_queue","continuation_dispatch",
       "continuation_ack","continuation_cancel","chat_new","observation_status",
       "observation_events","observation_frame",
