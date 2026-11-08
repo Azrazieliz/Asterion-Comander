@@ -34,8 +34,8 @@ function WaitPort([string]$address,[int]$port,[bool]$present) {
   return $false
 }
 function RestartCanonical([string]$module,[string]$address,[int]$port) {
-  $listeners=Port $address $port
-  if($listeners.Count -ne 1){throw ('Unexpected listener count on '+$port)}
+  $listeners=@(Port $address $port)
+  if($listeners.Count -ne 1){throw ('Unexpected listener count on '+$port+': '+$listeners.Count)}
   $ownerId=[int]$listeners[0].OwningProcess
   $process=Get-CimInstance Win32_Process -Filter ('ProcessId='+$ownerId)
   if(!$process -or $process.CommandLine -notmatch [regex]::Escape('uvicorn '+$module+':app')){
