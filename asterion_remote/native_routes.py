@@ -1,8 +1,6 @@
 """Read-only phone telemetry and explicit input proxy over private network/VPN."""
 from fastapi import APIRouter, Depends
 from fastapi.responses import Response
-from pydantic import BaseModel, Field
-from typing import Literal
 from .security import require_token
 from .phone_bridge import PairPhone, PhoneInput, register, request, load
 from .native_transfer import TransferRequest, start_transfer, transfer_status, cancel_transfer
@@ -90,6 +88,8 @@ def stop_control_session(key: str):
     return cancel_session(key)
 
 # Checkpoint messages are stored and sent by the Android head, never by PC AI.
+from pydantic import BaseModel, Field
+from typing import Literal
 
 class ContinuationRequest(BaseModel):
     project: str = Field(min_length=3,max_length=70)
