@@ -23,6 +23,7 @@ from .oauth_bridge import router as oauth_router, valid_access, challenge, SCOPE
 from .phone_bridge import load as load_phone
 from .phone_live import (router as phone_live_router, connected as phone_live_connected,
                          invoke as phone_live_invoke, DirectPhoneUncertain)
+from .live_operator_bridge import OPERATOR as live_operator, LiveOperatorUnavailable
 
 ROOT = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "AsterionControl"
 GATEWAY_KEY = ROOT / "mcp-gateway-token.txt"
@@ -48,6 +49,29 @@ NATIVE_PHONE_PREFIXES = (
     "control_phone_cycle_",
     "control_phone_network_status",
 )
+LIVE_OPERATOR_TOOLS = [
+    {"name":"control_live_ui",
+     "description":"DEFAULT interactive phone control: inspect current Android accessibility state over the persistent authenticated direct WebSocket; returns one-use state_id. Call before every action.",
+     "inputSchema":{"type":"object","properties":{},"required":[]}},
+    {"name":"control_live_action",
+     "description":"Execute ONE real native Android gesture via persistent direct WebSocket, guarded by the state_id returned by control_live_ui. Inspect again after this acknowledgment to confirm the resulting UI. Never run a prewritten action chain.",
+     "inputSchema":{"type":"object","properties":{
+         "state_id":{"type":"string","minLength":12},
+         "action":{"type":"string","enum":["tap","swipe","long_press","back","home","recents","notifications","type","click_text"]},
+         "x":{"type":"integer"},"y":{"type":"integer"},
+         "x2":{"type":"integer"},"y2":{"type":"integer"},
+         "duration_ms":{"type":"integer","minimum":100,"maximum":5000},
+         "text":{"type":"string","maxLength":2000}
+       },"required":["state_id","action"]}},
+    {"name":"control_live_launch",
+     "description":"Request opening an installed app through owner-approved Asterion Control while it is foreground. Requires fresh control_live_ui state_id; verify newly foreground app by inspecting again.",
+     "inputSchema":{"type":"object","properties":{
+         "state_id":{"type":"string","minLength":12},
+         "package":{"type":"string","minLength":3,"maxLength":180}
+       },"required":["state_id","package"]}},
+]
+LIVE_NAMES={tool["name"] for tool in LIVE_OPERATOR_TOOLS}
+
 MAX_REQUEST = 2_000_000
 MAX_RESPONSE = 8_000_000
 app = FastAPI(
@@ -215,6 +239,34 @@ async def rpc(req: Request):
     name = (message.get("params") or {}).get("name") if isinstance(message.get("params"), dict) else ""
     if method == "tools/call":
         params = message.get("params") or {}
+        if name in LIVE_NAMES:
+            arguments=params.get("arguments") or {}
+            if not isinstance(arguments,dict):
+                raise HTTPException(400,"Live Control arguments must be an object")
+            route=_windows_route()
+            if route is None:
+                raise HTTPException(503,"Private Windows Control server is unavailable")
+            try:
+                if name=="control_live_ui":
+                    live_result=await live_operator.inspect(route)
+                elif name=="control_live_action":
+                    live_result=await live_operator.action(route,arguments)
+                else:
+                    live_result=await live_operator.launch(route,arguments)
+            except LiveOperatorUnavailable as exc:
+                # No automatic retry: a dispatched gesture might have executed.
+                raise HTTPException(504,str(exc)) from exc
+            result={
+                "content":[{"type":"text","text":json.dumps(live_result,
+                                                            ensure_ascii=False)}],
+                "structuredContent":live_result,
+                "isError":not bool(live_result.get("ok")),
+            }
+            return Response(content=json.dumps({"jsonrpc":"2.0",
+                                                "id":message.get("id"),
+                                                "result":result}),
+                            media_type="application/json",
+                            headers={"Cache-Control":"no-store"})
         native = isinstance(name, str) and _tool_is_native(name)
         if native:
             if phone_live_connected():
@@ -278,7 +330,7 @@ async def rpc(req: Request):
         # Windows agent is older/offline. Native tools override their schemas.
         # Discovery is NOT evidence that a device command can execute.
         from .mcp_protocol import TOOLS
-        catalogs.append({"result":{"tools":TOOLS}})
+        catalogs.append({"result":{"tools":TOOLS+LIVE_OPERATOR_TOOLS}})
         merged = {}
         # Reverse so live native catalogues win over the static baseline.
         for item in reversed(catalogs):
