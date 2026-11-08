@@ -1112,13 +1112,11 @@ public final class MainActivity extends Activity {
   @Override protected void onResume(){
     super.onResume();
     visibleActivity = new java.lang.ref.WeakReference<>(this);
-    // The owner requested speech-only activation. Start the previously consented
-    // microphone service while this activity is visibly resumed; Android forbids
-    // starting a new microphone FGS from an ordinary hidden/background app.
+    // Never enable the microphone just because Android permission was granted.
+    // A one-time migration clears legacy automatic listening; only an explicit
+    // owner opt-in may start persistent wake-phrase monitoring.
+    VoiceDialogueService.migrateMusicSafePreferences(this);
     if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED){
-      SharedPreferences voicePreference=getSharedPreferences("voice_style",MODE_PRIVATE);
-      if(!voicePreference.contains(VoiceDialogueService.ALWAYS_ON_PREF))
-        voicePreference.edit().putBoolean(VoiceDialogueService.ALWAYS_ON_PREF,true).apply();
       VoiceDialogueService.ensureOwnerRequestedAlwaysOn(this);
       handler.postDelayed(()->{
         if(VoiceDialogueService.active!=null){
