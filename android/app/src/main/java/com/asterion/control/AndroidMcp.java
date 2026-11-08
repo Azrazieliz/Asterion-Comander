@@ -44,6 +44,7 @@ final class AndroidMcp {
     tools.put(tool("control_phone_performance_optimize","Prioritize foreground app for 20 minutes by lowering Control overhead",null));
     tools.put(tool("control_phone_ui","Accessible active Android UI hierarchy",null));
     tools.put(tool("control_phone_screen","Current consented live native screen frame",null));
+    tools.put(tool("control_phone_stream_status","Inspect ongoing consented native Android screen-sharing stream without screenshots",null));
     tools.put(tool("control_phone_input","Authorized Android gesture or UI action",args(
       "action","string","x","number","y","number","x2","number","y2","number",
       "duration_ms","integer","text","string"),"action"));
@@ -125,6 +126,7 @@ final class AndroidMcp {
         return textContent(service.dump());
       }
       case "control_phone_screen":return imageContent(CaptureService.latest);
+      case "control_phone_stream_status":return textContent(owner.nativeStreamStatus());
       case "control_phone_input":{
         ControlAccessibilityService access=ControlAccessibilityService.active;
         if(access==null)throw new IllegalStateException("Owner has not enabled Android Accessibility");
