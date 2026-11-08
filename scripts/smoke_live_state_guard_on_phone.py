@@ -74,10 +74,21 @@ def main():
                     result["status"]="rejected"
                     return
                 performed=True
-                current,current_ms=inspect(ws,"after-shade")
-                after=current["state"]["foreground_package"]
+                # Android transitions can finish AFTER native input_ack.
+                # Observe until SystemUI is actually foreground, not just until
+                # the gesture is acknowledged.
+                after=before
+                current_ms=0.0
+                for n in range(20):
+                    current,ms=inspect(ws,"after-shade-"+str(n))
+                    current_ms+=ms
+                    after=current["state"].get("foreground_package")
+                    if after=="com.android.systemui":
+                        break
+                    time.sleep(0.08)
                 result["observed_after_action"]=after
-                result["inspect_after_ms"]=current_ms
+                result["shade_observed"]=after=="com.android.systemui"
+                result["inspect_after_ms"]=round(current_ms,1)
                 # An old inspection may not authorize a second gesture.
                 ws.send_json({"type":"input","id":"reject-old-token",
                               "state_id":initial["state_id"],
@@ -93,12 +104,18 @@ def main():
                         restored,ms=action(ws,"return-ChatGPT",state,"back",foreground)
                         result["restore_ack_ok"]=restored.get("ok") is True
                         result["restore_ack_ms"]=ms
-                    final,_=inspect(ws,"final-verification")
-                    result["final_app"]=final["state"].get("foreground_package")
-                    result["restored"]=result["final_app"]==before
+                    after_restore=""
+                    for n in range(20):
+                        final,_=inspect(ws,"final-verification-"+str(n))
+                        after_restore=final["state"].get("foreground_package")
+                        if after_restore==before:break
+                        time.sleep(0.08)
+                    result["final_app"]=after_restore
+                    result["restored"]=after_restore==before
                     result["draft_not_edited"]=True
             result["status"]="passed" if (result.get("open_shade_ack_ok") and
-                result.get("old_state_rejected") and result.get("restored")) else "partial"
+                result.get("shade_observed") and result.get("old_state_rejected")
+                and result.get("restored")) else "partial"
     print(json.dumps(result,separators=(",",":")),flush=True)
 
 
