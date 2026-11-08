@@ -28,7 +28,8 @@ function Port([string]$address,[int]$port) {
 function WaitPort([string]$address,[int]$port,[bool]$present) {
   $until=(Get-Date).AddSeconds(16)
   do{
-    if(((Port $address $port).Count -gt 0) -eq $present){return $true}
+    $observed=@(Get-NetTCPConnection -LocalAddress $address -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
+    if(($observed.Count -gt 0) -eq $present){return $true}
     Start-Sleep -Milliseconds 160
   }while((Get-Date) -lt $until)
   return $false
@@ -61,7 +62,10 @@ foreach($item in $restore) {
   if((Hash $dest) -ne $item.old){throw ('Failed to restore '+$item.file)}
 }
 # Restore gateway and native-stream server independently.
-RestartCanonical 'asterion_remote.mcp_gateway' '127.0.0.1' 8996
+# The gateway already restarted with original source in the prior attempt.
+# Do not interrupt it twice: the only remaining old process is port 8911.
+$gateway=@(Get-NetTCPConnection -LocalAddress '127.0.0.1' -LocalPort 8996 -State Listen -ErrorAction SilentlyContinue)
+if($gateway.Count -ne 1){throw 'Previously restored MCP gateway not listening'}
 RestartCanonical 'asterion_remote.app' '192.168.1.133' 8911
 # Remove only new objects that did not exist before our unrequested changes.
 $created=@(
@@ -78,7 +82,7 @@ Write-Output ('ROLLBACK_COMPLETE '+(ConvertTo-Json -Compress @{
   status='restored';release='pre_state_aware_Windows_Control';
   mcp_gateway_sha256=(Hash (Join-Path $directory 'mcp_gateway.py'));
   live_stream_sha256=(Hash (Join-Path $directory 'live_stream.py'));
-  listener_mcp=@(Port '127.0.0.1' 8996).Count;
-  listener_lan=@(Port '192.168.1.133' 8911).Count;
+  listener_mcp=@(Get-NetTCPConnection -LocalAddress '127.0.0.1' -LocalPort 8996 -State Listen -ErrorAction SilentlyContinue).Count;
+  listener_lan=@(Get-NetTCPConnection -LocalAddress '192.168.1.133' -LocalPort 8911 -State Listen -ErrorAction SilentlyContinue).Count;
   apk_unchanged=$true;credentials_unchanged=$true
 }))
