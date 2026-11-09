@@ -2,6 +2,12 @@
 
 **CONTINUE, do not restart or redesign.** This file is the compact handoff for a fresh ChatGPT conversation. The detailed audit trail is in `PROGRESS.md`. GitHub and the existing signed Android installation are canonical; the chat transcript is not.
 
+## 2026-11-09 EXECUTION OVERRIDE — no Control MCP required
+
+The working **ChatGPT-to-Asterion Control** method is the existing GitHub connector and private [Asterion-Control-Bridge README](https://github.com/Azrazieliz/Asterion-Control-Bridge/blob/main/README.md). Its Windows worker watches `commands/active/<unique-id>.json` and returns actual receipts at `results/<id>.json`, executing through the existing authenticated Android/PC connection. **The direct native Control MCP, App SDK binding and Remote Desktop Commander are NOT prerequisites for normal execution.** Never waste an owner's requested cycle searching for missing `control_phone_*` tools if GitHub `create_file` and `fetch_file` are available. Use `phone_ui` / `phone_input` to operate the actual ChatGPT composer and observed Send button for requested cycles, as precisely documented in the bridge README. The 2026-11-06 native-plugin-registration task below is retained as historical backlog, not a blocker or routing instruction. This newer note supersedes older MCP-first directions while preserving all original project state.
+
+Live 2026-11-09 read-only receipts: `pc_status`, `phone_status`, `phone_bridge_status` all `complete`, `ok:true` through GitHub; paired/reachable Samsung SM-S948B, direct WSS connected; Wi-Fi was active during this check (cellular not verified by this test). If GitHub connector itself is missing, report that specific limitation. Do not install/repair/replace Asterion Control merely because the native MCP is absent.
+
 ## The owner's actual requirements
 - Android/Samsung phone is primary; authorized Windows laptop is subordinate. Phone must work over cellular, not require Wi-Fi or ADB. No payments.
 - ChatGPT decides every next operation, examines the execution receipt, and repeats. The Android app must **not autonomously generate ChatGPT turns** or operate a model-owned cycle.
