@@ -11,7 +11,7 @@ This is a baseline/continuation contract, NOT authorization to alter any existin
 - Android is the main, potentially sole visible interface; independent Windows and Android agents; wireless encrypted access locally and across networks, without permanent USB/ADB tether.
 - Low-latency live screen/video for both sides; native APIs / UI accessibility first for clicks, gestures, state inspection, app automation; live visual frames only where necessary, avoiding repeated screenshot/click cycles.
 - Remote PC and phone files, apps, terminals, processes, input, screenshots/recording when permitted, audio/video streams, builds, APK installation, logcat and diagnostics.
-- ChatGPT operates Control like Desktop Commander via authenticated API + MCP; Control has **NO embedded AI, agent, inference, self-learning, or autonomous decision making**.
+- ChatGPT operates Control through the existing authenticated worker as the primary route, and the established private GitHub relay as fallback; Control has **NO embedded AI, agent, inference, self-learning, or autonomous decision making**.
 - ChatGPT-only hidden: terminal/commands, logcat, script library and script internals. User-facing UI: remote-control panels, device connectivity, resource/performance and health.
 - Saved parameterized Python/PowerShell/shell/ADB routines for rapid direct and parallel execution, dependency-aware batching, job status/logs, cancellation, resumability and robust error reporting. Scripts are authored/changed externally (e.g. by ChatGPT); there is NO on-device "learning".
 - Health: CPU, GPU, RAM/storage pressure, device battery/charging, temperature/thermal throttling where OS exposes them, IO/network, process load and safe control of jobs. Monitor accurately; do not invent inaccessible sensors or claim magical cleaning/acceleration.
@@ -20,7 +20,7 @@ This is a baseline/continuation contract, NOT authorization to alter any existin
 - Do not duplicate functions of NoWorld, Art, Core, Downloader, Rounder, 3D, KK or Adaptive Study. Control invokes those apps' existing tools / asset pipelines / scripts ONLY when authorized; it does not become their engine.
 
 ## II. Asterion Sound — the creation tool
-**Purpose:** Original music, singing songs, character voice/dialogue/nonverbal vocal performance, and sound effects for NoWorld and other Asterion creations. Independent Android-first creative app with editing and ChatGPT API/MCP.
+**Purpose:** Original music, singing songs, character voice/dialogue/nonverbal vocal performance, and sound effects for NoWorld and other Asterion creations. Independent Android-first creative app with editing and authenticated ChatGPT-facing operations.
 
 **Main user-facing sections**
 1. Music: instrumentals without lyrics; songs with vocals; lyric generation/editing; artist choice, duets, separate featured artists, and blended profiles.
@@ -41,7 +41,7 @@ This is a baseline/continuation contract, NOT authorization to alter any existin
 
 ## III. Separation and delivery
 - Two independent repos, separate apps, shared only small versioned communication schemas where useful.
-- Both expose authenticated API/MCP for ChatGPT, but API existence is NOT the same as a connected ChatGPT app.
+- Both expose authenticated ChatGPT-facing operations, but an interface described in source is NOT proof of a connected execution session. For Control, use the existing worker first and GitHub fallback.
 - Prioritize real installed/tested Android workflows over demos; no invented install/test results.
 - Preserve prior accepted source/architecture and avoid unrelated changes. Document every implemented step in PROGRESS.md, separating implemented, verified, blocked and next.
 - These decisions supersede earlier suggestions of Control embedded AI, duplicate app engines, voice singing tab, or code-only music synthesis.
