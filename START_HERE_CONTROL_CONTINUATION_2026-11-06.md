@@ -1,61 +1,35 @@
-# ASTERION CONTROL — CANONICAL CONTINUATION (2026-11-06)
+# ASTERION CONTROL — CANONICAL CONTINUATION (updated 2026-11-09)
 
-**CONTINUE, do not restart or redesign.** This file is the compact handoff for a fresh ChatGPT conversation. The detailed audit trail is in `PROGRESS.md`. GitHub and the existing signed Android installation are canonical; the chat transcript is not.
+**CONTINUE; DO NOT RESTART, REDESIGN OR REINSTALL.** Samsung Android is primary, Windows is subordinate. Keep existing signing, pairing, data, credentials, source and projects. Actual operations must use the authorized Asterion Control executor and return real receipts. Avoid unsolicited setup, plugin hunting, Work, desktop-control replacements, or reauthorization when established permission already exists.
 
-## 2026-11-09 EXECUTION OVERRIDE — no Control MCP required
+## Mandatory execution route — WORKER FIRST, GITHUB FALLBACK
 
-The working **ChatGPT-to-Asterion Control** method is the existing GitHub connector and private [Asterion-Control-Bridge README](https://github.com/Azrazieliz/Asterion-Control-Bridge/blob/main/README.md). Its Windows worker watches `commands/active/<unique-id>.json` and returns actual receipts at `results/<id>.json`, executing through the existing authenticated Android/PC connection. **The direct native Control MCP, App SDK binding and Remote Desktop Commander are NOT prerequisites for normal execution.** Never waste an owner's requested cycle searching for missing `control_phone_*` tools if GitHub `create_file` and `fetch_file` are available. Use `phone_ui` / `phone_input` to operate the actual ChatGPT composer and observed Send button for requested cycles, as precisely documented in the bridge README. The 2026-11-06 native-plugin-registration task below is retained as historical backlog, not a blocker or routing instruction. This newer note supersedes older MCP-first directions while preserving all original project state.
+1. **Direct worker is the default.** In any ChatGPT conversation, inspect the *actually available authorized worker execution interface* and, if callable, operate the existing Windows worker / Samsung Android agent over the established authenticated native transport. Do not fabricate tool names or claim a live worker session without a matching response. Use native phone `phone_ui` / `phone_input` and worker `pc_status` / `pc_command` operations as supported by the verified environment.
+2. **If direct worker access is unavailable, use the existing GitHub fallback immediately.** Repository: `Azrazieliz/Asterion-Control-Bridge`, branch `main`. Create a unique `commands/active/<id>.json` containing `{"id":"<id>","op":"phone_status","params":{}}` or another currently supported, owner-authorized command. The original Windows worker consumes the command via its authenticated connection and writes `results/<id>.json`. Retrieve this exact result; require `status:"complete"`, inspect `ok` and returned payload, and confirm observed device/UI change. `running` and `accepted` are not completed work.
+3. For **"cycle"**, follow the exact verified normal ChatGPT composer/Send procedure in the [bridge README](https://github.com/Azrazieliz/Asterion-Control-Bridge/blob/main/README.md): inspect ChatGPT foreground app and draft, focus native keyboard, type the real next-turn request, verify draft and Send button, tap Send once, and confirm actual arrival of the next message. Observe stop and the documented conversation rollover guardrail. Never substitute a queue or simulated acknowledgment.
+4. Prefer the native authorized continuous screen stream when an actual viewer is exposed; do not claim video visibility through GitHub command-file results. `phone_ui` remains available for semantic Android state inspection. Never use screenshots as an ordinary control loop.
+5. If direct worker access is absent **but GitHub is present**, execution is not blocked. Only report a real route-specific limitation after checking worker then fallback. Avoid installing new agents, resetting/re-pairing the phone or requesting the user to repeat known pairing/account details.
 
-Live 2026-11-09 read-only receipts: `pc_status`, `phone_status`, `phone_bridge_status` all `complete`, `ok:true` through GitHub; paired/reachable Samsung SM-S948B, direct WSS connected; Wi-Fi was active during this check (cellular not verified by this test). If GitHub connector itself is missing, report that specific limitation. Do not install/repair/replace Asterion Control merely because the native MCP is absent.
+## Canonical sources and state preservation
 
-## The owner's actual requirements
-- Android/Samsung phone is primary; authorized Windows laptop is subordinate. Phone must work over cellular, not require Wi-Fi or ADB. No payments.
-- ChatGPT decides every next operation, examines the execution receipt, and repeats. The Android app must **not autonomously generate ChatGPT turns** or operate a model-owned cycle.
-- No uninstall/re-pair/revoke/token rotation/data clearing. Retain native app package `com.asterion.control`, original signing certificate, saved device data, gateway keys and historical project decisions.
-- The user has **already tested Work and it failed**. Do not tell them to try Work again. Do not equate publication/build/test success with native plugin attachment.
+- Application repository: `Azrazieliz/Asterion-Comander`.
+- Development branch: `work/android-primary-continuation-observation-20261105`. Read latest `PROGRESS.md` for chronological technical history; history is NOT an instruction to repeat superseded connection setup.
+- Primary phone: Samsung `SM-S948B`, Android 17. Native application package: `com.asterion.control`.
+- Authorized Windows worker: `LAPTOP-1LI4VRCJ`. The existing worker, account credentials and local files are not to be reset.
+- Original signed Android v0.9.6 baseline: versionCode 906, `main/dist/Asterion-Control-v0.9.6-release.apk`, SHA-256 `c1998bbc65506c2e058fb0c66d12db2278f19fabd1ea9518e1a03cfd334a0cd5`. Newer builds may exist; verify the currently installed version with actual device receipts, not this old snapshot.
+- Preserve native encrypted WSS pairing, Android accessibility and consent settings, foreground requirements, original signing identity, device storage, and existing applications.
+- Source and artifact status must be reported separately: source implemented, tests passed, APK built/published, APK installed, operation executed, and device accepted.
 
-## Durable assets and latest verified status
-- Repository: `Azrazieliz/Asterion-Comander`.
-- Development branch: `work/android-primary-continuation-observation-20261105`. Read newest HEAD and `PROGRESS.md` before editing.
-- Android signed release: **v0.9.6 (code 906)**, production `main/dist/Asterion-Control-v0.9.6-release.apk`; SHA-256 `c1998bbc65506c2e058fb0c66d12db2278f19fabd1ea9518e1a03cfd334a0cd5`. Installed on Samsung in latest live probe.
-- Authenticated gateway: `https://wise-eagle-c8b55706.tunnl.gg/mcp`. Device reported SM-S948B, Android 17, validated cellular, direct WSS connected. Keep secrets local; never print or put gateway bearer in chat/repo.
-- Canonical private ChatGPT plugin ID: `plugins_6aecce96358081918d70cb54cdca5b00`, **v1.7.4**. It declares direct streamable-HTTP MCP with OAuth DCR. The required `apps` reference to the empty autogenerated `Asterion Controler` SDK wrapper was removed. The wrapper `plugin_asdk_app_6aedf5c921b88191adf03a1cbe2f9886` was preserved, NOT deleted.
-- **Native ChatGPT plugin still not accepted:** plugin permission endpoint reported `not_installed`, and this conversation exposed no native `control_phone_*` tool bindings. No one has demonstrated a successful *native plugin* device call. A functional MCP gateway or published plugin does NOT prove native registration.
-- OAuth fixes are in place: owner-approved one-time phone code (10 min), persistent authorization session (30 min, survives gateway reload), friendly expiry page, OAuth DCR. An actual ChatGPT authorization/tool attachment must still be accepted separately.
-- Gateway standard MCP handshake repaired: anonymous `initialize`, `tools/list`, `tools/call` return 401 + OAuth `WWW-Authenticate` challenge; authenticated `initialize` returns 200, `notifications/initialized` 202, `tools/list` 200 with **52 tools**. Public live check also returned real phone status and cellular network.
-- Last automated tests: **124 passed, 0 failed** (7 nonblocking deprecation warnings). These are source/protocol tests, not a native ChatGPT plugin attachment test.
-- Latest implementation commits include `04749ed` OAuth persistence; `11dc3ce` owner code exchange; `3c1d002` MCP handshake; `419c1bb` fallback transport. See `PROGRESS.md` for follow-up commits and checks.
+## Verified operational evidence
 
-## Continuity plugin created (2026-11-06)
+On 2026-11-09 the existing GitHub fallback executed read-only `pc_status`, `phone_status`, and `phone_bridge_status`. All three returned `complete`, `ok:true`. Samsung was paired and reachable, worker was operational, and the phone-native link was connected. This particular probe observed **Wi-Fi**, not cellular; prior cellular verification does not imply cellular is currently connected.
 
-- Separate private **Asterion Continuity v1.0.0** plugin (not a second device controller): `plugins_6aee4f1ef6a88191adce01e0e1c972c8`, https://chatgpt.com/plugins/plugins_6aee4f1ef6a88191adce01e0e1c972c8 .
-- It bundles a self-contained Asterion Control handoff, the previously verified Windows-relayed authenticated phone-control commands, and a cross-project index for NoWorld, Adaptive Study, Core, Downloader and the Character Knowledge Database.
-- **No MCP server, App SDK dependency, or secret is bundled.** The existing `Asterion Control` v1.7.4 plugin ID and gateway are unchanged. Never confuse the context plugin with authenticated device-control tool access.
-- Plugin Creator verified its v1.0.0 published package. **Plugin activation in ChatGPT not proven**: new plugin skill was not listed in this existing chat; plugin-manager services have historically disagreed on install state. The GitHub handoff and this reference remain independent of plugin activation. If the continuity plugin does not surface in a new chat, load this GitHub document instead, without asking the owner to reconstruct past work.
+Earlier normal ChatGPT message cycles 2–4 were observed on 2026-11-07 using the Samsung's actual composer and native Send button. Automatic new-chat rollover and continuous hands-off continuation were not yet fully accepted. An Android input acknowledgment alone is insufficient to mark a continuation successful.
 
-## WORKING CONTROL PATH (already verified in the actual chat)
-When the native plugin has no tools, **the user can still control the phone** through the already authorized Remote Desktop Commander connection to the Windows worker, which sends MCP commands to the **same native Samsung execution gateway**. This is an explicit fallback, not the native plugin and not a substitute for fixing it.
+## Operational constraints
 
-- Authorized Windows device ID: `3f193111-df57-4fc2-9e4f-1c4d8e8a5d87` (`LAPTOP-1LI4VRCJ`).
-- Working repo on Windows: `D:\AsterionControlV092Build`.
-- Reusable source: `scripts/chatgpt_control_transport.py`. It loads the existing gateway bearer only from the Windows owner-local `%LOCALAPPDATA%\AsterionControl\mcp-gateway-token.txt` (does not print it).
-- In a new chat, discover `mcp__Remote_Desktop_Commander__list_devices` and `mcp__Remote_Desktop_Commander__start_process` from `ALL_TOOLS` via `functions.exec`. Confirm worker connected before calling.
-- On worker, invoke **read-only**:
-  `Set-Location 'D:\AsterionControlV092Build'; & 'D:\AsterionControlRelease\.venv\Scripts\python.exe' scripts\chatgpt_control_transport.py --tool control_phone_status`
-- Also verified:
-  `... scripts\chatgpt_control_transport.py --tool control_phone_network_status`
-- Real receipts returned: `control_phone_status` = SM-S948B, Android 17, installed 0.9.6; `control_phone_network_status` = connected validated cellular/direct WSS. Other read-only names are enumerated in script. Write commands require explicit approval and `--allow-write`; do not silently retry uncertain results.
-- If Remote Desktop tools are not available in a new chat, do **not** claim the fallback is accessible; discover installed connectors and report clearly.
+ChatGPT chooses the objective and subsequent actions; the phone and Windows worker execute deterministic commands and return receipts. Do not embed an autonomous response model in Control, invent completed steps, or run deprecated phone-owned cycle endpoints. Do not switch to an unverified phone-only queue. Use read-only `phone_status` / `pc_status` when necessary before important effects. Preserve user drafts and inspect UI between state-changing operations; avoid repeated submits when outcome is uncertain.
 
-## Exact unfinished issue
-**Make canonical v1.7.4 Asterion Control usable as a native ChatGPT plugin** with actual exposed tool bindings, and then verify a real `control_phone_status` from the native plugin. Owner has repeatedly shown a separate autogenerated App SDK card with “No tools available” and an OAuth approval that initially expired; both server-side defects were fixed, but ChatGPT host registration/installation remains unverified. Do not waste another cycle on Android APK builds, repeating Work advice, or creating duplicate plugins.
+Cellular operation without home Wi-Fi is a required capability, but test the actual network during the operation instead of assuming its availability. Android foreground-service, keyboard, screen-sharing, microphone and other platform permissions must be respected.
 
-## Other unresolved acceptance
-- Native plugin invocation and a complete ChatGPT-chosen command → phone execution → receipt → next-command cycle.
-- Actual speaker-to-mic recognized-answer acceptance on Samsung, not just voice status.
-- Preserve current device gateway status during any restart; canonical Windows pairing path must be `%LOCALAPPDATA%\AsterionControl`.
-
-## What to do in a fresh conversation
-Read this file and `PROGRESS.md`, inspect latest repo and plugin state, check available tool bindings, use the proven transport for real Control operations, and continue the native tool-registration repair with evidence. Never ask the owner to restate these decisions.
-
-**Success criteria:** native ChatGPT device tools attached and callable, real successful phone receipt, no reliance on a single old conversation. Clearly distinguish that goal from the already-working Windows-relayed Control path.
+**New conversation instruction:** Restore this file, read the current [Control Bridge README](https://github.com/Azrazieliz/Asterion-Control-Bridge/blob/main/README.md), immediately execute through the existing **worker if accessible, otherwise the GitHub fallback**, and continue the owner's actual task. Do not convert an optional connection mechanism into a prerequisite. Keep detailed historical records in `PROGRESS.md` for audit only.
