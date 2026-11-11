@@ -338,7 +338,7 @@ public final class MainActivity extends Activity {
     if(fullRepairInProgress){setPairingFeedback("Recovery already in progress. The existing job is being checked.");return;}
     if(force){
       new AlertDialog.Builder(this).setTitle("Force reinitialize Asterion Control?")
-        .setMessage("Recover the Windows worker, direct gateway, phone listener and streaming path. Other active Windows jobs will be preserved or the restart will be blocked. Existing pairing, credentials, app data and files are kept. Android may request screen-sharing consent again.")
+        .setMessage("Recover the Windows worker, direct native WebSocket, phone listener and screen-capture path. Other active Windows jobs will be preserved or the restart will be blocked. Existing pairing, credentials, app data and files are kept. Android may request screen-sharing consent again.")
         .setPositiveButton("Reinitialize",(d,w)->beginFullRepair(true))
         .setNegativeButton("Cancel",null).show();
     }else beginFullRepair(false);
@@ -616,7 +616,10 @@ public final class MainActivity extends Activity {
         +"\nCompleted commands: "+state.optLong("completed",0)
         +"\nLast error: "+state.optString("last_error","none");
       if(phoneBridgeFeedback!=null)phoneBridgeFeedback.setText(
-        enabled?(success>0?"Connected to private queue":"Enabled · not yet verified"):
+        enabled?(polled>0L&&System.currentTimeMillis()-polled<30000L&&
+           success>0L&&System.currentTimeMillis()-success<30000L?
+           "Recently active · live connection not guaranteed":
+           success>0L?"Enabled · historical success only":"Enabled · not yet verified"):
         "Disabled");
       new AlertDialog.Builder(this).setTitle("Private phone relay status")
         .setMessage(text).setPositiveButton("Close",null).show();
@@ -695,7 +698,7 @@ public final class MainActivity extends Activity {
             JSONObject receipt=job.optJSONObject("result");
             activeTransferId=null;
             transferStatus(receipt!=null?"Saved to "+receipt.optString("location")+"\nVerified SHA-256: "+receipt.optString("sha256"):
-                         "Completed; check phone Downloads");
+                         "Windows reported completion; phone file not yet independently verified");
           }else if(state.equals("failed")||state.equals("cancelled")){
             activeTransferId=null;
             transferStatus("Transfer "+state+": "+job.optString("error",""));
@@ -836,7 +839,7 @@ public final class MainActivity extends Activity {
           if(serverUrl!=null)serverUrl.setText(address);
           if(serverToken!=null)serverToken.setText("");
           setPairingFeedback("Windows paired. Starting phone control and registering this device…");
-          checkHost();toast("Windows connected");show(3);
+          checkHost();toast("Windows paired; checking device registration");show(3);
           startAgent();
           handler.postDelayed(()->{if(AgentService.running)registerPhone();else if(remoteConnection!=null)remoteConnection.setText("Windows paired; turn on phone access to register this device");},1400);
         });
@@ -904,7 +907,9 @@ public final class MainActivity extends Activity {
     if(homeBattery!=null)homeBattery.setText(percent<0?"—":Math.round(percent)+"%");
     if(homeThermal!=null){homeThermal.setText(thermalText);homeThermal.setTextColor(tint);homeThermal.setTextSize(thermalText.length()>9?12:17);}
     if(homeMemory!=null)homeMemory.setText(String.format(Locale.US,"%.1f GB",m.availMem/1e9));
-    if(homeAgent!=null)homeAgent.setText(AgentService.running?"Agent enabled · Remote access on":"Agent off · Device is local");
+    if(homeAgent!=null)homeAgent.setText(AgentService.running?
+       (AgentService.listenerReady?"Phone listener active · Windows link checked separately":"Phone agent starting · listener unverified"):
+       "Phone agent stopped");
     if(healthBattery!=null)healthBattery.setText(percent<0?"—":Math.round(percent)+"%");
     if(healthTemp!=null)healthTemp.setText(rawTemp<0?"—":String.format(Locale.US,"%.1f°",rawTemp/10.0));
     if(healthMemory!=null)healthMemory.setText(String.format(Locale.US,"%.1f GB",m.availMem/1e9));
@@ -933,20 +938,30 @@ public final class MainActivity extends Activity {
       VoiceDialogueService.active==null?View.GONE:View.VISIBLE);
     if(voiceTalkAction!=null)voiceTalkAction.setVisibility(
       VoiceDialogueService.active==null?View.GONE:View.VISIBLE);
-    if(agentConnection!=null){agentConnection.setText(AgentService.running?"Enabled":"Off");agentConnection.setTextColor(AgentService.running?DesignSystem.TEAL:DesignSystem.MUTED);}
-    if(captureConnection!=null){captureConnection.setText(CaptureService.active?"Streaming":"Off");captureConnection.setTextColor(CaptureService.active?DesignSystem.TEAL:DesignSystem.MUTED);}
+    if(agentConnection!=null){agentConnection.setText(AgentService.running?(AgentService.listenerReady?"Listener active":"Starting / unavailable"):"Stopped");agentConnection.setTextColor(AgentService.running?DesignSystem.TEAL:DesignSystem.MUTED);}
+    if(captureConnection!=null){boolean fresh=CaptureService.active&&CaptureService.latestAtMs>0L&&
+         System.currentTimeMillis()-CaptureService.latestAtMs<5000L;
+       captureConnection.setText(!CaptureService.active?"Off":fresh?"Fresh frames on phone":"Capture active · frames stale");
+       captureConnection.setTextColor(fresh?DesignSystem.TEAL:DesignSystem.MUTED);}
     if(accessConnection!=null){accessConnection.setText(ControlAccessibilityService.active!=null?"Authorized":"Not enabled");accessConnection.setTextColor(ControlAccessibilityService.active!=null?DesignSystem.TEAL:DesignSystem.MUTED);}
     if(phoneAddress!=null){
       boolean requested=getSharedPreferences("agent",MODE_PRIVATE)
         .getBoolean(AgentService.PREF_REMOTE_ENABLED,false);
-      phoneAddress.setText(AgentService.running?"Remote control enabled":
-         requested?"Android stopped access · reopen Control or tap Repair connection":
-                   "Remote control disabled");
+      phoneAddress.setText(AgentService.running?
+        (AgentService.listenerReady?"Phone listener active · Windows reachability checked separately":
+         "Phone service starting · listener unverified"):
+        requested?"Phone access requested but agent stopped":"Remote phone access disabled");
     }
     if(privacyStatus!=null)privacyStatus.setText(
-      AgentService.running?"Phone agent active · "+(ControlAccessibilityService.active!=null?"input authorized":"touch permission needed")+" · "+(CaptureService.active?"screen shared":"screen private"):
-      "Remote phone access is disabled. No screen or input is shared.");
-    if(headerStatus!=null)headerStatus.setText(AgentService.running?"SHARING ON":"ON DEVICE");
+      AgentService.running?"Phone agent running · "+(ControlAccessibilityService.active!=null?
+          "input authorized":"touch permission needed")+" · "+(CaptureService.active?
+          "screen capture active (remote delivery unverified)":"screen capture off"):
+       "Phone agent stopped · "+(CaptureService.active?"local capture still running":"capture off")+
+       " · input permission "+(ControlAccessibilityService.active!=null?"granted":"not granted"));
+    if(headerStatus!=null)headerStatus.setText(
+       CaptureService.active&&CaptureService.latestAtMs>0L&&
+       System.currentTimeMillis()-CaptureService.latestAtMs<5000L?
+         "LOCAL CAPTURE LIVE":AgentService.running?"PHONE SERVICE ON":"ON DEVICE");
     updateConnectionIssue();
     if(!hostRefreshing&&(currentTab==0||currentTab==2||currentTab==3)&&System.currentTimeMillis()-lastHostRefresh>12000){lastHostRefresh=System.currentTimeMillis();checkHost();}
   }catch(Exception ignored){} }
@@ -1111,9 +1126,11 @@ public final class MainActivity extends Activity {
         +"\nActive: "+cycle.optBoolean("active",false)
         +"  |  Turns: "+cycle.optInt("index",0)
         +"  |  Verified replies: "+cycle.optInt("ack_count",0)
-        +"\nOvernight/unbounded: "+cycle.optBoolean("overnight_unbounded",true)
+        +"\nTotal-turn limit: "+(cycle.optBoolean("active",false)?
+          (cycle.optBoolean("overnight_unbounded",false)?"None (until stop or genuine completion)":"Owner-configured"):
+          "No cycle running")
         +"\nSubstantial work target: ~30 minutes per turn (25-minute minimum quality warning)"
-        +"\nEvery individual action: <10 seconds end-to-end; trivial navigation ~1 second"
+        +"\nAction performance targets (not verified measurements): <10 seconds end-to-end; trivial navigation ~1 second"
         +"\nCurrent chat: "+cycle.optInt("messages_in_chat",0)+"/"+cycle.optInt("chat_rollover_messages",20)+" messages"
         +"\nAutomatic rollover count: "+cycle.optInt("rollover_count",0)
         +"\nContinuation enabled: "+ledger.optBoolean("enabled",false)
@@ -1316,11 +1333,17 @@ public final class MainActivity extends Activity {
       if(!state.optBoolean("enabled") || !"queued".equals(state.optString("state"))){
         toast("Enable continuation and queue a checkpoint first");return;
       }
-      Intent launch=getPackageManager().getLaunchIntentForPackage("com.openai.chatgpt");
-      if(launch==null){toast("ChatGPT Android app not found");return;}
-      startActivity(launch);
-      // An accessibility window event will send only after verifying a blank
-      // ChatGPT composer and a labeled Send action.
+      ControlAccessibilityService access=ControlAccessibilityService.active;
+      if(access==null){
+        toast("Cannot restore existing ChatGPT task without Accessibility");return;
+      }
+      JSONObject restore=access.requestChatForeground();
+      if(restore.optBoolean("already_foreground",false))
+        toast("Existing ChatGPT task foreground; checkpoint still queued");
+      else if(restore.optBoolean("requested",false))
+        toast("Returning to existing ChatGPT conversation; delivery not verified");
+      else toast("Existing ChatGPT task not verified; checkpoint remains queued. "+
+        restore.optString("reason",""));
     }catch(Exception e){toast("Cannot open ChatGPT checkpoint");}
   }
   private void showBatterySetup(){
