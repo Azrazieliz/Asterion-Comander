@@ -231,6 +231,90 @@ public final class ControlAccessibilityService extends AccessibilityService {
     }
     return result[0];
   }
+  /**
+   * Safe, read-only proof that the New chat navigation actually finished.
+   * A successful tap, empty old-chat composer or unchanged foreground package
+   * is never sufficient to send the next autonomous-cycle checkpoint.
+   */
+  JSONObject verifyNewChatLanding(String previousCheckpoint) {
+    final CountDownLatch done=new CountDownLatch(1);
+    final JSONObject[] result={new JSONObject()};
+    main.post(()->{
+      try{
+        AccessibilityNodeInfo root=getRootInActiveWindow();
+        if(root==null||root.getPackageName()==null||
+           !"com.openai.chatgpt".contentEquals(root.getPackageName())){
+          result[0]=new JSONObject().put("verified",false)
+            .put("reason","ChatGPT new chat not foreground");
+          return;
+        }
+        AccessibilityNodeInfo composer=findComposer(root);
+        if(composer!=null&&composer.getText()!=null&&composer.getText().length()>0){
+          result[0]=new JSONObject().put("verified",false)
+            .put("reason","Existing draft visible; new-chat rollover paused");
+          return;
+        }
+        InputMethod.AccessibilityInputConnection input=chatKeyboard();
+        String text=inputText(input);
+        if(text!=null&&!text.isEmpty()){
+          result[0]=new JSONObject().put("verified",false)
+            .put("reason","Keyboard contains unsent text; preserve owner draft");
+          return;
+        }
+        int[] evidence=new int[]{0,0}; // welcome heading, previous checkpoint marker
+        inspectNewChatLanding(root,previousCheckpoint,evidence,0,new int[]{0});
+        boolean clean=evidence[0]>0&&evidence[1]==0;
+        result[0]=new JSONObject().put("verified",clean)
+          .put("reason",clean?"New Chat welcome and empty composer verified":
+            "New-chat landing not provable from visible native UI; no blind send");
+      }catch(Exception e){
+        try{result[0]=new JSONObject().put("verified",false)
+          .put("reason","ChatGPT new-chat check failed: "+e.getClass().getSimpleName());}
+        catch(Exception ignored){}
+      }finally{done.countDown();}
+    });
+    try{if(!done.await(3,TimeUnit.SECONDS))
+      return new JSONObject().put("verified",false).put("reason","New-chat verification timed out");}
+    catch(InterruptedException e){Thread.currentThread().interrupt();return new JSONObject();}
+    return result[0];
+  }
+
+  private void inspectNewChatLanding(AccessibilityNodeInfo node,String previousCheckpoint,
+       int[] evidence,int depth,int[] count){
+    if(node==null||depth>26||count[0]++>450||!node.isVisibleToUser())return;
+    CharSequence text=node.getText(),desc=node.getContentDescription();
+    if(!node.isEditable())for(CharSequence value:new CharSequence[]{text,desc}){
+      if(value==null||value.length()>600)continue;
+      String item=value.toString().trim();
+      if(!previousCheckpoint.isEmpty() &&
+         (item.contains("ASTERION-CYCLE-ACK:"+previousCheckpoint)||
+          item.contains("ASTERION-CYCLE-DONE:"+previousCheckpoint)))evidence[1]++;
+      String normalized=item.toLowerCase(java.util.Locale.ROOT)
+        .replace('’','\'').replace('?', ' ').replaceAll("\\s+"," ").trim();
+      boolean welcome=normalized.equals("what can i help with")||
+        normalized.equals("what can i help you with")||
+        normalized.equals("how can i help")||
+        normalized.equals("how can i help you today")||
+        normalized.equals("where should we begin")||
+        normalized.equals("where should we start")||
+        normalized.equals("what are you working on")||
+        normalized.equals("what's on your mind today")||
+        normalized.equals("ready when you are")||
+        normalized.equals("comment puis-je vous aider")||
+        normalized.equals("par quoi voulez-vous commencer");
+      if(welcome){
+        Rect b=new Rect(),screen=new Rect();
+        node.getBoundsInScreen(b);
+        AccessibilityNodeInfo root=getRootInActiveWindow();
+        if(root!=null)root.getBoundsInScreen(screen);
+        if(!b.isEmpty()&&!screen.isEmpty()&&
+           b.centerY()>screen.top+screen.height()*0.1f&&
+           b.centerY()<screen.top+screen.height()*0.85f)evidence[0]++;
+      }
+    }
+    for(int i=0;i<node.getChildCount()&&count[0]<=450;i++)
+      inspectNewChatLanding(node.getChild(i),previousCheckpoint,evidence,depth+1,count);
+  }
   private AccessibilityNodeInfo findNewChat(AccessibilityNodeInfo node,int depth){
     if(node==null||depth>24)return null;
     CharSequence desc=node.getContentDescription(),txt=node.getText();
