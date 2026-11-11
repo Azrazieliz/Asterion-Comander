@@ -1,5 +1,5 @@
 # Asterion Control Windows agent. Android is the primary interface.
-# LAN only; use an encrypted private tunnel for access across networks.
+# Private LAN/VPN Windows API. The native phone-outbound WSS is independent.
 $ErrorActionPreference='Stop'
 $root=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Set-Location $root
@@ -35,13 +35,10 @@ $endpoint='http://'+$bind+':8911'
 )
 Write-Host ('Asterion Control Windows agent '+$endpoint)
 $pinFile=Join-Path $settings 'pairing-code.txt'
-# No GitHub-based remote-control relay is started in normal operation.
-# Historical bridge scripts remain preserved for explicit migration only.
-$stableSshFlag=Join-Path $settings 'mcp-stable-ssh-enabled.flag'
-$stableSshScript=Join-Path $PSScriptRoot 'start_persistent_ssh_mcp.py'
-if((Test-Path $stableSshFlag) -and (Test-Path $stableSshScript)){
-  Start-Process -FilePath $venv -ArgumentList @($stableSshScript) -WorkingDirectory $root -WindowStyle Hidden | Out-Null
-}
+# The separate private GitHub command/result worker is supervised by the
+# existing Asterion watchdog. No MCP or SSH tunnel is launched here.
+# Retired MCP/SSH ingress is intentionally disabled. The real Windows API
+# and its existing authenticated Android transport require no public gateway.
 # Restart the actual native agent after unexpected termination.
 $failureCount=0
 while($true){
