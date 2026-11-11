@@ -449,7 +449,7 @@ public final class MainActivity extends Activity {
       button(summary,"Find Windows computer","devices",true,this::discoverComputer);
     else button(summary,"Auto-repair connection","refresh",true,()->fullRepair(false));
     gap(summary,9);button(summary,"Force reinitialize all components","power",false,()->fullRepair(true));
-    gap(summary,9);button(summary,"How development cycles work","check",false,this::showCycleStatus);
+    gap(summary,9);button(summary,"Cycle status","check",false,this::showCycleStatus);
     gap(summary,10);pairingFeedback=t("Your phone is the controller. Connect once; the Windows worker follows.",12,DesignSystem.MUTED,false);
     pairingFeedback.setMaxLines(13);wide(summary,pairingFeedback);
     gap(summary,10);connectionIssue=t("Checking last disconnection…",12,DesignSystem.MUTED,false);
@@ -1107,23 +1107,20 @@ public final class MainActivity extends Activity {
     try{
       JSONObject ledger=ContinuationLedger.get(this).status();
       JSONObject cycle=ContinuationCycle.get(this).status();
-      String explanation="ONE DEVELOPMENT CYCLE = 1 verified ChatGPT work iteration.\n\n"+
-        "1. ChatGPT performs the actual project work and records evidence.\n"+
-        "2. Control submits the next normal message in the REAL ChatGPT composer, only after the previous reply was observed complete.\n"+
-        "3. The next reply is checked before continuing; a tap/queue receipt is NOT a completed cycle.\n"+
-        "4. If a draft exists, Send is uncertain, the UI changed, or permissions are missing, Control pauses for review rather than duplicating the message.\n"+
-        "5. Stop blocks future cycles but cannot retract an already submitted ChatGPT message.\n\n"+
-        "Conversation safety: at most 10 additional turns in an existing chat, or 20 in a newly opened chat. Rollover requires a verified canonical handoff.\n\n"+
-        "No AI model or independent ChatGPT session runs inside Control. ChatGPT must remain the actual external operator.\n\n"+
-        "Cycle: "+cycle.optString("state","idle")+
-        " | active: "+cycle.optBoolean("active",false)+
-        " | iteration: "+cycle.optInt("index",0)+
-        " | verified replies: "+cycle.optInt("ack_count",0)+
-        "\nContinuation owner-enabled: "+ledger.optBoolean("enabled",false)+
-        "\nCheckpoint: "+ledger.optString("state","idle")+
-        "\nLast error: "+cycle.optString("last_error","none");
-      new AlertDialog.Builder(this).setTitle("How Asterion Control cycles work")
-        .setMessage(explanation).setPositiveButton("Close",null).show();
+      String information="Development cycle: "+cycle.optString("state","idle")
+        +"\\nActive: "+cycle.optBoolean("active",false)
+        +"  |  Turns: "+cycle.optInt("index",0)
+        +"  |  Verified replies: "+cycle.optInt("ack_count",0)
+        +"\\nOvernight/unbounded: "+cycle.optBoolean("overnight_unbounded",true)
+        +"\\nSubstantial work target: ~30 minutes per turn (25-minute minimum quality warning)"
+        +"\\nEvery individual action: <10 seconds end-to-end; trivial navigation ~1 second"
+        +"\\nContinuation enabled: "+ledger.optBoolean("enabled",false)
+        +"\\nCheckpoint: "+ledger.optString("state","idle")
+        +"\\nLast error: "+cycle.optString("last_error","none")
+        +"\\nA cycle is a long-running sequence of substantive ChatGPT turns, not one tap or one turn."
+        +"\\nA real reply/receipt is required before any continuation; uncertain sends are never replayed.";
+      new AlertDialog.Builder(this).setTitle("Continuous development cycle status")
+        .setMessage(information).setPositiveButton("Close",null).show();
     }catch(Exception e){toast("Cycle status unavailable: "+e.getClass().getSimpleName());}
   }
   private void testVoiceDialogue(){
