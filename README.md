@@ -2,7 +2,7 @@
 
 > **Transport:** Direct Windows worker → existing authenticated native WebSocket → Samsung is primary; private GitHub bridge is the fallback if the direct ChatGPT tool is not callable. Existing `PhoneDirectMcp`/MCP-named RPC code remains part of the current WSS implementation; do not claim it was all removed or make a separate ChatGPT MCP plugin a prerequisite. Repair verifies the *actual native WebSocket*, not an unrelated gateway process.
 
-> **Cycle semantics:** [Real ChatGPT development cycle contract](docs/CYCLE_EXECUTION_CONTRACT.md). One cycle is a genuine tool-using ChatGPT reply with a verified marker, not an internal artificial model or a queued command. Limits: 10 additional turns in an existing chat; 20 in a verified new chat.
+> **Cycle semantics:** [Real ChatGPT development cycle contract](docs/CYCLE_EXECUTION_CONTRACT.md). One cycle is a genuine tool-using ChatGPT reply with a verified marker, not an internal artificial model or a queued command. No arbitrary 10/20-turn caps; `max_cycles=0` is continuous. Each substantial ChatGPT development turn can last about 30 minutes. Individual actions, including ChatGPT decision time, command transport and verification, target under 10 seconds end-to-end and about one second for simple Android navigation.
 
 # Asterion Control — Android-primary shared execution tool
 
