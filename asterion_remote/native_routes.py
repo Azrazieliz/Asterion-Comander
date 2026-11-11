@@ -1,5 +1,5 @@
 """Read-only phone telemetry and explicit input proxy over private network/VPN."""
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from .security import require_token
 from .phone_bridge import PairPhone, PhoneInput, register, request, load
@@ -17,8 +17,13 @@ def phone_status():
     try:
         h=request('/health').json()
         return {'paired':True,'reachable':True,'device':pairing['device'],'info':h}
-    except Exception:
-        return {'paired':True,'reachable':False,'device':pairing['device']}
+    except HTTPException as exc:
+        # Report the actual authenticated probe failure, never the private token.
+        return {'paired':True,'reachable':False,'device':pairing['device'],
+                'reason':str(exc.detail)[:180], 'status_code':exc.status_code}
+    except Exception as exc:
+        return {'paired':True,'reachable':False,'device':pairing['device'],
+                'reason':'Phone probe failed: '+type(exc).__name__}
 
 class AppBridgeAction(BaseModel):
     package: str = Field(min_length=3,max_length=180)
