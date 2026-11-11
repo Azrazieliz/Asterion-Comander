@@ -1,3 +1,13 @@
+# 2026-11-11 — Continuous overnight cycle correction (v0.9.27)
+
+- **Owner directive:** one cycle = the continuously repeating process, potentially overnight or across days. Each ChatGPT turn should spend approximately 30 minutes on substantive real work (under 25 minutes without verified progress is inadequate). Each individual action—observation, reasoning, API, gesture and outcome check—must finish under 10 seconds end-to-end; trivial actions target approximately 1 second. Device execution time alone is not the end-to-end latency.
+- **Source implemented:** `ContinuationCycle` now accepts `max_cycles=0` as unbounded by default rather than limiting total turns to 10/20. A new ChatGPT conversation is requested once when explicitly configured, not once per turn. Durable per-turn response timing warnings and owner-readable status were added. Unique reply ACK/DONE, uncertain-send guard and quiet evidence window were preserved.
+- **Tested:** Original owner-signed v0.9.27 Android build completed; SHA-256 `3cdc5813446f7c220f5344fc0c97474fa48280db67921a7d8dd760e194aca1d3`, original certificate `9bc439712a0a460cc4703ebf254aaaf9bf3cc6e67b0ced6fc12162ed3ca3b9ad`. Seven existing native Windows/recovery regression tests passed; unbounded-cycle source checks passed.
+- **Published:** v0.9.27 APK and canonical `dist/latest-release.json` / `dist/latest.json` via existing GitHub release feed on commit `75419ac`. No GitHub Actions build.
+- **Not yet verified:** Owner installation of v0.9.27, sustained live ChatGPT turns of ~30 minutes, unattended overnight continuation/rollover, or under-10-second ChatGPT-inclusive end-to-end action latency. Native WSS media/tap timings from an earlier test do not measure ChatGPT thinking.
+
+---
+
 # 2026-11-11 — current access and safe-recovery implementation
 
 - The existing private GitHub relay executed `phone_ui` on the authorized Windows worker and returned `ok:true`, `status:complete`, Android `com.openai.chatgpt` foreground, native Accessibility tree and 77 ms worker-side execution. The same worker continues to serve both direct and fallback routes; this is **not** direct ChatGPT tool exposure, live in-chat video acceptance, or measured end-to-end gesture time.
