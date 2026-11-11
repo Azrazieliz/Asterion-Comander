@@ -1,6 +1,8 @@
 'use strict';
 const $ = (q) => document.querySelector(q);
 const state = {token:'', page:'desktop', device:'', job:'', selectedFile:'', imageUrl:null, phoneUrl:null, desktopRight:false, busy:false, phoneInfo:null};
+const embedded = new URLSearchParams(location.search).get('embedded')==='1';
+if(embedded)document.body.classList.add('embedded');
 const api = '/api/v1';
 let frameTimer;let lastFrame=0;let live=null;let liveRetry=null;
 let liveTarget=null,liveRequestId=0;
@@ -27,7 +29,19 @@ async function controlInput(source,payload){
   });
 }
 
-function toast(message){ const el=$('#toast');el.textContent=String(message);el.style.display='block';clearTimeout(toast.timer);toast.timer=setTimeout(()=>el.style.display='none',4200); }
+function friendlyError(error){
+ const message=String(error?.message||error||'Connection unavailable');
+ if(/503|screen.*unavailable|screen sharing|media.?projection|capture/i.test(message))
+   return 'Phone screen sharing is paused. Open Control, tap Start screen sharing, and approve Android’s prompt.';
+ if(/401|403|unauthorized|forbidden/i.test(message))return 'Authorization was rejected. Reconnect this device in Control.';
+ if(/unreachable|timed out|network|failed to fetch/i.test(message))return 'The device is not reachable. Check its connection and retry.';
+ return message.length>140?message.slice(0,137)+'…':message;
+}
+function phoneStatus(message,kind='warn'){
+ const el=$('#android-status');
+ if(el){el.textContent=message;el.className='device-status '+kind;}
+}
+function toast(message){const el=$('#toast');el.textContent=friendlyError(message);el.style.display='block';clearTimeout(toast.timer);toast.timer=setTimeout(()=>el.style.display='none',4200);}
 async function request(path,options={}){
  const headers={Authorization:`Bearer ${state.token}`,...(options.headers||{})};
  if(options.body && !(options.body instanceof Blob) && !(options.body instanceof ArrayBuffer) && typeof options.body==='object'){
@@ -41,14 +55,47 @@ async function request(path,options={}){
 }
 function qp(obj){return '?'+new URLSearchParams(obj).toString()}
 function showPage(name){ state.page=name;document.querySelectorAll('.page').forEach(e=>e.classList.toggle('active',e.id===name));document.querySelectorAll('.tabs button').forEach(e=>e.classList.toggle('active',e.dataset.page===name)); if(name==='android')discover().catch(e=>toast(e.message));if(name==='files')files().catch(e=>toast(e.message));if(name==='processes')processes().catch(e=>toast(e.message));if(name==='system')system().catch(e=>toast(e.message)); startLive();}
-async function connect(){ state.token=$('#token').value.trim()||state.token;if(!state.token){toast('Enter the API token');return;}try{const h=await request('/health');$('#connection').textContent=h.host+' · Connected';$('#connection').classList.remove('off');$('#health-body').textContent=JSON.stringify(h,null,2);$('#token').value='';toast('Connected to '+h.host);if(state.page==='android')await discover();await discoverMonitors();startLive();}catch(e){$('#connection').textContent='Disconnected';$('#connection').classList.add('off');toast(e.message)}}
+async function connect(){
+ state.token=$('#token').value.trim()||state.token;
+ if(!state.token){toast('Enter the Windows access key');return;}
+ try{
+   const h=await request('/health');
+   $('#connection').textContent=h.host+' · Connected';
+   $('#connection').classList.remove('off');
+   document.body.classList.add('paired');
+   $('#token').value='';
+   if($('#health-body'))$('#health-body').textContent=JSON.stringify(h,null,2);
+   if(state.page==='android')await discover();
+   await discoverMonitors();
+   startLive();
+ }catch(e){
+   document.body.classList.remove('paired');
+   $('#connection').textContent='Disconnected';
+   $('#connection').classList.add('off');
+   toast(e);
+ }
+}
 async function shot(url,img,placeholder,key){if(!state.token)return;const blob=await request(url,{blob:true});const object=URL.createObjectURL(blob);if(state[key])URL.revokeObjectURL(state[key]);state[key]=object;img.src=object;img.classList.add('shown');$(placeholder).style.display='none';}
-async function screen(){if(!state.token||state.busy)return;state.busy=true;try{if(state.page==='desktop')await shot('/screen'+qp({monitor:$('#desktop-monitor').value}),$('#desktop-image'),'#desktop-empty','imageUrl');else if(state.page==='android'&&state.device)await shot(state.device==='native'?'/phone/screen':'/android/'+encodeURIComponent(state.device)+'/screen',$('#android-image'),'#android-empty','phoneUrl');}catch(e){if(!String(e.message).includes('503'))toast(e.message);}finally{state.busy=false;}}
+async function screen(){
+ if(!state.token||state.busy)return;
+ if(state.page==='android'&&state.device==='native'&&state.phoneInfo?.capture===false){
+   phoneStatus('Phone connected · Screen sharing is paused. Start it in Control.');return;
+ }
+ state.busy=true;
+ try{
+   if(state.page==='desktop')await shot('/screen'+qp({monitor:$('#desktop-monitor').value}),$('#desktop-image'),'#desktop-empty','imageUrl');
+   else if(state.page==='android'&&state.device)await shot(state.device==='native'?'/phone/screen':'/android/'+encodeURIComponent(state.device)+'/screen',$('#android-image'),'#android-empty','phoneUrl');
+ }catch(e){
+   if(state.page==='android')phoneStatus(friendlyError(e));
+   else toast(e);
+ }finally{state.busy=false;}
+}
 async function discoverMonitors(){try{const data=await request('/monitors');const select=$('#desktop-monitor');select.replaceChildren();for(const m of data.items){const o=document.createElement('option');o.value=m.index;o.textContent=m.index===0?'All monitors':'Monitor '+m.index;select.append(o);}select.value=String(data.items.length>1?1:0);}catch(e){toast(e.message)}}
 function startScreenRefresh(){clearInterval(frameTimer);frameTimer=setInterval(()=>{if(live&&live.readyState===WebSocket.OPEN)return;if(!state.token)return;if(state.page==='desktop'||state.page==='android'&&state.device)screen();},1600);}
 function startLive(){
  clearTimeout(liveRetry);clearPendingInputs(new Error('Live stream replaced'));if(live){live.onclose=null;live.close();live=null;} liveTarget=null;
  if(!state.token)return;
+ if(state.page==='android'&&state.device==='native'&&state.phoneInfo?.capture===false)return;
  const target=state.page==='desktop'?'desktop':state.page==='android'&&state.device==='native'?'phone':null;
  if(!target)return;
  const protocol=location.protocol==='https:'?'wss:':'ws:';
@@ -70,8 +117,10 @@ function startLive(){
              entry.resolve({ok:true,rtt_ms:rtt,device_ms:data.device_ms});
            }else entry.reject(new Error(data.error||'Input refused'));
          }
-       }else if(data.type==='error')toast(data.error||'Live stream error');
-       else if(data.error)toast(data.error);
+       }else if(data.type==='error'){
+         if(target==='phone')phoneStatus(friendlyError(data.error||'Live phone stream unavailable'));
+         else toast(data.error||'Live stream error');
+       }else if(data.error){if(target==='phone')phoneStatus(friendlyError(data.error));else toast(data.error);}
      }catch(ex){toast('Invalid stream response');}
      return;
    }
@@ -80,6 +129,7 @@ function startLive(){
    const obj=URL.createObjectURL(e.data);const old=img.dataset.objectUrl;
    img.src=obj;img.dataset.objectUrl=obj;img.classList.add('shown');
    (target==='desktop'?$('#desktop-empty'):$('#android-empty')).style.display='none';
+    if(target==='phone')phoneStatus('Phone connected · Live screen sharing', 'good');
    if(old)URL.revokeObjectURL(old);
  };
  ws.onclose=()=>{if(live===ws){live=null;liveTarget=null;clearPendingInputs(new Error('Live connection lost'));liveRetry=setTimeout(startLive,2500);}};
@@ -89,18 +139,48 @@ function screenCoords(img, ev){const r=img.getBoundingClientRect();const width=i
 function bindPointer(img,mode){let pressed=null;img.addEventListener('pointerdown',ev=>{pressed={...screenCoords(img,ev),time:Date.now()};if(!Number.isFinite(pressed.x))pressed=null;img.setPointerCapture(ev.pointerId)});img.addEventListener('pointerup',async ev=>{if(!pressed)return;const end=screenCoords(img,ev);if(!end){pressed=null;return;}const begin=pressed;pressed=null;const elapsed=Date.now()-begin.time;const distance=Math.hypot(end.x-begin.x,end.y-begin.y);try{if(mode==='desktop'){if(distance>18){await controlInput('desktop',{action:'drag',monitor:Number($('#desktop-monitor').value),x:begin.x,y:begin.y,to_x:end.x,to_y:end.y,seconds:Math.max(.2,Math.min(3,elapsed/1000))})}else{await controlInput('desktop',{action:state.desktopRight?'right_click':'click',monitor:Number($('#desktop-monitor').value),...end});}}else if(state.device){const action=distance>30?'swipe':elapsed>600?'long_press':'tap';if(state.device==='native'){const inf=state.phoneInfo||{};const sx=(inf.screen_width||img.naturalWidth)/img.naturalWidth,sy=(inf.screen_height||img.naturalHeight)/img.naturalHeight;await androidAction({action,x:Math.round(begin.x*sx),y:Math.round(begin.y*sy),x2:Math.round(end.x*sx),y2:Math.round(end.y*sy),duration_ms:Math.max(200,Math.min(5000,elapsed))});}else await androidAction({action,x:begin.x,y:begin.y,to_x:end.x,to_y:end.y,duration_ms:Math.max(200,Math.min(10000,elapsed))});}if(!live)setTimeout(screen,250);}catch(e){toast(e.message)}});img.addEventListener('contextmenu',e=>e.preventDefault());}
 async function discover(){
  const select=$('#device-select');select.replaceChildren();
- let native=null;try{native=await request('/phone');}catch(e){toast('Phone agent unavailable: '+e.message);}
+ let native=null;
+ try{native=await request('/phone');}
+ catch(e){phoneStatus(friendlyError(e));}
+ const detail=$('#android-detail');
+ if(detail)detail.hidden=true;
  if(native?.paired&&native?.reachable){
-   const opt=document.createElement('option');opt.value='native';opt.textContent=(native.device||'Android')+' · Native agent';select.append(opt);
-   state.device='native';state.phoneInfo=native.info;
-   $('#android-detail').textContent=JSON.stringify(native.info,null,2);
+   const opt=document.createElement('option');opt.value='native';
+   opt.textContent=(native.device||'Android')+' · Native';select.append(opt);
+   state.device='native';state.phoneInfo=native.info||{};
+   const info=state.phoneInfo,access=info.accessible===true,capture=info.capture===true;
+   if(!capture){
+     phoneStatus('Phone connected · Start screen sharing in Control to see the display.');
+   }else if(!access){
+     phoneStatus('Live screen available · Accessibility input not authorized.');
+   }else{
+     phoneStatus('Phone connected · Screen and touch ready','good');
+   }
  }else{
    state.device='';state.phoneInfo=null;
-   $('#android-detail').textContent='Enable the native Asterion Control phone agent, authorize screen sharing and accessibility, then link your phone.';
-   $('#android-image').classList.remove('shown');$('#android-empty').style.display='block';
+   if(!native?.paired)phoneStatus('Phone not registered with Windows. Use Force activate connection in Control.');
+   else phoneStatus(friendlyError(native?.reason||'Windows cannot reach the phone agent.'));
+   $('#android-image').classList.remove('shown');$('#android-empty').style.display='flex';
  }
- select.value=state.device;startLive();
+ select.value=state.device;
+ startLive();
 }
+function formatPhoneInfo(info){
+ const transport=info.remote_transport||{};
+ const wss=transport.direct_mcp||{};
+ const net=transport.network||'Unavailable';
+ const screen=info.capture?'Active':'Off — start screen sharing in Control';
+ const input=info.accessible?'Authorized':'Not authorized — enable Accessibility';
+ const live=wss.connected===true?'Connected':wss.phase||'Unavailable';
+ return ['Device: '+(info.device||'Android'),
+   'Android: '+(info.android||'Unknown'),
+   'Screen sharing: '+screen,
+   'Touch input: '+input,
+   'Network: '+net,
+   'Direct WebSocket: '+live
+ ].join('\n');
+}
+
 async function androidAction(action){
  if(state.device!=='native')throw Error('Android agent not paired');
  const a={...action};
@@ -132,14 +212,20 @@ $('#desktop-fps').addEventListener('change',startLive);
 bind('#desktop-backspace',()=>request('/input',{method:'POST',body:{action:'press',keys:['backspace']}}));
 bind('#desktop-enter',()=>request('/input',{method:'POST',body:{action:'press',keys:['enter']}}));
 bind('#desktop-escape',()=>request('/input',{method:'POST',body:{action:'press',keys:['esc']}}));
-bind('#desktop-ctrlaltdelete',()=>toast('Secure-attention sequence is blocked by Windows for ordinary software.'));
 bind('#desktop-right',()=>{state.desktopRight=!state.desktopRight;$('#desktop-right').textContent='Right-click mode: '+(state.desktopRight?'ON':'OFF')});
 bind('#desktop-type',()=>request('/input',{method:'POST',body:{action:'type',text:$('#desktop-text').value}}));
 document.querySelectorAll('[data-android-key]').forEach(b=>b.addEventListener('click',()=>androidAction({action:'key',key:b.dataset.androidKey}).catch(e=>toast(e.message))));
 bind('#android-type',()=>androidAction({action:'text',text:$('#android-text').value}));
 bind('#android-pair',async()=>{const address=prompt('Wireless debugging pairing address (IP:pairing-port):');if(!address)return;const code=prompt('Six-digit pairing code shown on your phone:');if(!code)return;const result=await request('/android/pair',{method:'POST',body:{address,code}});toast(result.output);await discover();});
 bind('#android-connect',async()=>{const address=prompt('Wireless debugging connection address (IP:connection-port):');if(!address)return;const result=await request('/android/connect',{method:'POST',body:{address}});toast(result.output);await discover();});
-bind('#android-info',async()=>{$('#android-detail').textContent=JSON.stringify(await request(state.device==='native'?'/phone/health':'/android/'+encodeURIComponent(state.device)+'/info'),null,2)});
+bind('#android-info',async()=>{
+ if(!state.device){phoneStatus('Phone not connected. Use Force activate connection in Control.');return;}
+ const detail=$('#android-detail');
+ if(!detail.hidden){detail.hidden=true;return;}
+ const info=await request(state.device==='native'?'/phone/health':'/android/'+encodeURIComponent(state.device)+'/info');
+ detail.textContent=formatPhoneInfo(info);
+ detail.hidden=false;
+});
 bind('#android-ui',async()=>{const v=await request(state.device==='native'?'/phone/ui':'/android/'+encodeURIComponent(state.device)+'/ui');$('#android-detail').textContent=(typeof v==='string'?v:JSON.stringify(v,null,2)).slice(0,30000)});
 bind('#terminal-run',runCommand);bind('#terminal-refresh',readJob);bind('#terminal-stop',async()=>{if(state.job)await request('/commands/'+state.job+'/stop',{method:'POST'})});
 bind('#terminal-list',async()=>{$('#terminal-output').textContent=JSON.stringify(await request('/commands'),null,2)});
