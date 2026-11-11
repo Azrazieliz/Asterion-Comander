@@ -26,7 +26,6 @@ from pydantic import BaseModel, Field
 from .security import configured_token, require_token
 from .native_routes import router as phone_router
 from .recovery import router as recovery_router
-from .mcp_setup import router as mcp_setup_router
 from .pairing import router as pairing_router, start_discovery, stop_discovery, create_code
 from .live_stream import install_stream
 from .control_services import ScriptRun, BatchRequest, script_command, script_list, host_health
@@ -47,7 +46,6 @@ app = FastAPI(title='Asterion Control', version='0.8.0', docs_url='/docs', redoc
 app.mount('/static', StaticFiles(directory=STATIC), name='static')
 app.include_router(phone_router)
 app.include_router(recovery_router)
-app.include_router(mcp_setup_router)
 app.include_router(pairing_router)
 
 
@@ -793,9 +791,6 @@ def android_install(serial: str, data: AndroidInstall):
         raise HTTPException(422, 'A valid .apk inside the root is required')
     result = adb(serial, 'install', '-r', str(p), timeout=120)
     return {'ok': True, 'output': result[-1200:]}
-
-# Register MCP /mcp endpoint in the same REST server.
-from . import mcp_protocol  # noqa: E402,F401
 
 
 # Authenticated continuous frame transport: one WebSocket handshake, not repeated screenshot requests.
