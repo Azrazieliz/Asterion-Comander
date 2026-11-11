@@ -1,3 +1,14 @@
+# 2026-11-11 — Owner-approved two-turn Control app-switch test, TURN 1
+
+- **Source branch:** `work/control-0927-overnight-cycles-20261111`. Canonical detailed real-test report: [docs/CYCLE_ABRIDGED_APPSWITCH_ACCEPTANCE_20261111.md](docs/CYCLE_ABRIDGED_APPSWITCH_ACCEPTANCE_20261111.md), report commit `4dcf2a9`; source recovery helper `scripts/restore_chatgpt_from_control.py`, commit `61df73d`.
+- **Actual installed device verified:** `com.asterion.control` reports **versionCode 928**, Samsung Android 17 paired/reachable; Windows worker available. Initial ChatGPT Accessibility foreground verified, then actual Control foreground verified. Direct worker connector was not callable in this conversation; real actions used the documented private GitHub bridge.
+- **First script test:** `accept_cycle_app_switch.py` worker job `c2261ab7d67e4411b9296cf6e45b1b5c` exited 1 because Control was already foreground at script start: `CHATGPT_NOT_FOREGROUND_com.asterion.control`. This is a strict precondition defect, not successful app-switch acceptance.
+- **Capture test:** Control header `SHARING ON` contradicted native `capture:false` and `direct_mcp.connected:false`. Real `Start screen sharing` tap ACK 141 ms opened Android SystemUI MediaProjection `Share one app` consent. Mode-control taps ACKed 134/183 ms but did not change the observed mode; no permission was granted and no live video frames proved. Dialog dismissed with Back, ACK 172 ms.
+- **Real recovery verified:** using Control `/apps/launch`, new Python helper returned ChatGPT foreground (worker job `1d367a1b8e35402c9966fab7c69a980c`, exit 0; native launch request 194.1 ms); independent Accessibility `final-ui` confirmed `com.openai.chatgpt`, editor `draft_empty:true`, receipt 94 ms. **No ChatGPT send/replay was performed.**
+- **Status:** TURN 1 partial, TURN 2 pending. Source committed and Windows-executed; signed v0.9.28 already published and installed version 928 observed; cross-app continuous capture, direct connector, end-to-end SLA, duplicate-free second-turn continuation, full rollover and overnight operation remain **unverified**. The owner's short two-turn test does not relax ordinary unbounded-cycle production requirements.
+
+---
+
 # 2026-11-11 — Automatic 20-message ChatGPT conversation rollover
 
 - Owner correction: the autonomous development **cycle** remains unbounded across many ChatGPT conversations. Automatically roll over after **20 total ChatGPT messages per conversation**, preserving a canonical repository handoff; do not stop the cycle at that limit. Each work turn aims for ~30 minutes of substantial work; individual actions (including ChatGPT decision time) must remain <10 seconds, trivial native gestures ~1 second.
