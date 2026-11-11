@@ -46,34 +46,21 @@ def wait_foreground(pkg,timeout=5):
         if last==pkg:return u
         time.sleep(.15)
     raise RuntimeError("FOREGROUND_NOT_VERIFIED:"+pkg+":actual="+last)
-def launcher():
-    input_action(action="home")
-    until=time.monotonic()+4
-    while time.monotonic()<until:
-        p=ui().get("foreground_package","")
-        if "launcher" in p:return
-        time.sleep(.15)
-    raise RuntimeError("HOME_NOT_VERIFIED")
-def open_from_launcher(name,pkg):
-    launcher()
+def open_recent(name,pkg):
+    # Samsung Recents exposes reliable labeled task cards; the launcher drawer
+    # is paginated and can omit icons from the Accessibility tree.
+    if not input_action(action="recents"):
+        raise RuntimeError("RECENTS_NOT_OPENED")
+    time.sleep(.25)
     current=ui()
-    loc=app_element(current,name)
-    if not loc:
-        root=current.get("root",{})
-        b=root.get("bounds",[0,0,1080,2340])
-        midx=int((b[0]+b[2])/2)
-        bottom=b[3]
-        input_action(action="swipe",x=midx,y=int(bottom*.82),
-                     x2=midx,y2=int(bottom*.33),duration_ms=300)
-        time.sleep(.3)
-        current=ui();loc=app_element(current,name)
-    if not loc:
-        visible=[(n.get("text") or n.get("description")) for n in nodes(current.get("root",{}))
-                 if (n.get("text") or n.get("description"))]
-        raise RuntimeError("APP_ICON_NOT_FOUND:"+name+";visible="+repr(visible[:20]))
-    input_action(action="tap",x=loc[0],y=loc[1])
+    available=[(n.get("text") or n.get("description") or "")
+               for n in nodes(current.get("root",{}))]
+    if not any(x.strip().lower()==name.lower() for x in available):
+        raise RuntimeError("RECENT_TASK_NOT_VISIBLE:"+name)
+    if not input_action(action="click_text",text=name):
+        raise RuntimeError("RECENT_TASK_CLICK_FAILED:"+name)
     wait_foreground(pkg,6)
-    LOG.append({"opened":name,"foreground":pkg})
+    LOG.append({"opened_from_recents":name,"foreground":pkg})
 def capture_status():
     status=get("/api/v1/phone")
     return {"paired":status.get("paired"),"reachable":status.get("reachable"),
@@ -85,13 +72,17 @@ def main():
     before=ui().get("foreground_package","")
     if before!="com.openai.chatgpt": raise RuntimeError("CHATGPT_NOT_FOREGROUND_"+before)
     try:
-        open_from_launcher("Asterion Control","com.asterion.control")
+        open_recent("Asterion Control","com.asterion.control")
         state=capture_status()
         LOG.append({"asterion_control_status":state})
         if not state["capture"]:
             current=ui();loc=app_element(current,"Start screen sharing")
+            if not loc and app_element(current,"Open Connect"):
+                input_action(action="click_text",text="Open Connect")
+                time.sleep(.25)
+                current=ui();loc=app_element(current,"Start screen sharing")
             if not loc:
-                raise RuntimeError("CAPTURE_OFF_NO_UI_RESTART_BUTTON")
+                raise RuntimeError("CAPTURE_OFF_NO_VISIBLE_RESTART_BUTTON")
             input_action(action="tap",x=loc[0],y=loc[1])
             time.sleep(.5)
             current=ui()
@@ -112,24 +103,14 @@ def main():
                         res.headers.get("content-type","").startswith("image/jpeg"),
                         "captured_bytes":len(res.content)})
     finally:
-        # Return directly from the VISIBLE Control Activity. This is the
-        # authorized native app-launch mechanism; app-drawer search is not
-        # reliable across Samsung pages and was the original failure.
+        # Keep EXACT same ChatGPT task/conversation. Starting ChatGPT's launcher
+        # activity can open its new-chat home instead of the previous thread.
         try:
-            fg=ui().get("foreground_package","")
-            if fg=="com.asterion.control":
-                from asterion_remote.phone_bridge import request
-                launch=request("/apps/launch","POST",{"package":"com.openai.chatgpt"},timeout=6).json()
-                LOG.append({"chatgpt_launch_from_visible_control":launch})
-                if not launch.get("intent_dispatched"):
-                    raise RuntimeError("CHATGPT_INTENT_NOT_ACCEPTED")
-                wait_foreground("com.openai.chatgpt",7)
-                LOG.append({"chatgpt_return_verified":True})
-            elif fg=="com.openai.chatgpt":
-                LOG.append({"chatgpt_return_verified":True})
-            else:
-                LOG.append({"return_to_chatgpt_error":"Control not foreground; avoid blind app launch"})
-        except Exception as e:LOG.append({"return_to_chatgpt_error":str(e)})
+            if ui().get("foreground_package")!="com.openai.chatgpt":
+                open_recent("ChatGPT","com.openai.chatgpt")
+            LOG.append({"original_chatgpt_task_restored":True})
+        except Exception as e:
+            LOG.append({"return_to_chatgpt_error":str(e)})
     after=ui().get("foreground_package","")
     output={"test":"chatgpt-control-chatgpt-real-ui","before":before,
             "after":after,"returned":after=="com.openai.chatgpt",
