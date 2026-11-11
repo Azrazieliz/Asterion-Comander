@@ -231,9 +231,9 @@ public final class MainActivity extends Activity {
     if(p.getChildCount()>0)lp.leftMargin=dp(8);p.addView(card,lp);return value;
   }
   private View remotePage(){LinearLayout layout=v();layout.setPadding(dp(17),dp(11),dp(17),dp(14));
-    LinearLayout title=h();LinearLayout labels=v();labels.addView(eyebrow("REMOTE VIEW"));margin(labels,t("Your Windows desktop",21,DesignSystem.TEXT,true),7);title.addView(labels,new LinearLayout.LayoutParams(0,-2,1));
+    LinearLayout title=h();LinearLayout labels=v();labels.addView(eyebrow("REMOTE VIEW"));margin(labels,t("Remote control",21,DesignSystem.TEXT,true),7);title.addView(labels,new LinearLayout.LayoutParams(0,-2,1));
     LinearLayout refresh=h();refresh.setGravity(Gravity.CENTER);refresh.setPadding(dp(11),dp(11),dp(11),dp(11));DesignSystem.clickable(refresh,this,DesignSystem.SURFACE2,DesignSystem.EDGE,13);refresh.addView(icon("refresh",DesignSystem.PURPLE,20));refresh.setContentDescription("Refresh remote connection");refresh.setOnClickListener(w->connectRemote(true));title.addView(refresh);wide(layout,title);
-    remoteConnection=t("Configure your Windows connection in Devices.",12,DesignSystem.MUTED,false);margin(layout,remoteConnection,10);gap(layout,13);
+    remoteConnection=t("Checking Windows connection…",12,DesignSystem.MUTED,false);margin(layout,remoteConnection,10);gap(layout,13);
     FrameLayout frame=new FrameLayout(this);frame.setBackground(DesignSystem.shape(this,DesignSystem.SURFACE,DesignSystem.EDGE,21));
     web=new WebView(this);web.setBackgroundColor(DesignSystem.SURFACE);WebSettings settings=web.getSettings();settings.setJavaScriptEnabled(true);settings.setDomStorageEnabled(false);settings.setAllowFileAccess(false);
     settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);settings.setBuiltInZoomControls(false);settings.setDisplayZoomControls(false);
@@ -241,7 +241,7 @@ public final class MainActivity extends Activity {
       @Override public boolean shouldOverrideUrlLoading(WebView view,WebResourceRequest request){return !sameOrigin(request.getUrl().toString(),prefs.getString("url",""));}
       @Override public void onPageFinished(WebView view,String url){if(!sameOrigin(url,prefs.getString("url","")))return;
         String token=prefs.getString("token","");
-        String css="header,footer,.authbar,.notice{display:none!important}.app{padding:8px!important}main{margin:0!important}.tabs{margin:0 0 12px!important}.tabs button{padding:10px 16px!important}.tabs button[data-page=files],.tabs button[data-page=processes],.tabs button[data-page=system]{display:none!important}.viewer{height:50vh!important;min-height:240px!important}.phone-viewer{min-height:370px!important}.sectiontitle{flex-wrap:wrap!important}body{background:#13192b!important}";
+        String css="header,footer,.headline,.authbar,.notice{display:none!important}.app{padding:7px 9px!important}main{margin:0!important}.tabs{margin:0 0 12px!important}.tabs button{padding:9px 14px!important}.tabs button[data-page=files],.tabs button[data-page=processes],.tabs button[data-page=system]{display:none!important}.sectiontitle{flex-wrap:wrap!important}body{background:#13192b!important}.phone-viewer{min-height:270px!important}";
         String script="(function(){if(!document.getElementById('asterion-embedded')){const st=document.createElement('style');st.id='asterion-embedded';st.textContent="+JSONObject.quote(css)+";document.head.appendChild(st);}const t=document.querySelector('#token');const b=document.querySelector('#connect');if(t&&b){t.value="+JSONObject.quote(token)+";b.click();}})()";
         view.evaluateJavascript(script,null);
       }
@@ -781,7 +781,7 @@ public final class MainActivity extends Activity {
       tabLabels[i].setTextColor(selected?DesignSystem.TEXT:DesignSystem.MUTED);tabIcons[i].tint(selected?DesignSystem.PURPLE:DesignSystem.MUTED);
       if(selected)tabButtons[i].setBackground(DesignSystem.shape(this,0xFF292743,0,15));else tabButtons[i].setBackgroundColor(Color.TRANSPARENT);
     }
-    if(page==1)connectRemote(false);if(page==0||page==2||page==3)updateHealth();
+    if(page==1){connectRemote(false);if(!hostRefreshing)checkHost();}if(page==0||page==2||page==3)updateHealth();
   }
   private void save(){prefs.edit().putString("url",serverUrl.getText().toString().trim())
     .putString("phoneip",localAddress.getText().toString().trim()).apply();updateHealth();}
@@ -791,7 +791,7 @@ public final class MainActivity extends Activity {
       if(emptyRemote!=null)emptyRemote.setVisibility(View.VISIBLE);if(web!=null)web.setVisibility(View.GONE);return;}
     if(remoteConnection!=null)remoteConnection.setText("Connecting to "+url.replaceFirst("^https?://",""));
     emptyRemote.setVisibility(View.GONE);web.setVisibility(View.VISIBLE);
-    if(force||!webStarted){webStarted=true;web.loadUrl(url);}
+    if(force||!webStarted){webStarted=true;web.loadUrl(url.replaceAll("/+$","")+"/?embedded=1");}
   }
   private void updateHealth(){try{
     Intent b=registerReceiver(null,new IntentFilter(Intent.ACTION_BATTERY_CHANGED));int level=b==null?-1:b.getIntExtra(BatteryManager.EXTRA_LEVEL,-1);
