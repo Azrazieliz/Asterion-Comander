@@ -1,10 +1,18 @@
-# One-time owner-authorized Windows per-minute service recovery. No administrative privileges needed.
+# Install/repair the original minute watchdog WITHOUT displaying a PowerShell window.
+# The scheduled task runs wscript.exe, not a console-hosted powershell.exe.
+# No worker restart, credential reset, desktop control or installer invocation.
 $ErrorActionPreference='Stop'
-$path=(Resolve-Path (Join-Path $PSScriptRoot 'control_repair_watchdog.ps1')).Path
+$launcher=(Resolve-Path (Join-Path $PSScriptRoot 'control_watchdog_hidden.vbs')).Path
 $task='Asterion Control Self-Healing Worker'
-$cmd='powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "'+$path+'"'
+$cmd='wscript.exe //B //Nologo "'+$launcher+'"'
 & schtasks.exe /Create /F /SC MINUTE /MO 1 /TN $task /TR $cmd | Out-Null
-if($LASTEXITCODE -ne 0){throw 'Could not install user-context Windows watchdog'}
+if($LASTEXITCODE -ne 0){throw 'Could not install hidden Windows watchdog'}
+$observed=Get-ScheduledTask -TaskName $task -ErrorAction Stop
+$action=@($observed.Actions)[0]
+if($action.Execute -notmatch '(?i)wscript(?:\.exe)?$' -or
+   $action.Arguments -notmatch 'control_watchdog_hidden\.vbs'){
+   throw 'Task registration did not replace the console launcher'
+}
 & schtasks.exe /Run /TN $task | Out-Null
-if($LASTEXITCODE -ne 0){throw 'Windows watchdog registered but first execution failed'}
-Write-Output 'ASTERION_CONTROL_WATCHDOG_INSTALLED'
+if($LASTEXITCODE -ne 0){throw 'Watchdog registered but test launch failed'}
+Write-Output 'ASTERION_HIDDEN_WATCHDOG_INSTALLED_AND_INVOKED'
