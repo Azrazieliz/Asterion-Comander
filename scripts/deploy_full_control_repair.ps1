@@ -35,11 +35,11 @@ if(-not $appOld.Contains('from .native_routes import router as phone_router') -o
 $appNew=$appOld
 if(-not $appNew.Contains('from .recovery import router as recovery_router')){
   $appNew=$appNew.Replace('from .native_routes import router as phone_router',
-    'from .native_routes import router as phone_router'+"\n"+'from .recovery import router as recovery_router')
+    'from .native_routes import router as phone_router'+[Environment]::NewLine+'from .recovery import router as recovery_router')
 }
 if(-not $appNew.Contains('app.include_router(recovery_router)')){
   $appNew=$appNew.Replace('app.include_router(phone_router)',
-    'app.include_router(phone_router)'+"\n"+'app.include_router(recovery_router)')
+    'app.include_router(phone_router)'+[Environment]::NewLine+'app.include_router(recovery_router)')
 }
 Copy-Item -LiteralPath $app -Destination (Join-Path $backup 'app.py.original') -Force
 foreach($part in $parts){
