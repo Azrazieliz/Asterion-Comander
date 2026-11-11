@@ -6,8 +6,9 @@ sharing is already active, verifies fresh frames; if inactive, requests the
 existing Control UI restart and observes the Android consent dialog.
 """
 from __future__ import annotations
-import json,os,time
+import json,os,time,sys
 from pathlib import Path
+sys.path.insert(0,str(Path(r'D:\AsterionControlRelease')))
 import httpx
 
 ROOT=Path(os.environ["LOCALAPPDATA"])/"AsterionControl"
