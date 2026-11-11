@@ -56,6 +56,24 @@ final class AppCatalog {
     if(foreground==null)
       return new JSONObject().put("intent_dispatched",false)
         .put("reason","Open the Asterion Control screen before requesting a new application");
+    // ChatGPT is special: the existing conversation/task is part of the cycle
+    // state. Launching its MAIN activity can open a blank chat and silently
+    // strand the active checkpoint. Resume the existing RECENT task instead.
+    if("com.openai.chatgpt".equals(packageName)){
+      ControlAccessibilityService access=ControlAccessibilityService.active;
+      if(access==null)
+        return new JSONObject().put("intent_dispatched",false)
+          .put("verified_foreground",false).put("package",packageName)
+          .put("reason","Accessibility unavailable; existing ChatGPT conversation preserved");
+      JSONObject resume=access.requestChatForeground();
+      boolean requested=resume.optBoolean("requested",false)||
+        resume.optBoolean("already_foreground",false);
+      return new JSONObject().put("intent_dispatched",requested)
+        .put("verified_foreground",resume.optBoolean("already_foreground",false))
+        .put("existing_task_only",true)
+        .put("package",packageName)
+        .put("reason",resume.optString("reason","Existing ChatGPT task selected"));
+    }
     Intent intent=foreground.getPackageManager().getLaunchIntentForPackage(packageName);
     if(intent==null)throw new IllegalArgumentException("Application has no launch intent");
     final boolean[] accepted={false};
