@@ -273,8 +273,12 @@ public final class ControlAccessibilityService extends AccessibilityService {
         catch(Exception ignored){}
       }finally{done.countDown();}
     });
-    try{if(!done.await(3,TimeUnit.SECONDS))
-      return new JSONObject().put("verified",false).put("reason","New-chat verification timed out");}
+    try{if(!done.await(3,TimeUnit.SECONDS)){
+      JSONObject timedOut=new JSONObject();
+      try{timedOut.put("verified",false).put("reason","New-chat verification timed out");}
+      catch(Exception ignored){}
+      return timedOut;
+    }}
     catch(InterruptedException e){Thread.currentThread().interrupt();return new JSONObject();}
     return result[0];
   }
