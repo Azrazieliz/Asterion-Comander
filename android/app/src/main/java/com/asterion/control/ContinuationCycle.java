@@ -406,7 +406,7 @@ final class ContinuationCycle {
       "\nYour question: "+previousQuestion+
       "\nOwner's speech-to-text answer: "+spokenInput);
     String rolloverContext=state.optBoolean("new_conversation_handoff",false)?(
-      "\\nCONVERSATION ROLLOVER: this is a VERIFIED fresh ChatGPT conversation. "+
+      "\nCONVERSATION ROLLOVER: this is a VERIFIED fresh ChatGPT conversation. "+
       "The overall development cycle has NOT restarted. The last verified "+
       "checkpoint is "+state.optString("last_acknowledged","unknown")+". "+
       "FIRST read the canonical project repository, progress report, recorded "+
@@ -415,7 +415,7 @@ final class ContinuationCycle {
       "new work until source/test receipts prove it. This reply MUST be "+
       "another substantial development turn. "):"";
     String closingHandoff=state.optInt("turns_in_chat",0)==CHAT_ROLLOVER_TURNS-1?(
-      "\\nBEFORE ACK: the next message will roll into a new ChatGPT conversation. "+
+      "\nBEFORE ACK: the next message will roll into a new ChatGPT conversation. "+
       "Update the canonical repository progress/handoff with exact branch, "+
       "latest commit, completed and incomplete work, test/build status, "+
       "outstanding defects and the next substantial tasks. No empty handoff. "):"";
