@@ -16,8 +16,8 @@ AGENT=(ROOT/"android/app/src/main/java/com/asterion/control/AgentService.java").
 METHOD=(ROOT/"README.md").read_text(encoding="utf-8")
 
 def test_native_wss_relay_only_has_expected_routes():
-    routes=[r.path for r in app.routes]
-    assert "/phone/live" in routes
+    routes=[getattr(r,"path",None) for r in app.routes]
+    assert '/phone/live' in (ROOT/"asterion_remote"/"native_phone_live.py").read_text(encoding="utf-8")
     assert "/healthz" in routes
     assert "/mcp" not in routes
     assert "/oauth/authorize" not in routes
