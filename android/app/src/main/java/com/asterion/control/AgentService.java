@@ -37,6 +37,7 @@ import java.util.concurrent.Executors;
 public final class AgentService extends Service {
   public static final int PORT = 8973;
   public static volatile boolean running = false;
+  public static volatile boolean listenerReady = false;
   private volatile boolean alive = false;
   private ServerSocket server;
   private Thread acceptThread;
@@ -164,7 +165,7 @@ public final class AgentService extends Service {
   private void serve(){
     while(alive){
       try(ServerSocket s=new ServerSocket(PORT)){
-        server=s;s.setReuseAddress(true);
+        server=s;s.setReuseAddress(true);listenerReady=true;
         while(alive){
           Socket client=s.accept();
           if(!privatePeer(client.getInetAddress())){
@@ -175,13 +176,15 @@ public final class AgentService extends Service {
           clients.execute(()->handle(client));
         }
       }catch(Exception e){
+        listenerReady=false;
         if(alive){
+          ConnectionDiagnostics.failure(this,"listener_error","Phone listener failed: "+e.getClass().getSimpleName()+"; retrying");
           android.util.Log.w("AsterionAgent","Listener will retry after network failure",e);
           try{Thread.sleep(1800);}catch(InterruptedException interrupted){Thread.currentThread().interrupt();break;}
         }
       }
     }
-    alive=false;running=false;
+    alive=false;running=false;listenerReady=false;
   }
   JSONObject nativeStreamStatus()throws Exception{
     long frameAt=CaptureService.latestAtMs;
@@ -573,7 +576,10 @@ public final class AgentService extends Service {
       .put("thermals",thermals).put("performance",PerformanceManager.status(this))
       .put("remote_transport",TransportConnectivity.report(this));
   }
-  @Override public void onDestroy(){alive=false;running=false;try{if(server!=null)server.close();}catch(Exception ignored){}
+  @Override public void onDestroy(){
+    if(getSharedPreferences("agent",MODE_PRIVATE).getBoolean(PREF_REMOTE_ENABLED,false))
+      ConnectionDiagnostics.failure(this,"agent_stopped","Android stopped the phone control service");
+    alive=false;running=false;listenerReady=false;try{if(server!=null)server.close();}catch(Exception ignored){}
     if(networkManager!=null&&networkCallback!=null){
       try{networkManager.unregisterNetworkCallback(networkCallback);}catch(Exception ignored){}
     }
