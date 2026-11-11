@@ -186,3 +186,16 @@ def test_sync_remote_never_rebases_unrelated_local_changes(monkeypatch):
     monkeypatch.setattr(control, "git", fake_git)
     with pytest.raises(RuntimeError, match="non-receipt"):
         control.sync_remote()
+
+
+def test_guarded_recovery_script_syntax_and_preservation_contract():
+    import ast
+    recovery = Path(__file__).resolve().parents[1] / "scripts" / "recover_control_git_transport.py"
+    source = recovery.read_text(encoding="utf8")
+    ast.parse(source)
+    assert "stop_only_git_bridge()" in source
+    assert "quarantine_uncertain_backlog(worktree)" in source
+    assert "sync_receipts(worktree)" in source
+    assert "PHONE_UI_CONFIRMED" in source
+    assert "adb kill-server" not in source
+    assert "git reset --hard" not in source
