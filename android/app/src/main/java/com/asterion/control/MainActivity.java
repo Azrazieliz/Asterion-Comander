@@ -91,6 +91,7 @@ public final class MainActivity extends Activity {
   private TextView privacyStatus;
   private int currentTab=0;
   private boolean webStarted=false,hostRefreshing=false;
+  private boolean repairInProgress=false;
   private long lastHostRefresh=0;
   private boolean destroyed=false;
   private final Runnable ticker=new Runnable(){@Override public void run(){if(destroyed)return;updateHealth();handler.postDelayed(this,3500);}};
@@ -257,11 +258,13 @@ public final class MainActivity extends Activity {
     gap(summary,12);remoteConnection=t("Checking saved connection…",12,DesignSystem.MUTED,false);wide(summary,remoteConnection);
     gap(summary,16);twoActions(summary,"Open desktop","monitor",()->show(1),"Reconnect","refresh",()->{save();checkHost();});
     gap(summary,10);button(summary,"Find my Windows computer","devices",true,this::discoverComputer);
-    gap(summary,9);button(summary,"Repair connection","refresh",false,()->{
-      if(!prefs.getString("token","").isEmpty()&&!prefs.getString("url","").isEmpty()){
-        startAgent();
-        handler.postDelayed(()->{if(AgentService.running)registerPhone();else setPairingFeedback("Phone service did not start. Enable phone access in this screen.");},1500);
-      }else discoverComputer();
+    gap(summary,9);button(summary,"Auto-repair connection","refresh",false,()->repairControl(false));
+    gap(summary,9);button(summary,"Force reinitialize · keep pairing","power",false,()->{
+      new AlertDialog.Builder(this)
+        .setTitle("Reinitialize phone control?")
+        .setMessage("Restart the phone control listener and re-register with Windows. Pairing, credentials, files and app settings are preserved. Android may require renewed screen-sharing approval.")
+        .setPositiveButton("Reinitialize",(dialog,which)->repairControl(true))
+        .setNegativeButton("Cancel",null).show();
     });
     gap(summary,10);pairingFeedback=t("Your phone is the controller. Connect once; the Windows worker follows.",12,DesignSystem.MUTED,false);
     pairingFeedback.setMaxLines(5);wide(summary,pairingFeedback);
@@ -645,6 +648,83 @@ public final class MainActivity extends Activity {
       runOnUiThread(()->{hostRefreshing=false;if(destroyed)return;if(pcConnection!=null)pcConnection.setText(state);if(hostHealth!=null)hostHealth.setText(details);
         if(remoteConnection!=null)remoteConnection.setText(state.startsWith("Online")?"Connected to Windows agent":state);
       });
+    });
+  }
+  /**
+   * Owner-initiated, bounded recovery. Never clear pairing or rotate credentials.
+   * A successful start request is NOT proof the Windows worker can reach the phone.
+   * Report success only after the worker's authenticated /phone probe confirms reachability.
+   */
+  private void repairControl(boolean force){
+    if(repairInProgress){setPairingFeedback("Repair already running · checking the phone link");return;}
+    if(prefs.getString("url","").isEmpty()||prefs.getString("token","").isEmpty()){
+      setPairingFeedback("No saved Windows pairing · find your computer to connect");
+      discoverComputer();return;
+    }
+    repairInProgress=true;
+    setPairingFeedback(force?"Reinitializing phone listener · preserving pairing…":"Checking and repairing the saved connection…");
+    if(force){
+      stopService(new Intent(this,AgentService.class));
+      handler.postDelayed(()->beginRepair(true),850);
+    }else beginRepair(false);
+  }
+  private void beginRepair(boolean force){
+    if(destroyed)return;
+    if(!AgentService.running)startAgent();
+    handler.postDelayed(()->{
+      if(destroyed)return;
+      if(!AgentService.running){
+        repairInProgress=false;
+        setPairingFeedback("Repair failed: Android phone agent did not start. Open the phone access permissions.");
+        return;
+      }
+      io.execute(()->{
+        boolean healthy=false;
+        if(!force){
+          try{
+            JSONObject result=pcTransferRequest("/api/v1/phone","GET",null);
+            healthy=result.optBoolean("paired")&&result.optBoolean("reachable");
+          }catch(Exception ignored){}
+        }
+        if(healthy){reportRepair(true,"Existing native link verified");return;}
+        runOnUiThread(()->{
+          if(destroyed)return;
+          setPairingFeedback("Phone service active · renewing Windows worker registration…");
+          registerPhone();
+          // Same single-thread executor: this verification runs AFTER registration completes,
+          // never races with its authentication handshake.
+          io.execute(this::verifyRepair);
+        });
+      });
+    },1150);
+  }
+  private void verifyRepair(){
+    String failure="Windows could not verify phone reachability";
+    boolean success=false;
+    for(int attempt=0;attempt<3;attempt++){
+      try{
+        JSONObject state=pcTransferRequest("/api/v1/phone","GET",null);
+        if(state.optBoolean("paired")&&state.optBoolean("reachable")){
+          success=true;break;
+        }
+        failure=state.optBoolean("paired")?
+          "Windows has a pairing, but the phone listener is unreachable":
+          "Windows has not accepted the phone registration";
+      }catch(Exception e){failure="Cannot reach Windows verification: "+e.getClass().getSimpleName();}
+      if(attempt<2)try{Thread.sleep(750);}catch(InterruptedException e){Thread.currentThread().interrupt();return;}
+    }
+    reportRepair(success,success?"Native Windows-to-phone link verified":failure);
+  }
+  private void reportRepair(boolean success,String detail){
+    runOnUiThread(()->{
+      if(destroyed)return;
+      repairInProgress=false;
+      if(success){
+        String capture=CaptureService.active?"Live screen sharing active":
+          "Screen sharing off · Android approval required to resume video";
+        setPairingFeedback("Repair verified · "+detail+"\n"+capture);
+        checkHost();updateHealth();
+      }else setPairingFeedback("Repair incomplete · "+detail+"\nPairing has been preserved.");
     });
   }
   private void startAgent(){try{
