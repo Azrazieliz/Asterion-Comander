@@ -25,7 +25,7 @@ Time is a target, **not a substitute for progress**: do not keep a finished tiny
 
 ## Measurement and acceptance
 
-Measure separately **(a) observation-to-decision**, **(b) command transport**, **(c) device/API execution**, **(d) outcome verification**. The sum for **each individual action** is compared to the 10-second deadline. The target for trivial deterministic gestures is ~1 second. Persistent direct authenticated Windows worker and native WebSocket are the primary route; private GitHub relay is only the fall back and carries extra latency.
+Measure separately **(a) observation-to-decision**, **(b) command transport**, **(c) device/API execution**, **(d) outcome verification**. The sum for **each individual action** is compared to the 10-second deadline. The target for trivial deterministic gestures is ~1 second. The existing GitHub connector and private command/result bridge are the **actual ChatGPT-to-worker invocation path in this setup**. The Windows worker's authenticated phone WebSocket is an **internal native transport**, not an Asterion Control tool callable inside ChatGPT. Do not install or use an MCP gateway or claim a direct ChatGPT worker session exists. GitHub relay latency is additional to worker execution.
 
 A worker-side 69 ms input ACK does **not** measure ChatGPT's minutes of thinking and cannot satisfy the end-to-end action SLA by itself. Likewise a model's 30-minute working turn cannot excuse a 20-second individual UI navigation.
 
@@ -33,4 +33,7 @@ The phone's durable turn telemetry records time from actual message submission t
 
 ## Implemented versus proven
 
-This contract and unbounded-cycle default are source work on `work/control-0927-overnight-cycles-20261111`. Until the **owner-signed v0.9.27 APK** is built, installed, and a real sustained multi-turn test passes, do **not** claim fully unattended overnight acceptance. The prior published v0.9.26 has the old 10/20-turn limit. Preserve the working pairing, update-feed identity and existing verified native screen streaming.
+Canonical operating method: [Asterion-Control-Bridge README](https://github.com/Azrazieliz/Asterion-Control-Bridge/blob/main/README.md). Asterion Control is an **external Android/Windows system**, never a ChatGPT-callable tool. The legacy HTTP MCP gateway, OAuth setup and associated launcher scripts are retired; **native authenticated phone WSS is preserved** behind the existing stable forwarding identity. An old class or SSH-key *filename* containing `mcp` is not a reason to resurrect that gateway.
+
+The currently published owner-signed Control APK is **v0.9.30**, and source work beyond that version may be staged. Only a real phone version check proves installation. The 20-message rollover, same-conversation task restoration, actual ChatGPT ACK handling, unattended operation and full end-to-end action latency still require live acceptance; do not claim these are proven from a build or source test alone.
+
