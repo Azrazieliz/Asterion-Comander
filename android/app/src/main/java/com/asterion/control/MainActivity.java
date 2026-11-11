@@ -268,7 +268,7 @@ public final class MainActivity extends Activity {
     wide(healthBody,meters);gap(healthBody,12);
     LinearLayout safety=card();rowTitle(safety,"Automatic protection",
       "Thermal and memory safeguards manage Control overhead",icon("activity",DesignSystem.TEAL,23));
-    gap(safety,9);healthActionStatus=t("Automatic management is active",12,DesignSystem.MUTED,false);
+    gap(safety,9);healthActionStatus=t("Reading performance configuration…",12,DesignSystem.MUTED,false);
     wide(safety,healthActionStatus);wide(healthBody,safety);
     gap(healthBody,12);LinearLayout store=card();healthStorage=t("—",18,DesignSystem.TEXT,true);metricRow(store,"Internal storage",null,healthStorage,DesignSystem.PURPLE);margin(healthBody,store,0);
     gap(healthBody,12);LinearLayout network=card();healthWifi=t("Checking…",17,DesignSystem.TEXT,true);metricRow(network,"Network",null,healthWifi,DesignSystem.TEAL);wide(healthBody,network);
@@ -678,7 +678,7 @@ public final class MainActivity extends Activity {
         String id=out.getString("id");
         runOnUiThread(()->{
           activeTransferId=id;
-          transferStatus("Transfer started · "+pcPath);
+          transferStatus("Transfer request accepted · awaiting first progress · "+pcPath);
           pollWifiTransfer(id,0);
         });
       }catch(Exception e){runOnUiThread(()->transferStatus("Transfer not started: "+e.getMessage()));}
@@ -697,8 +697,11 @@ public final class MainActivity extends Activity {
           if(state.equals("completed")){
             JSONObject receipt=job.optJSONObject("result");
             activeTransferId=null;
-            transferStatus(receipt!=null?"Saved to "+receipt.optString("location")+"\nVerified SHA-256: "+receipt.optString("sha256"):
-                         "Windows reported completion; phone file not yet independently verified");
+            transferStatus(receipt!=null&&receipt.optString("location").length()>0&&
+                 receipt.optString("sha256").matches("[a-fA-F0-9]{64}")?
+                 "Windows reports transfer finished at "+receipt.optString("location")+
+                   "\nReported SHA-256: "+receipt.optString("sha256"):
+                 "Windows reported transfer completion without an independently checkable phone receipt");
           }else if(state.equals("failed")||state.equals("cancelled")){
             activeTransferId=null;
             transferStatus("Transfer "+state+": "+job.optString("error",""));
@@ -918,7 +921,7 @@ public final class MainActivity extends Activity {
       JSONObject p=PerformanceManager.status(this);
       int every=p.optInt("capture_interval_ms",90);
       String details="Automatic · "+p.optString("reason","normal")+
-        "\nScreen refresh: "+every+" ms/frame";
+        "\nConfigured capture target: "+every+" ms/frame (actual FPS not measured)";
       healthActionStatus.setText(details);
     }
     if(healthStorage!=null)healthStorage.setText(String.format(Locale.US,"%.1f GB free of %.0f GB",fs.getAvailableBytes()/1e9,fs.getTotalBytes()/1e9));
@@ -1124,7 +1127,7 @@ public final class MainActivity extends Activity {
       JSONObject cycle=ContinuationCycle.get(this).status();
       String information="Development cycle: "+cycle.optString("state","idle")
         +"\nActive: "+cycle.optBoolean("active",false)
-        +"  |  Turns: "+cycle.optInt("index",0)
+        +"  |  Current turn number: "+cycle.optInt("index",0)
         +"  |  Verified replies: "+cycle.optInt("ack_count",0)
         +"\nTotal-turn limit: "+(cycle.optBoolean("active",false)?
           (cycle.optBoolean("overnight_unbounded",false)?"None (until stop or genuine completion)":"Owner-configured"):
@@ -1289,7 +1292,7 @@ public final class MainActivity extends Activity {
         runOnUiThread(()->{
           if(choices.isEmpty()){
             new AlertDialog.Builder(this).setTitle("Asterion app integration")
-              .setMessage("No installed apps have declared the native Asterion bridge yet. The app teams have been asked to add it. No apps were modified.")
+              .setMessage("No installed apps have declared the native Asterion bridge yet. No connected apps were modified.")
               .setPositiveButton("Close",null).show();
             return;
           }
@@ -1454,7 +1457,7 @@ public final class MainActivity extends Activity {
             ConnectionDiagnostics.success(this);
             runOnUiThread(()->{
               workerPhoneState="Phone registered; Windows reachability being verified";
-              setPairingFeedback("Connected · Samsung is the controller and Windows is the worker");
+              setPairingFeedback("Phone registration accepted by Windows · testing live reachability");
               updateConnectionIssue();
               toast("Phone registered with Windows");
               updateHealth();
@@ -1467,7 +1470,7 @@ public final class MainActivity extends Activity {
                 :"Windows registration returned HTTP "+failure);
             runOnUiThread(()->{
               workerPhoneState="Registration rejected: HTTP "+failure;
-              setPairingFeedback("Phone registration HTTP "+failure+" — use Force activate connection");
+              setPairingFeedback("Phone registration HTTP "+failure+" — use Auto-repair connection");
               updateConnectionIssue();
               toast("Phone registration returned HTTP "+failure);
             });return;
