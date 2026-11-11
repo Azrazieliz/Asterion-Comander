@@ -1,3 +1,11 @@
+# 2026-11-11 — Automatic 20-turn ChatGPT conversation rollover
+
+- Owner correction: the autonomous development **cycle** remains unbounded across many ChatGPT conversations. Automatically roll over after **20 acknowledged work turns per conversation**, preserving a canonical repository handoff; do not stop the cycle at that limit. Each work turn aims for ~30 minutes of substantial work; individual actions (including ChatGPT decision time) must remain <10 seconds, trivial native gestures ~1 second.
+- Source implementation: persisted `turns_in_chat`, `rollover_count`, `chat_rollover_turns=20`; prior turn is instructed to update exact canonical project handoff; next verified new-chat prompt carries last confirmed checkpoint and progress reference. A new conversation is not inferred from a clicked button or an empty old composer. Protected drafts and unique checkpoint IDs prevent double sends.
+- Limitation: actual ChatGPT new-chat greeting availability differs by UI version, and final acceptance of unattended overnight 20-turn rollover has **not** been demonstrated. Verified source and APK build are not on-phone proof.
+
+---
+
 # ASTERION CONTROL — ACTIVE PROGRESS AND EXECUTION STATE (updated 2026-11-09)
 
 This file is the **current operational summary**, not a replacement for the full chronological audit. The full original historical progress record was preserved byte-for-byte as [PROGRESS_HISTORICAL_AUDIT_PRE_WORKER_FIRST_20261109.md](PROGRESS_HISTORICAL_AUDIT_PRE_WORKER_FIRST_20261109.md). Consult that archive for historical implementation details only; earlier connection experiments are not current task instructions.
