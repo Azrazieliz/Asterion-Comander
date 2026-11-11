@@ -32,7 +32,7 @@ def execute(args, *, cwd=None, check=True, timeout=120):
     if check and p.returncode:
         raise RuntimeError(f"{args[0]} failed ({p.returncode}): "
                            + (p.stderr or p.stdout)[-750:])
-    return p.stdout.strip()
+    return p.stdout.rstrip('\r\n')
 
 
 def git(repo, *args):
