@@ -8,7 +8,7 @@ from asterion_remote import github_bridge_git as control
 
 def prepare(tmp_path, monkeypatch):
     monkeypatch.setattr(control, "ROOT", tmp_path)
-    monkeypatch.setattr(control, "git", lambda *args, **kwargs: "")
+    monkeypatch.setattr(control, "git", lambda *args, **kwargs: "0" if args and args[0] == "rev-list" else "")
     monkeypatch.setattr(control, "publish", lambda paths: None)
     monkeypatch.setattr(control, "ensure_agent", lambda key: {"ok": True})
     active = tmp_path / "commands" / "active"
@@ -152,7 +152,7 @@ def test_sync_remote_recovers_unpublished_result_commits(tmp_path, monkeypatch):
         if args[0] == "rev-list":
             return "2"
         if args[0] == "log":
-            return "results/accepted.json\\nresults/finished.json"
+            return "results/accepted.json\nresults/finished.json"
         return ""
 
     monkeypatch.setattr(control, "git", fake_git)
@@ -217,7 +217,7 @@ def test_dirty_receipt_and_untracked_command_are_preserved(tmp_path, monkeypatch
     backup_dir = tmp_path / "backup"
     backup_dir.mkdir()
     monkeypatch.setattr(module, "git", lambda *a:
-                        " M results/core-20261111-1450-assembly-tail-31.json\\n"
+                        " M results/core-20261111-1450-assembly-tail-31.json\n"
                         "?? commands/active/core-20261111-1454-apk-log-job-32.json")
     module.ensure_clean_enough(worktree, backup_dir)
     held = backup_dir / "held-unsubmitted-local-commands" / command.name
@@ -239,7 +239,7 @@ def test_execute_preserves_git_porcelain_status_prefix(monkeypatch):
     spec.loader.exec_module(module)
     class Result:
         returncode = 0
-        stdout = " M results/core-20261111-1450-assembly-tail-31.json\\n?? commands/active/example.json\\n"
+        stdout = " M results/core-20261111-1450-assembly-tail-31.json\n?? commands/active/example.json\n"
         stderr = ""
     monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: Result())
     result = module.execute(["git", "status"])
