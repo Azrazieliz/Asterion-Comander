@@ -43,7 +43,12 @@ final class ContinuationCycle {
   synchronized JSONObject status()throws Exception {
     JSONObject result=new JSONObject(state.toString());
     result.remove("instruction");
-    return result.put("continuation_enabled",ledger.status().optBoolean("enabled",false));
+    return result.put("continuation_enabled",ledger.status().optBoolean("enabled",false))
+      .put("overnight_unbounded",state.optInt("max_cycles",0)==0)
+      .put("target_turn_minutes",30)
+      .put("minimum_substantial_turn_minutes",25)
+      .put("per_action_deadline_ms",10000)
+      .put("simple_action_target_ms",1000);
   }
   synchronized JSONObject start(JSONObject input)throws Exception {
     if(!ledger.status().optBoolean("enabled",false))
@@ -58,9 +63,10 @@ final class ContinuationCycle {
     String conversation=input.optString("conversation","same");
     String voiceLocale=input.optString("voice_locale","en-US");
     int maximum=input.optInt("max_cycles",0);
-    // A bounded cycle cannot silently run forever. Zero selects the safe default.
-    int allowedTurns="new".equals(conversation)?20:10;
-    if(maximum==0)maximum=allowedTurns;
+    // Zero is intentionally unbounded: an overnight development cycle continues
+    // until the project is complete, the owner stops it, or a safety-critical
+    // uncertainty needs review. Chat rollover is NOT a total-cycle limit.
+    // Positive values are optional explicit owner-requested stops.
     if(!id.matches("[A-Za-z][A-Za-z0-9_.-]{2,65}")||
        !project.matches("[A-Za-z0-9_.-]{3,70}")||
        spec.length()<3||spec.length()>250||
@@ -68,7 +74,7 @@ final class ContinuationCycle {
        !(tier.equals("5*")||tier.equals("6*")||tier.equals("7*"))||
        !("same".equals(conversation)||"new".equals(conversation))||
        !voiceLocale.matches("[a-z]{2}(-[A-Z]{2})?")||
-       maximum<1||maximum>allowedTurns)
+       maximum<0||maximum>1000000)
       throw new IllegalArgumentException("Invalid canonical Control cycle parameters");
     if(id.equals(state.optString("cycle_id","")))
       throw new IllegalStateException("Reusing a prior cycle ID could replay checkpoint history");
@@ -84,6 +90,9 @@ final class ContinuationCycle {
       .put("priority_tier",tier).put("spec_reference",spec)
       .put("instruction",instruction).put("conversation",conversation)
       .put("voice_locale",voiceLocale).put("max_cycles",maximum).put("index",1).put("ack_count",0)
+      .put("target_turn_minutes",30).put("minimum_substantial_turn_minutes",25)
+      .put("per_action_deadline_ms",10000).put("simple_action_target_ms",1000)
+      .put("overnight_unbounded",maximum==0)
       .put("last_error","").put("started_at_ms",System.currentTimeMillis());
     save();
     return status();
@@ -217,6 +226,15 @@ final class ContinuationCycle {
         save();return status();
       }
       if("acknowledged".equals(current)) {
+        long submittedAt=checkpoint.optLong("last_submit_ms",0L);
+        long observedAt=checkpoint.optLong("response_observed_ms",0L);
+        if(submittedAt>0L&&observedAt>=submittedAt){
+          // A wall-clock response interval, NOT proof of how much useful work
+          // ChatGPT completed. Use source/test/device receipts for that.
+          long elapsed=observedAt-submittedAt;
+          state.put("last_turn_response_elapsed_ms",elapsed)
+            .put("last_turn_below_25_min",elapsed<25L*60L*1000L);
+        }
         if(state.optBoolean("response_completed_work",false)) {
           state.put("ack_count",state.optInt("ack_count",0)+1)
             .put("state","finished").put("active",false)
@@ -337,8 +355,10 @@ final class ContinuationCycle {
       return status();
     }
     if(!"ready".equals(phase))return status();
+    // A verified new chat is required only ONCE when a cycle begins with
+    // conversation="new". Do not request a new chat every iteration.
     if("new".equals(state.optString("conversation")) &&
-       state.optInt("new_chat_verified_index",0)!=index) {
+       state.optInt("new_chat_verified_index",0)==0) {
       state.put("state","awaiting_new_chat").put("new_chat_requested",false)
         .put("last_error","Wait for external operator to verify New chat navigation");
       save();return status();
@@ -352,8 +372,19 @@ final class ContinuationCycle {
       "\nOwner's speech-to-text answer: "+spokenInput);
     String instructions=state.getString("instruction")+voiceContext+
       "\nCycle: "+index+". Continue from the same canonical specification and "+
-      "the latest verified GitHub progress. Complete meaningful work before "+
-      "replying. On the LAST visible line of your answer, join the exact "+
+      "the latest verified project progress. Carry out approximately 30 minutes "+
+      "of substantial project implementation/testing per ChatGPT turn; turns "+
+      "under 25 minutes with no meaningful verified changes are inadequate. "+
+      "Do not submit filler, summaries instead of implementation, or a premature "+
+      "continuation. This work-turn target does NOT slow individual tool/UI actions: "+
+      "every separate observation, reasoning, API, input and verification action "+
+      "should complete end-to-end within 10 seconds; simple navigation aims "+
+      "for about 1 second, including assistant decision time. "+
+      "The development cycle must continue across many turns, including overnight, "+
+      "unless the verified scope is truly complete or the owner stops it. "+
+      "A transient failure must be diagnosed and recovered without asking the "+
+      "sleeping owner to restart the cycle, while uncertain ChatGPT sends MUST "+
+      "never be blindly replayed. On the LAST visible line of your answer, join the exact "+
       "uppercase prefix ASTERION-CYCLE-ACK: immediately with the checkpoint "+
       "ID supplied above. If the defined work is fully complete and further "+
       "cycles are unnecessary, instead join ASTERION-CYCLE-DONE: with the same "+
