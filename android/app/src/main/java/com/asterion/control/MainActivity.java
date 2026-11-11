@@ -1108,17 +1108,17 @@ public final class MainActivity extends Activity {
       JSONObject ledger=ContinuationLedger.get(this).status();
       JSONObject cycle=ContinuationCycle.get(this).status();
       String information="Development cycle: "+cycle.optString("state","idle")
-        +"\\nActive: "+cycle.optBoolean("active",false)
+        +"\nActive: "+cycle.optBoolean("active",false)
         +"  |  Turns: "+cycle.optInt("index",0)
         +"  |  Verified replies: "+cycle.optInt("ack_count",0)
-        +"\\nOvernight/unbounded: "+cycle.optBoolean("overnight_unbounded",true)
-        +"\\nSubstantial work target: ~30 minutes per turn (25-minute minimum quality warning)"
-        +"\\nEvery individual action: <10 seconds end-to-end; trivial navigation ~1 second"
-        +"\\nContinuation enabled: "+ledger.optBoolean("enabled",false)
-        +"\\nCheckpoint: "+ledger.optString("state","idle")
-        +"\\nLast error: "+cycle.optString("last_error","none")
-        +"\\nA cycle is a long-running sequence of substantive ChatGPT turns, not one tap or one turn."
-        +"\\nA real reply/receipt is required before any continuation; uncertain sends are never replayed.";
+        +"\nOvernight/unbounded: "+cycle.optBoolean("overnight_unbounded",true)
+        +"\nSubstantial work target: ~30 minutes per turn (25-minute minimum quality warning)"
+        +"\nEvery individual action: <10 seconds end-to-end; trivial navigation ~1 second"
+        +"\nContinuation enabled: "+ledger.optBoolean("enabled",false)
+        +"\nCheckpoint: "+ledger.optString("state","idle")
+        +"\nLast error: "+cycle.optString("last_error","none")
+        +"\nA cycle is a long-running sequence of substantive ChatGPT turns, not one tap or one turn."
+        +"\nA real reply/receipt is required before any continuation; uncertain sends are never replayed.";
       new AlertDialog.Builder(this).setTitle("Continuous development cycle status")
         .setMessage(information).setPositiveButton("Close",null).show();
     }catch(Exception e){toast("Cycle status unavailable: "+e.getClass().getSimpleName());}
