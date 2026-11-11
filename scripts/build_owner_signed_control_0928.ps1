@@ -4,7 +4,7 @@
 param([switch]$PublishToDevBranch)
 $ErrorActionPreference='Stop'
 $root=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$branch='work/control-0928-overnight-cycles-20261111'
+$branch='work/control-0927-overnight-cycles-20261111'
 Set-Location $root
 $current=(git branch --show-current).Trim()
 if($LASTEXITCODE -ne 0 -or $current -ne $branch){throw "Wrong Control branch: $current"}
