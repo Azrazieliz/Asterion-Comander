@@ -43,6 +43,42 @@ if($workerOk){
 # The retired MCP gateway is deliberately NOT monitored, launched, restarted,
 # or required. Only the existing Windows worker and private GitHub relay are
 # authorized watchdog targets. The phone's native WSS is independent.
+# Keep the original phone-outbound WSS working on the same local port as
+# the established stable HTTPS forwarding. This is a MINIMAL native relay:
+# /phone/live and /healthz ONLY, never MCP, OAuth or ChatGPT tool discovery.
+$nativeRelayOk=$false
+try{
+  $probe=Invoke-RestMethod 'http://127.0.0.1:8995/healthz' -TimeoutSec 2
+  $nativeRelayOk=($probe.ok -and $probe.service -eq 'asterion-native-phone-wss')
+}catch{}
+if(-not $nativeRelayOk){
+  $occupied=@(Get-NetTCPConnection -State Listen -LocalPort 8995 -ErrorAction SilentlyContinue)
+  if($occupied.Count -eq 0){
+    $python=Join-Path $root '.venv\Scripts\python.exe'
+    if(Test-Path $python){
+      Start-Process -FilePath $python -ArgumentList @('-m','uvicorn',
+        'asterion_remote.native_phone_relay:app','--host','127.0.0.1','--port','8995') `
+        -WorkingDirectory $root -WindowStyle Hidden `
+        -RedirectStandardOutput (Join-Path $state 'native-wss.stdout.log') `
+        -RedirectStandardError (Join-Path $state 'native-wss.stderr.log')|Out-Null
+    }
+  }
+  # A different service owns 8995: never kill it blindly or claim WSS ready.
+}
+$nativeFlag=Join-Path $state 'native-wss-enabled.flag'
+if(Test-Path $nativeFlag){
+  $supervised=@(Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" -ErrorAction SilentlyContinue|
+    Where-Object{$_.CommandLine -match 'start_native_wss_tunnel\.py'})
+  if($supervised.Count -eq 0){
+    $python=Join-Path $root '.venv\Scripts\python.exe'
+    $script=Join-Path $PSScriptRoot 'start_native_wss_tunnel.py'
+    if((Test-Path $python) -and (Test-Path $script)){
+      Start-Process -FilePath $python -ArgumentList @($script) -WorkingDirectory $root `
+        -WindowStyle Hidden -RedirectStandardOutput (Join-Path $state 'native-wss-tunnel.stdout.log') `
+        -RedirectStandardError (Join-Path $state 'native-wss-tunnel.stderr.log')|Out-Null
+    }
+  }
+}
 $bridge=@(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue|
   Where-Object {$_.Name -match 'python' -and $_.CommandLine -match 'asterion_remote.github_bridge_git'})
 if($bridge.Count -eq 0){
