@@ -2,9 +2,10 @@ import json
 from fastapi.testclient import TestClient
 from fastapi import HTTPException
 from asterion_remote.app import app
+from asterion_remote.security import configured_token
 from asterion_remote import phone_bridge
 
-AUTH = {'Authorization':'Bearer test-asterion-token-abcdefghijklmnopqrstuvwxyz'}
+AUTH = {'Authorization':'Bearer '+configured_token()}
 
 
 def test_phone_api_requires_authorization():
@@ -61,7 +62,7 @@ def test_websocket_live_requires_token(monkeypatch):
     monkeypatch.setattr(main,'screenshot',lambda monitor,quality: type('Response',(),{'body':b'\xff\xd8LIVE'})())
     with TestClient(app) as c:
         with c.websocket_connect('/api/v1/stream/desktop') as ws:
-            ws.send_json({'token':'test-asterion-token-abcdefghijklmnopqrstuvwxyz','monitor':1,'fps':5})
+            ws.send_json({'token':configured_token(),'monitor':1,'fps':5})
             assert ws.receive_bytes().startswith(b'\xff\xd8')
         with c.websocket_connect('/api/v1/stream/desktop') as ws:
             ws.send_json({'token':'wrong'})
