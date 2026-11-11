@@ -6,7 +6,7 @@ from asterion_remote.app import app
 from asterion_remote.security import configured_token
 from asterion_remote import recovery
 
-AUTH = {"Authorization": "Bearer test-asterion-token-abcdefghijklmnopqrstuvwxyz"}
+AUTH = {"Authorization": "Bearer "+configured_token()}
 
 
 def test_recovery_requires_authorization():
