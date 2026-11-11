@@ -1113,7 +1113,7 @@ public final class MainActivity extends Activity {
         "3. The next reply is checked before continuing; a tap/queue receipt is NOT a completed cycle.\n"+
         "4. If a draft exists, Send is uncertain, the UI changed, or permissions are missing, Control pauses for review rather than duplicating the message.\n"+
         "5. Stop blocks future cycles but cannot retract an already submitted ChatGPT message.\n\n"+
-        "Conversation safety: at most 10 additional turns in an existing chat, or 20 in a newly opened chat. Rollover requires a verified canonical handoff.\n\n"+
+        "The development cycle continues until completion or owner Stop. No artificial 10/20 turn cap. Chat rollover requires a verified canonical handoff. Each substantive ChatGPT turn can take around 30 minutes. Individual control actions must complete in under 10 seconds end-to-end; simple navigation targets about 1 second.\n\n"+
         "No AI model or independent ChatGPT session runs inside Control. ChatGPT must remain the actual external operator.\n\n"+
         "Cycle: "+cycle.optString("state","idle")+
         " | active: "+cycle.optBoolean("active",false)+
