@@ -1,42 +1,50 @@
-> **CURRENT RELEASE — Asterion Control v0.9.26 (2026-11-11).** Published installer: `dist/Asterion-Control-v0.9.26-release.apk`; APK SHA-256: `be146e6f57d3b0660c5609c628d344fc9c5f1f7b38a6fa42e87b6f8d61a556f1`; source/build commit: `dcf60699fc1305b66e829334194288acce807e0b`; publication commit: `e79fdaa`. Use **the existing in-app Check for updates** action, which reads `dist/latest-release.json` and verifies SHA-256. Do not install the superseded v0.9.24 repair APK or bypass the updater. The separately published Android update still needs owner-confirmed installation and on-phone acceptance.
+> **CURRENT PUBLISHED RELEASE — v0.9.27 (2026-11-11).** Original-signature Android APK: `dist/Asterion-Control-v0.9.27-release.apk`; SHA-256: `3cdc5813446f7c220f5344fc0c97474fa48280db67921a7d8dd760e194aca1d3`. Compiled source commit `3b9bd0e57d6901d1bf2d5f2e48338b18f28c7aed`, published via `main` commit `75419ac`. Use the **existing in-app Check for updates** UI. Built, signed, regression-tested and published; **installation and unattended overnight cycle acceptance are not yet verified**. The v0.9.26 build is superseded; do not reinstall older repair APKs.
+
 
 > **Transport:** Direct Windows worker → existing authenticated native WebSocket → Samsung is primary; private GitHub bridge is the fallback if the direct ChatGPT tool is not callable. Existing `PhoneDirectMcp`/MCP-named RPC code remains part of the current WSS implementation; do not claim it was all removed or make a separate ChatGPT MCP plugin a prerequisite. Repair verifies the *actual native WebSocket*, not an unrelated gateway process.
 
-> **Cycle semantics:** [Real ChatGPT development cycle contract](docs/CYCLE_EXECUTION_CONTRACT.md). One cycle is a genuine tool-using ChatGPT reply with a verified marker, not an internal artificial model or a queued command. Limits: 10 additional turns in an existing chat; 20 in a verified new chat.
+> **Cycle semantics (2026-11-11 correction):** [Continuous overnight cycle operator contract](docs/CYCLE_EXECUTION_CONTRACT.md). **A cycle is a continuous, potentially overnight development loop**; each turn should contain ~30 minutes of meaningful work, with turns under 25 minutes without substantive results considered inadequate. Every individual observation/decision/API/UI/verification action must finish in under 10 seconds end-to-end (simple gestures ~1 second). **No 10/20 total-turn cap:** `max_cycles=0` is unbounded by default. Safety checks still prevent ambiguous double-sends and unverified chat changes. Published v0.9.26 still has older cycle code until the v0.9.27 repair is built and installed.
 
-# Asterion Control — authoritative operator and recovery contract
+# Asterion Control — Android-primary shared execution tool
 
-**Current operating rule (2026-11-11): Android is the owner-facing head; the existing Windows worker executes commands. Preserve the working pairing, Windows process, Android permissions, signer, project sources, and installations.** This page overrides historical README addenda, release snapshots and superseded connection experiments. The frozen product scope is [7STAR_FROZEN_MASTER.md](7STAR_FROZEN_MASTER.md).
+**Canonical requirements:** [7* frozen master](7STAR_FROZEN_MASTER.md). **Current evidence:** [PROGRESS.md](PROGRESS.md). **Cross-app interface:** [Control API v1](docs/CONTROL_CROSS_APP_API_V1.md).
 
-## Connect ChatGPT without wasting time
+Asterion Control is the user's universal, deterministic device-control **tool**, operated externally by ChatGPT. Its Android user interface handles permissions and connection management. It does not embed a paid model API, another AI agent, or duplicate any Asterion application/game engine. Samsung Android is primary; Windows remains an optional subordinate build/desktop worker.
 
-1. **Direct authenticated Windows worker session is primary.** When an authorized direct Control session is genuinely callable, use the existing native WebSocket/Accessibility/MediaProjection state for fast, adaptive interactions. Keep the session open, use live frames where available and tap grounded Accessibility elements or coordinates. For a short deterministic navigation sequence, prefer the existing state-checked session/batch API. Avoid repeated connection discovery, per-tap status requests and screenshot polling. **Report end-to-end operator latency**, including time between observation and command creation, not merely device execution time.
-2. **Existing private GitHub worker relay is the immediate fallback.** If a direct callable worker control is not exposed in a particular conversation, do **not** conclude Asterion Control/Windows/phone is down, stop, or request installation/pairing. Send the command through [Azrazieliz/Asterion-Control-Bridge](https://github.com/Azrazieliz/Asterion-Control-Bridge) `main`: create `commands/active/<id>.json`, read matching `results/<id>.json`. That repository is only message transport; **the same Windows worker actually executes the action**. A completed `ok:true` receipt is required. The fallback is not equivalent to live viewed video.
-3. If neither route is callable, distinguish *conversation tool exposure* from *Windows service health* and *native phone reachability*. Never claim the service is broken without its own error evidence. Do not install another controller, rotate existing credentials or use Remote Desktop/ADB as a prerequisite.
+## Versions and safety
 
-### Verified current evidence
+- **Historical baseline:** v0.8.6 was the original owner-confirmed Samsung version. The owner later confirmed installing v0.9.26; v0.9.27 was subsequently published but phone installation is not yet independently verified. [Original owner-signed APK](dist/Asterion-Control-v0.8.6-debug.apk) and [SHA-256](dist/SHA256SUMS-v0.8.6.txt).
+- **Historical development milestone:** v0.8.8 was source-complete and CI-compilable on development branch `work/android-primary-continuation-observation-20261105`, tracked in [PR #1](https://github.com/Azrazieliz/Asterion-Comander/pull/1). It is **not installed**, and CI's debug APK cannot upgrade installed v0.8.6 because the cert SHA-256 differs.
+- Owner's v0.8.6 signing certificate SHA-256: `9bc439712a0a460cc4703ebf254aaaf9bf3cc6e67b0ced6fc12162ed3ca3b9ad`. Never uninstall or clear app data just to install a CI-signed APK.
+- Safe owner-key build procedure: [build_owner_signed_control_088.ps1](scripts/build_owner_signed_control_088.ps1). Its output is published only after matching the installed certificate. An authorized private build request has been queued, but **the Windows bridge has not responded**. The release update index therefore remains pinned to the working v0.8.6 until signed delivery.
 
-2026-11-11: An authenticated `phone_ui` command executed via the existing GitHub fallback returned `ok:true`, `status:complete`, Android foreground `com.openai.chatgpt`, Accessibility tree and worker `elapsed_ms:77`. This proves native phone UI reachability via the established worker **at that moment**, not that a directly callable ChatGPT tool or in-chat live video was exposed. The 77 ms is worker execution time **only**, not end-to-end navigation latency.
+## Native Android operation
 
-The existing Windows/Android system supports native phone input, UI observation, Android screen sharing with OS consent and a Windows-side authenticated WebSocket stream. The Windows real-time stream code still needs actual end-to-end stream/viewer acceptance. An HTTP/MCP tool response is not continuous real-time video.
+Enable phone control within Asterion Control; Android accessibility and MediaProjection permissions must be granted by the owner. Re-grant screen sharing after Android invalidates an old session. Samsung remote operations include native screen/stream, gestures/input, UI tree, battery/thermal/health, approved app discovery/launch and owned-app observation; controls are not dependent on ADB. Protected windows and Android background launch rules remain respected.
 
-## Recovery from the Android app
+The Android foreground agent exposes an authenticated local/private-network `POST /mcp` with native tools. **Do not port-forward its HTTP port 8973.** The existing direct authenticated native WebSocket (WSS) is working. A separately installed MCP connector is not a prerequisite; do not infer service downtime from connector-tool visibility.
 
-**Connect → Auto-repair connection** checks the saved link, restarts the Android agent if necessary, re-registers with Windows, and confirms that the Windows worker can read phone status before reporting success. An already healthy connection is preserved.
+## ChatGPT operation and free Android-only fallback
 
-**Connect → Force reinitialize all components** asks for confirmation, restarts the Android listener, runs the Windows recovery endpoint and schedules a safe Windows-worker restart when idle. It preserves Windows pairing, credentials, files, and app settings. Android screen capture may require renewed OS consent. A successful service-start call alone is never reported as proof that the native link works.
+**Preferred:** authenticate a supported direct MCP plugin to a stable HTTPS or supported secure tunnel. Merely installing the plugin or compiling an MCP server is not proof of connection; availability and account permissions must be checked in ChatGPT.
 
-These controls are **implemented in Android source as of 2026-11-11**, but deployment status must be tracked separately: source change is not a compiled, installed, or phone-tested APK. The previously existing "Repair connection" lacked post-recovery verification.
+**Optional fallback in uninstalled v0.8.8:** Devices → *Private GitHub relay* → *Connect Android private bridge*. Enter a GitHub fine-grained credential scoped to **Contents read/write only** on the user's private `Azrazieliz/Asterion-Control-Bridge` repository. The credential is encrypted through Android Keystore on the Samsung; it is not entered into ChatGPT, GitHub source files or the Windows computer.
 
-## Service and security
+When enabled, the phone polls the existing private commands folder over GitHub HTTPS and writes results into the same private result folder. ChatGPT uses its already-connected GitHub plugin to create `commands/android-<id>.json`, e.g. `{"id":"android-probe-001","op":"phone_status","params":{}}`, and reads `results/android-<id>.json`. Only the native Android whitelist is accepted, with bounded retry/idempotency protection and durable failure receipts. This **does not** allow shell execution on Android, bypass OS permissions, create a second model, or deliver low-latency streaming. It is a temporary no-Windows fallback, not the final direct MCP transport.
 
-Windows API: authenticated private-network HTTP on TCP `8911`; UDP discovery `8912`; Android foreground phone agent listener `8973`. There is an MCP-only gateway on loopback `8995` for approved HTTPS tunnel connections. Direct ChatGPT access requires an actual authorized callable connector in the current conversation; mere deployment of an MCP endpoint does not supply that interface.
+## Spec-linked continuation and observation
 
-For real-time PC/phone interaction use the existing authenticated WebSocket `/api/v1/stream/{source}` and state-checked interaction-session APIs rather than a GitHub command per gesture **where the client can actually consume these APIs**. The direct endpoint remains the production priority; GitHub commands are contingency only. Use private LAN/encrypted VPN and existing bearer authorization, never unauthenticated public listeners or credentials in the repository. Android foreground, Accessibility and MediaProjection permissions remain user-controlled.
+On owner opt-in, ChatGPT can queue a bounded project/spec-referenced checkpoint and use Android Accessibility to submit the next message in the already installed ChatGPT app. It never overwrites a different existing draft. Clicking Send remains `submitted_unverified`; the actual next ChatGPT response must be observed and acknowledged. Conversation limits and context limits remain applicable; autonomous multi-conversation continuation is **not yet device proven**.
 
-## Release and evidence discipline
+Voice uses Android foreground microphone permission, text-to-speech and on-device recognition when available. Optional observation retains bounded, owner-selected app evidence; it does not replace Asterion Pilot's own direct live game-state perception, strategies or mastery.
 
-Latest source state and actual installed build may differ. See [PROGRESS.md](PROGRESS.md) for dated verified receipts. [RELEASE_STATUS.md](RELEASE_STATUS.md) and [README_CONTROL_ADDENDUM.md](README_CONTROL_ADDENDUM.md) are historical records, **not connection instructions**. Never equate source implementation, compilation, app installation, device operation and direct ChatGPT tool availability.
+## Existing Windows worker and advanced tools
+
+The Windows companion remains available for explicit desktop, native build, file and process operations, persistent interaction sessions, signed APK packaging and private Wi-Fi file transfers. Advanced commands and scripts remain ChatGPT-facing, not ordinary user-facing Android navigation. Old Windows-only pairing instructions and the 0.3 prototype history remain in [README_CONTROL_ADDENDUM.md](README_CONTROL_ADDENDUM.md) for reference.
+
+## Verified vs pending
+
+Native Windows/Samsung screen and input, persistent sessions, Wi-Fi APK delivery and v0.8.6 installation have historical device evidence. v0.8.8's Android GitHub fallback, direct MCP, continuation and voice compile, but **their new on-device behavior has not been accepted**. Completing this requires the matching owner-signed APK, Android installation/permission approvals, a real ChatGPT next-turn receipt, and a stable authenticated direct connection. See [the current ledger](PROGRESS.md).
 
 ### Current recovery acceptance ledger (v0.9.26)
 
