@@ -40,22 +40,9 @@ if($workerOk){
   }
   exit 0 # The next scheduled check verifies actual startup, never assume success.
 }
-# Gateway and stable HTTPS ingress are independent components; a healthy worker is not enough.
-$gatewayOk=$false
-foreach($port in @(8995,8996)){
-  try{
-    $g=Invoke-RestMethod ('http://127.0.0.1:'+ $port +'/healthz') -TimeoutSec 2
-    if($g.ok -and $g.service -match 'asterion'){$gatewayOk=$true;break}
-  }catch{}
-}
-if(-not $gatewayOk){
-  $ports=@(Get-NetTCPConnection -State Listen -LocalPort 8995,8996 -ErrorAction SilentlyContinue)
-  $python=Join-Path $root '.venv\Scripts\python.exe'
-  $mcpKey=Join-Path $state 'mcp-gateway-token.txt'
-  if($ports.Count -eq 0 -and (Test-Path $python) -and (Test-Path $mcpKey)){
-    Start-Process -FilePath $python -ArgumentList @('-m','uvicorn','asterion_remote.mcp_gateway:app','--host','127.0.0.1','--port','8995') -WorkingDirectory $root -WindowStyle Hidden -RedirectStandardOutput (Join-Path $state 'watchdog-mcp.stdout.log') -RedirectStandardError (Join-Path $state 'watchdog-mcp.stderr.log') | Out-Null
-  }
-}
+# The retired MCP gateway is deliberately NOT monitored, launched, restarted,
+# or required. Only the existing Windows worker and private GitHub relay are
+# authorized watchdog targets. The phone's native WSS is independent.
 $bridge=@(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue|
   Where-Object {$_.Name -match 'python' -and $_.CommandLine -match 'asterion_remote.github_bridge_git'})
 if($bridge.Count -eq 0){
