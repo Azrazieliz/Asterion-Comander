@@ -140,3 +140,49 @@ def test_native_batch_has_bounded_twelve_command_window(tmp_path, monkeypatch):
     assert control.cycle("private-key") == 1
     assert len(published) == 2 and len(published[1]) == 1
     assert len(executed) == 13
+
+
+def test_sync_remote_recovers_unpublished_result_commits(tmp_path, monkeypatch):
+    """A push race must not permanently block later phone commands."""
+    monkeypatch.setattr(control, "ROOT", tmp_path)
+    calls = []
+
+    def fake_git(*args, **kwargs):
+        calls.append(args)
+        if args[0] == "rev-list":
+            return "2"
+        if args[0] == "log":
+            return "results/accepted.json\\nresults/finished.json"
+        return ""
+
+    monkeypatch.setattr(control, "git", fake_git)
+    control.sync_remote()
+    assert ("rebase", "origin/main") in calls
+    assert ("push", "--quiet", "origin", "HEAD:main") in calls
+    assert ("merge", "--ff-only", "origin/main") not in calls
+
+
+def test_sync_remote_keeps_fast_forward_on_clean_checkout(monkeypatch):
+    calls = []
+
+    def fake_git(*args, **kwargs):
+        calls.append(args)
+        return "0" if args[0] == "rev-list" else ""
+
+    monkeypatch.setattr(control, "git", fake_git)
+    control.sync_remote()
+    assert ("merge", "--ff-only", "origin/main") in calls
+    assert not any(entry[0] == "push" for entry in calls)
+
+
+def test_sync_remote_never_rebases_unrelated_local_changes(monkeypatch):
+    def fake_git(*args, **kwargs):
+        if args[0] == "rev-list":
+            return "1"
+        if args[0] == "log":
+            return "commands/active/new-command.json"
+        return ""
+
+    monkeypatch.setattr(control, "git", fake_git)
+    with pytest.raises(RuntimeError, match="non-receipt"):
+        control.sync_remote()
