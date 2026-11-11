@@ -1,3 +1,12 @@
+# 2026-11-11 — current access and safe-recovery implementation
+
+- The existing private GitHub relay executed `phone_ui` on the authorized Windows worker and returned `ok:true`, `status:complete`, Android `com.openai.chatgpt` foreground, native Accessibility tree and 77 ms worker-side execution. The same worker continues to serve both direct and fallback routes; this is **not** direct ChatGPT tool exposure, live in-chat video acceptance, or measured end-to-end gesture time.
+- Implemented in the Android app source: **Auto-repair connection**, a verified Windows-to-phone registration/reachability check; **Force reinitialize · keep pairing**, a user-confirmed phone listener restart that preserves credentials/settings. Screen-sharing permission remains under Android's control. Neither source change is an installed APK until build/install/phone testing is recorded.
+- **Authoritative operating procedure:** [README.md](README.md). Direct authorized worker/WebSocket first for low-latency UI interaction, GitHub relay immediately when direct tool absent. Legacy prototype docs are explicitly marked historical; do not infer worker or phone downtime merely from missing tool exposure.
+- Timing contract: separate operator think/decision latency, transport delay, device ACK and end-state verification. A 77 ms ACK alone does not make a ten-minute session "real time".
+
+---
+
 # 2026-11-05 — Direct MCP transport trial, Asterion Control plugin v1.3.0
 - Implemented `asterion_remote/mcp_gateway.py`: dedicated authenticated MCP-only loopback ingress on port 8995. Forwards `POST /mcp` to existing Windows Control MCP and native Samsung proxy; DOES NOT expose Windows general REST routes through the tunnel. Independent 43+ character bearer credential kept only under `%LOCALAPPDATA%\AsterionControl\mcp-gateway-token.txt`, not in GitHub or plugin.
 - Implemented `scripts/start_mcp_gateway.ps1` to start gateway and outbound Cloudflare Quick Tunnel. Installer reported `MCP_AUTHENTICATED_LOOPBACK_OK`, `MCP_TUNNEL_PID=11872`, HTTPS endpoint `https://days-hence-video-autos.trycloudflare.com/mcp`. Remote unauthenticated `POST /mcp` returned HTTP **401**; external `GET /healthz` through HTTPS returned `ok:true`. HTTPS bearer-authenticated external tool call is **not yet verified**; a control connector attempt to submit an authenticated remote test was blocked by platform safety checks and not retried by bypassing them.
