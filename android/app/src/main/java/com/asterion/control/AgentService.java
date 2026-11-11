@@ -170,7 +170,7 @@ public final class AgentService extends Service {
           Socket client=s.accept();
           if(!privatePeer(client.getInetAddress())){
             try{client.close();}catch(Exception ignored){}
-            continue; // Never expose native MCP/control over public IP directly.
+            continue; // Never expose the native Control listener over public IP directly.
           }
           client.setSoTimeout(8500);
           clients.execute(()->handle(client));
@@ -237,16 +237,8 @@ public final class AgentService extends Service {
     byte[] data=in.readNBytes(len);
     if(data.length!=len){json(out,400,error("Truncated JSON request"));return;}
     JSONObject body=len>0?new JSONObject(new String(data,StandardCharsets.UTF_8)):new JSONObject();
-    // Android-native MCP is stateless, bearer-authenticated and LAN-only here.
-    // Public HTTPS ingress must be deployed separately; do not publish this port.
-    if(path.equals("/mcp")){
-      if(!method.equals("POST")){
-        write(out,405,"application/json; charset=utf-8",new byte[0]);return;
-      }
-      JSONObject reply=AndroidMcp.handle(this,body);
-      if(reply==null){write(out,202,"application/json; charset=utf-8",new byte[0]);return;}
-      json(out,200,reply);return;
-    }
+    // No MCP HTTP endpoint. Native authenticated Control APIs and the separate
+    // phone-outbound WebSocket remain available through their original routes.
     // Phone-resident checkpoint state. Owner must first opt in using Control's
     // native UI; HTTP bearer possession alone cannot enable self-continuation.
     // User-enabled Asterion app recording; only native MediaProjection frames.
