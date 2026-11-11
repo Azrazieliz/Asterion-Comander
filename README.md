@@ -1,6 +1,8 @@
+> **Release correction — 2026-11-11:** The canonical published update is **v0.9.25**, manifest SHA-256 `06f5f2d0f753ba697615dbefbabe96f7beaafb753b5065ec1449777d310e05b7`. The separate **v0.9.24 repair APK** built in an older development checkout has SHA-256 `dae1e1233ab998b0b5def3c26805f00865178e7ae84094c12b20c54a19736c6e` and **must not be installed or published over v0.9.25**. The Android app already contains a checksum-validating update detector (`UpdateManager`); retain it. The user's direct native WebSocket transport is connected. Do not require a new MCP plugin/gateway or restart a working ingress merely because old filenames contain `mcp`. The source still contains MCP-style RPC handlers inside the WSS system; removal has **not** been completed at the code/protocol level, so deleting those files blindly would break working access.
+
 # Asterion Control — authoritative operator and recovery contract
 
-**Source branch: `work/control-force-reconnect-diagnostics-20261111`, owner-signed Android 0.9.24.**
+**Legacy recovery-development branch:** `work/control-force-reconnect-diagnostics-20261111` is based on Android 0.9.24 and is **not** the canonical v0.9.25 release. Do not deploy its APK over the current application.
 
 **Current operating rule (2026-11-11): Android is the owner-facing head; the existing Windows worker executes commands. Preserve the working pairing, Windows process, Android permissions, signer, project sources, and installations.** This page overrides historical README addenda, release snapshots and superseded connection experiments. The frozen product scope is [7STAR_FROZEN_MASTER.md](7STAR_FROZEN_MASTER.md).
 
