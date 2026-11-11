@@ -1,3 +1,5 @@
+> **Historical integration proposal (2026-11-05), not the active operating procedure.** Use [README.md](README.md) and the existing native Windows worker first; use the private GitHub bridge only as a fallback when direct tools are not exposed. Do not interpret older statements about inaccessible phone/worker or mandatory re-pairing as current status. Existing Android and Windows infrastructure is preserved.
+
 # Asterion Control — Plugin Creator integration contract
 Date: 2026-11-05
 Status: integration specification; **not** proof of an installed/connected plugin.
