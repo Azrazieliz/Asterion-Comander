@@ -560,7 +560,7 @@ public final class MainActivity extends Activity {
       if(state.optBoolean("token_present")){
         new AlertDialog.Builder(this)
           .setTitle("Enable direct phone relay")
-          .setMessage("Reuse the existing encrypted repository credential? No Windows worker, tunnel, or MCP is needed.")
+          .setMessage("Reuse the existing encrypted repository credential for the optional private queue? This does not install a gateway or create a callable ChatGPT tool.")
           .setPositiveButton("Enable",(dialog,which)->configurePrivatePhoneRelay("",true))
           .setNegativeButton("Cancel",null).show();
         return;
