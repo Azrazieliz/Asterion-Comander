@@ -3,6 +3,7 @@ A bearer secret is never forwarded to the browser; only the Windows host may cal
 """
 from __future__ import annotations
 import ipaddress
+import re
 import json
 import os
 import threading
@@ -12,7 +13,8 @@ import httpx
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
-STATE = Path(os.getenv('ASTERION_CONTROL_STATE', str(Path.home() / '.asterion-control'))).expanduser() / 'phone-pairing.json'
+_DEFAULT_STATE=(Path(os.getenv('LOCALAPPDATA',str(Path.home()))) / 'AsterionControl' if os.name=='nt' else Path.home()/'.asterion-control')
+STATE = Path(os.getenv('ASTERION_CONTROL_STATE', str(_DEFAULT_STATE))).expanduser() / 'phone-pairing.json'
 _lock = threading.RLock()
 
 class PairPhone(BaseModel):
@@ -54,7 +56,7 @@ def load() -> dict | None:
         except (ValueError, OSError, KeyError, HTTPException): return None
 
 def request(path: str, method: str='GET', payload: dict | None=None, timeout: float=5.0) -> httpx.Response:
-    if path not in {'/health', '/ui', '/input', '/screen'}:
+    if path not in {'/health', '/ui', '/input', '/screen', '/continuation/status', '/continuation/queue', '/continuation/dispatch', '/observation/status', '/observation/events', '/observation/frame', '/voice/status', '/voice/question', '/voice/ack', '/voice/enable', '/voice/stop', '/voice/settings', '/cycles/status', '/cycles/start', '/cycles/pause', '/cycles/resume', '/cycles/stop', '/cycles/confirm-new-chat', '/network/status', '/github-bridge/status', '/performance/status', '/performance/mode', '/performance/optimize', '/diagnostics/logcat', '/apps', '/apps/launch', '/app-bridge/apps', '/app-bridge/invoke', '/app-bridge/operation', '/continuation/ack', '/continuation/cancel', '/chat/new' } and not re.fullmatch(r'/observation/frame/frame-[0-9]{10,15}\.jpg',path):
         raise HTTPException(400, 'Unsupported phone API call')
     p=load()
     if not p: raise HTTPException(503, 'Phone agent not registered')

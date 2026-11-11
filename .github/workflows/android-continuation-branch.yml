@@ -1,0 +1,228 @@
+name: Android Control source tests (owner-signed APK release on explicit release commit or manual dispatch)
+on:
+  push:
+    branches:
+      - work/android-primary-continuation-observation-20261105
+    paths:
+      - 'android/**'
+      - 'asterion_remote/**'
+      - 'tests/**'
+      - 'scripts/build_owner_signed_control_088.ps1'
+      - 'scripts/build_owner_signed_control_092.ps1'
+      - 'scripts/publish_owner_signed_control_092.ps1'
+      - 'scripts/build_owner_signed_control_093.ps1'
+      - 'scripts/publish_owner_signed_control_093.ps1'
+      - 'scripts/build_owner_signed_control_094.ps1'
+      - 'scripts/publish_owner_signed_control_094.ps1'
+      - '.github/workflows/android-continuation-branch.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: android-control-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  source-and-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify Android-native API, MCP, fallback and existing Control tests
+        run: |
+          python -m pip install -r requirements.txt pytest
+          python -m pytest -q tests --basetemp=${{ runner.temp }}/asterion-pytest
+      - name: Validate native Control Windows bootstrap scripts without execution
+        shell: pwsh
+        run: |
+          $scripts=@(
+            'scripts/build_owner_signed_control_088.ps1',
+            'scripts/build_owner_signed_control_092.ps1',
+            'scripts/publish_owner_signed_control_092.ps1',
+            'scripts/build_owner_signed_control_093.ps1',
+            'scripts/publish_owner_signed_control_093.ps1',
+            'scripts/build_owner_signed_control_094.ps1',
+            'scripts/publish_owner_signed_control_094.ps1',
+            'scripts/start_git_bridge.ps1',
+            'scripts/start_windows.ps1',
+            'scripts/restart_control_worker.ps1'
+          )
+          foreach($path in $scripts){
+            $file=Join-Path (Get-Location) $path
+            $bytes=[System.IO.File]::ReadAllBytes($file)
+            if(@($bytes | Where-Object { $_ -ge 128 }).Count -gt 0){
+              throw "Windows PowerShell 5.1 encoding risk: $path contains non-ASCII source"
+            }
+            $errorsFound=$null
+            $parsedTokens=$null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $file,[ref]$parsedTokens,[ref]$errorsFound) | Out-Null
+            if($errorsFound.Count -gt 0){
+              $errorsFound | ForEach-Object { Write-Error ($path + ': ' + $_.Message) }
+              exit 1
+            }
+            Write-Host "Control PowerShell syntax valid: $path"
+          }
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Provision owner Android signer from encrypted GitHub Actions secret
+        if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release-0912]')
+        shell: bash
+        env:
+          ASTERION_OWNER_KEYSTORE_B64: ${{ secrets.ASTERION_ANDROID_DEBUG_KEYSTORE_B64 }}
+        run: |
+          python - <<'PY'
+          import base64, os, pathlib, re, subprocess
+          sealed=os.environ.get('ASTERION_OWNER_KEYSTORE_B64','')
+          if not sealed:
+              raise SystemExit('Original signing identity missing from protected GitHub Actions secrets')
+          try:
+              data=base64.b64decode(sealed,validate=True)
+          except (ValueError,base64.binascii.Error):
+              raise SystemExit('Invalid protected keystore encoding')
+          if not (500<=len(data)<=100000):
+              raise SystemExit('Owner signing key size invalid')
+          target=pathlib.Path.home()/'.android'/'debug.keystore'
+          target.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
+          target.write_bytes(data)
+          target.chmod(0o600)
+          result=subprocess.run(['keytool','-list','-v','-keystore',str(target),
+              '-storepass','android','-alias','androiddebugkey'],
+              capture_output=True,text=True,timeout=30)
+          if result.returncode:
+              raise SystemExit('Protected signing key is unreadable')
+          match=re.search(r'SHA256:\s*([0-9A-Fa-f:]+)',result.stdout+result.stderr)
+          if match is None:
+              raise SystemExit('Signing key certificate fingerprint missing')
+          actual=match.group(1).replace(':','').lower()
+          expected='9bc439712a0a460cc4703ebf254aaaf9bf3cc6e67b0ced6fc12162ed3ca3b9ad'
+          if actual!=expected:
+              raise SystemExit('CI signer does not match installed Samsung package')
+          print('OWNER_ANDROID_SIGNER_MATCHES_INSTALLED_APP=true')
+          with open(os.environ['GITHUB_ENV'],'a',encoding='utf8') as output:
+              output.write('ASTERION_OWNER_KEYSTORE_PATH='+str(target)+'\n')
+          PY
+      - name: Provision Android SDK 35 using available cmdline-tools
+        shell: bash
+        run: |
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          MGR="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$MGR" ]; then MGR="$SDK/cmdline-tools/16.0/bin/sdkmanager"; fi
+          test -x "$MGR"
+          if [ ! -f "$SDK/platforms/android-35/android.jar" ]; then
+            yes | "$MGR" --sdk_root="$SDK" 'platforms;android-35' || true
+          fi
+          if [ ! -d "$SDK/build-tools/35.0.0" ]; then
+            yes | "$MGR" --sdk_root="$SDK" 'build-tools;35.0.0' || true
+          fi
+          test -f "$SDK/platforms/android-35/android.jar"
+          test -d "$SDK/build-tools/35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - name: Compile native Android source without APK packaging
+        if: github.event_name == 'push'
+        working-directory: android
+        run: gradle --no-daemon --console=plain :app:compileReleaseJavaWithJavac
+      - name: Build owner-compatible native APK entirely on GitHub Actions
+        if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release-0912]')
+        working-directory: android
+        run: gradle --no-daemon --console=plain :app:assembleRelease
+      - name: Validate Android app identity and archive
+        if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release-0912]')
+        run: |
+          test -s android/app/build/outputs/apk/release/app-release.apk
+          grep -q "versionName '0.9.12'" android/app/build.gradle
+          grep -q "versionCode 912" android/app/build.gradle
+          test -s android/app/src/main/java/com/asterion/control/PhoneGitBridge.java
+          test -s android/app/src/main/java/com/asterion/control/AndroidMcp.java
+          sha256sum android/app/build/outputs/apk/release/app-release.apk
+          # The APK MUST be a non-debuggable, optimized release variant.
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          AAPT="$SDK/build-tools/35.0.0/aapt"
+          test -x "$AAPT"
+          if "$AAPT" dump badging android/app/build/outputs/apk/release/app-release.apk | grep -q 'application-debuggable'; then
+            echo "::error::Release APK is debuggable"
+            exit 1
+          fi
+          "$SDK/build-tools/35.0.0/zipalign" -c -v 4 android/app/build/outputs/apk/release/app-release.apk
+      - name: Audit non-debuggable release APK signing identity versus installed v0.8.6 baseline
+        if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release-0912]')
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SIGNER="$SDK/build-tools/35.0.0/apksigner"
+          test -x "$SIGNER"
+          BASE="dist/Asterion-Control-v0.8.6-debug.apk"
+          NEW="android/app/build/outputs/apk/release/app-release.apk"
+          test -s "$BASE"
+          test -s "$NEW"
+          OLD_CERT=$("$SIGNER" verify --print-certs "$BASE" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -1)
+          NEW_CERT=$("$SIGNER" verify --print-certs "$NEW" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -1)
+          test -n "$OLD_CERT"
+          test -n "$NEW_CERT"
+          echo "Installed version baseline cert SHA256: $OLD_CERT"
+          echo "CI build cert SHA256:                $NEW_CERT"
+          if [ "$OLD_CERT" = "$NEW_CERT" ]; then
+            echo "SIGNER_COMPATIBLE_WITH_V086_BASELINE=true" | tee "$RUNNER_TEMP/asterion-signing-compatibility.txt"
+          else
+            echo "SIGNER_COMPATIBLE_WITH_V086_BASELINE=false" | tee "$RUNNER_TEMP/asterion-signing-compatibility.txt"
+            echo "::error::Refusing to publish an Android APK with an incompatible signer"
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        if: success() && (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release-0912]'))
+        with:
+          name: Asterion-Control-v0.9.12-OWNER-SIGNED-RELEASE
+          path: android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+
+      - name: Publish verified in-place Android update to the canonical app feed
+        if: success() && (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release-0912]'))
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION='0.9.12'
+          PKG='Asterion-Control-v0.9.12-release.apk'
+          ROOT="${RUNNER_TEMP}/asterion-release-feed"
+          git fetch --no-tags origin main
+          git worktree add --detach "$ROOT" origin/main
+          mkdir -p "$ROOT/dist"
+          cp android/app/build/outputs/apk/release/app-release.apk "$ROOT/dist/$PKG"
+          # Compatibility filename ONLY: exact same non-debuggable release APK.
+          # Required because v0.8.8 validates this historical suffix.
+          cp "$ROOT/dist/$PKG" "$ROOT/dist/Asterion-Control-v0.9.12-debug.apk"
+          (
+            cd "$ROOT/dist"
+            sha256sum "$PKG" > 'SHA256SUMS-v0.9.12.txt'
+          )
+          python - "$ROOT/dist" <<'PY'
+          import hashlib,json,pathlib,sys
+          root=pathlib.Path(sys.argv[1])
+          source=root/'Asterion-Control-v0.9.12-release.apk'
+          data={
+            "version_code":912,
+            "version_name":"0.9.12",
+            "apk_url":"https://raw.githubusercontent.com/Azrazieliz/Asterion-Comander/main/dist/Asterion-Control-v0.9.12-release.apk",
+            "sha256":hashlib.file_digest(source.open('rb'),'sha256').hexdigest(),
+            "size_bytes":source.stat().st_size,
+          }
+          (root/'latest-release.json').write_text(json.dumps(data,indent=2)+'\n',encoding='utf8')
+          legacy=dict(data)
+          legacy["apk_url"]=legacy["apk_url"].replace("-release.apk","-debug.apk")
+          (root/'latest.json').write_text(json.dumps(legacy,indent=2)+'\n',encoding='utf8')
+          print("UPDATE_SIGNED_PACKAGE="+source.name)
+          print("UPDATE_BYTES="+str(data["size_bytes"]))
+          print("UPDATE_SHA256="+data["sha256"])
+          PY
+          git -C "$ROOT" add dist/latest.json dist/latest-release.json "dist/$PKG" \
+            dist/Asterion-Control-v0.9.12-debug.apk dist/SHA256SUMS-v0.9.12.txt
+          if ! git -C "$ROOT" diff --cached --quiet; then
+            git -C "$ROOT" -c user.name='asterion-control-actions' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m "Publish owner-signed Control v0.9.12 verified release update"
+            git -C "$ROOT" push origin HEAD:main
+          fi

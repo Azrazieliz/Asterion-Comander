@@ -18,6 +18,32 @@ from .pairing import is_authorized
 from .phone_bridge import load as load_phone_pairing
 
 
+def _take_mjpeg_frame(buffer: bytearray) -> bytes | None:
+    """Return a complete fresh JPEG from one native authenticated MJPEG stream."""
+    import re
+    marker=b'--asterionframe\r\n'
+    start=buffer.find(marker)
+    if start<0:
+        if len(buffer)>len(marker):del buffer[:-len(marker)]
+        return None
+    if start:del buffer[:start]
+    end=buffer.find(b'\r\n\r\n',len(marker))
+    if end<0:
+        if len(buffer)>4096:raise ValueError('Invalid MJPEG frame headers')
+        return None
+    match=re.search(rb'(?i)content-length:\s*(\d+)',bytes(buffer[len(marker):end]))
+    if not match:raise ValueError('Missing MJPEG frame length')
+    length=int(match.group(1))
+    if not 4<=length<=4_000_000:raise ValueError('MJPEG frame size exceeded')
+    done=end+4+length+2
+    if len(buffer)<done:return None
+    frame=bytes(buffer[end+4:end+4+length])
+    if not frame.startswith(b'\xff\xd8') or not frame.endswith(b'\xff\xd9'):
+        raise ValueError('Malformed JPEG frame')
+    del buffer[:done]
+    return frame
+
+
 def install_stream(app, desktop_capture, desktop_input):
     @app.websocket('/api/v1/stream/{source}')
     async def stream(websocket: WebSocket, source: str):
@@ -62,19 +88,32 @@ def install_stream(app, desktop_capture, desktop_input):
 
         async def push_frames():
             interval=1/fps
+            if source=='phone':
+                # Preserve one owner-authorized LAN connection for the native
+                # continuous stream. Avoid a new stale screenshot GET per frame.
+                async with httpx.AsyncClient(timeout=httpx.Timeout(6.0,read=6.0),
+                                            trust_env=False,follow_redirects=False) as stream_client:
+                    async with stream_client.stream('GET',phone['base_url']+'/stream',headers=headers) as response:
+                        response.raise_for_status()
+                        buf=bytearray()
+                        last_push=0.0
+                        async for chunk in response.aiter_bytes():
+                            if closed.is_set():break
+                            buf.extend(chunk)
+                            while True:
+                                frame=_take_mjpeg_frame(buf)
+                                if frame is None:break
+                                now=time.perf_counter()
+                                if now-last_push>=interval*0.95:
+                                    async with outgoing:await websocket.send_bytes(frame)
+                                    last_push=now
+                return
             while not closed.is_set():
                 start=time.perf_counter()
-                if source=='desktop':
-                    frame=await asyncio.to_thread(desktop_capture,monitor)
-                else:
-                    response=await asyncio.to_thread(
-                        connection.get,phone['base_url']+'/screen',headers=headers)
-                    response.raise_for_status()
-                    frame=response.content
+                frame=await asyncio.to_thread(desktop_capture,monitor)
                 if not frame or len(frame)>4_000_000:
                     raise ValueError('Invalid frame payload')
-                async with outgoing:
-                    await websocket.send_bytes(frame)
+                async with outgoing:await websocket.send_bytes(frame)
                 await asyncio.sleep(max(.005,interval-(time.perf_counter()-start)))
 
         async def pull_actions():

@@ -19,18 +19,19 @@ def owner_mcp_connection(request: Request):
         raise HTTPException(403,"Connection setup requires private LAN/VPN")
     folder=Path(os.environ.get("LOCALAPPDATA",str(Path.home()))) / "AsterionControl"
     token_file=folder/"mcp-gateway-token.txt"
-    url_file=folder/"mcp-tunnel-url.txt"
+    url_file=folder/"mcp-stable-https-url.txt"
     try:
         secret=token_file.read_text("utf-8").strip()
         base=url_file.read_text("utf-8").strip().rstrip("/")
     except OSError:
         raise HTTPException(503,"Start the owner-authorized MCP gateway first")
-    if len(secret)<43 or not base.startswith("https://") or not base.endswith(".trycloudflare.com"):
+    if (len(secret)<43 or
+        base != "https://wise-eagle-c8b55706.tunnl.gg/mcp"):
         raise HTTPException(503,"MCP HTTPS setup is incomplete")
     return JSONResponse({
-      "server_url":base+"/mcp",
+      "server_url":base,
       "api_key":secret,
       "kind":"private-bearer",
-      "temporary":True,
-      "note":"Temporary testing endpoint. Never share the credential. Do not expect this hostname to persist after tunnel restart."
+      "temporary":False,
+       "note":"Existing stable HTTPS MCP endpoint. Never share the permanent credential."
     },headers={"Cache-Control":"no-store","Pragma":"no-cache","X-Content-Type-Options":"nosniff"})

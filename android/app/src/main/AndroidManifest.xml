@@ -1,5 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"/>
@@ -10,10 +12,21 @@
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE"/>
+    <queries>
+        <package android:name="com.openai.chatgpt"/>
+        <intent>
+          <action android:name="android.intent.action.MAIN"/>
+          <category android:name="android.intent.category.LAUNCHER"/>
+        </intent>
+        <intent>
+          <action android:name="android.speech.RecognitionService"/>
+        </intent>
+    </queries>
     <application android:allowBackup="false" android:label="Asterion Control" android:icon="@drawable/ic_asterion" android:roundIcon="@drawable/ic_asterion" android:usesCleartextTraffic="true" android:theme="@android:style/Theme.Material.NoActionBar" android:supportsRtl="true">
       <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="unspecified">
         <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
       </activity>
+      <service android:name=".VoiceDialogueService" android:exported="false" android:foregroundServiceType="microphone" />
       <service android:name=".AgentService" android:exported="false" android:stopWithTask="false" android:foregroundServiceType="connectedDevice" />
       <receiver android:name=".RestoreReceiver" android:enabled="true" android:exported="false">
         <intent-filter>

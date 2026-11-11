@@ -7,7 +7,8 @@ from pydantic import BaseModel, Field
 
 PORT=8912
 DISCOVER=b'ASTERION_CONTROL_DISCOVER_V1'
-STATE=Path(os.getenv('ASTERION_CONTROL_STATE',str(Path.home()/'.asterion-control'))).expanduser()
+_DEFAULT_STATE=(Path(os.getenv('LOCALAPPDATA',str(Path.home()))) / 'AsterionControl' if os.name=='nt' else Path.home()/'.asterion-control')
+STATE=Path(os.getenv('ASTERION_CONTROL_STATE',str(_DEFAULT_STATE))).expanduser()
 PAIRED=STATE/'authorized-devices.json'
 PIN_FILE=STATE/'pairing-code.txt'
 _lock=threading.RLock()
