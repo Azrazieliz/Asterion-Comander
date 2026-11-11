@@ -19,7 +19,7 @@ ChatGPT
   → ChatGPT reads and verifies outcome
 ```
 
-The worker-to-Android **native WSS** is essential, already installed and independent of the removed MCP gateway. Never mistake an existing native service, historic class name or `direct_wss` telemetry for a ChatGPT-callable tool. Do not replace or restart it merely because this conversation has no direct worker action namespace.
+The worker-to-Android **native WSS** is essential, already installed and independent of the removed MCP gateway. The existing stable phone hostname forwards to a minimal native WSS-only relay on Windows port 8995. The relay exposes only authenticated `/phone/live` and `/healthz`; both historical HTTP `/mcp` endpoints now return 404. The old gateway/OAuth scripts were retired from active source and runtime, while the original phone pairing and SSH key were preserved. Never mistake an existing native service, historic class name or `direct_wss` telemetry for a ChatGPT-callable tool. Do not replace or restart it merely because this conversation has no direct worker action namespace.
 
 **Authoritative operational contract:** [private Asterion Control bridge README](https://github.com/Azrazieliz/Asterion-Control-Bridge/blob/main/README.md). It contains the exact command JSON, permitted operations, receipts, app switching and cycle behavior. **That README supersedes older guidance.**
 
@@ -42,6 +42,6 @@ To control a device here, use the connected GitHub tool to **create** `commands/
 | Installed | Real phone package version independently verified |
 | Phone accepted | Full real UI/cycle scenario completed with matching receipts |
 
-**Current publication:** owner-signed v0.9.30 Android release is published on `main` with the existing in-app update feed. Installation and a completed unattended cycle are **not verified**. For current version/defects read [PROGRESS.md](PROGRESS.md). Source of recent development is `work/control-0927-overnight-cycles-20261111` or a newer verified continuation, not old source on `main`.
+**Current publication:** owner-signed **v0.9.31** Android release is published on `main` with the existing in-app update feed (compiled source `f5f74e0ba94ceb5152fbbffe50d277ebc2ee3e97`, SHA-256 `800b85fb8114e8d6619620aeef2f82da47d2ef985e64eac523a138774be182bc`). Installation and a completed unattended cycle are **not verified**. For current version/defects read [PROGRESS.md](PROGRESS.md). Source of recent development is `work/control-0927-overnight-cycles-20261111` or a newer verified continuation, not old source on `main`.
 
 Project requirements: [7-star frozen master](7STAR_FROZEN_MASTER.md), [continuous cycle contract](docs/CYCLE_EXECUTION_CONTRACT.md), [cross-app API](docs/CONTROL_CROSS_APP_API_V1.md). Historical MCP gateway/plugin instructions were exploratory and are **revoked**, not a checklist for future implementation.
