@@ -94,7 +94,7 @@ def main():
             def capture():
                 if proc.stdout is None:return
                 for line in proc.stdout:
-                    match=re.search(r"https://[a-z0-9-]+\\.tunnl\\.gg",line,re.I)
+                    match=re.search(r"https://[a-z0-9-]+\.tunnl\.gg",line,re.I)
                     if match and len(urls)<5:urls.append(match.group(0))
             threading.Thread(target=capture,daemon=True).start()
             for _ in range(8):
