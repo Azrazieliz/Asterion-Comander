@@ -1,4 +1,8 @@
-> **Release correction — 2026-11-11:** The canonical published update is **v0.9.25**, manifest SHA-256 `06f5f2d0f753ba697615dbefbabe96f7beaafb753b5065ec1449777d310e05b7`. The separate **v0.9.24 repair APK** built in an older development checkout has SHA-256 `dae1e1233ab998b0b5def3c26805f00865178e7ae84094c12b20c54a19736c6e` and **must not be installed or published over v0.9.25**. The Android app already contains a checksum-validating update detector (`UpdateManager`); retain it. The user's direct native WebSocket transport is connected. Do not require a new MCP plugin/gateway or restart a working ingress merely because old filenames contain `mcp`. The source still contains MCP-style RPC handlers inside the WSS system; removal has **not** been completed at the code/protocol level, so deleting those files blindly would break working access.
+> **CURRENT RELEASE — Asterion Control v0.9.26 (2026-11-11).** Published installer: `dist/Asterion-Control-v0.9.26-release.apk`; APK SHA-256: `be146e6f57d3b0660c5609c628d344fc9c5f1f7b38a6fa42e87b6f8d61a556f1`; source/build commit: `dcf60699fc1305b66e829334194288acce807e0b`; publication commit: `e79fdaa`. Use **the existing in-app Check for updates** action, which reads `dist/latest-release.json` and verifies SHA-256. Do not install the superseded v0.9.24 repair APK or bypass the updater. The separately published Android update still needs owner-confirmed installation and on-phone acceptance.
+
+> **Transport:** Direct Windows worker → existing authenticated native WebSocket → Samsung is primary; private GitHub bridge is the fallback if the direct ChatGPT tool is not callable. Existing `PhoneDirectMcp`/MCP-named RPC code remains part of the current WSS implementation; do not claim it was all removed or make a separate ChatGPT MCP plugin a prerequisite. Repair verifies the *actual native WebSocket*, not an unrelated gateway process.
+
+> **Cycle semantics:** [Real ChatGPT development cycle contract](docs/CYCLE_EXECUTION_CONTRACT.md). One cycle is a genuine tool-using ChatGPT reply with a verified marker, not an internal artificial model or a queued command. Limits: 10 additional turns in an existing chat; 20 in a verified new chat.
 
 # Asterion Control — authoritative operator and recovery contract
 
@@ -20,7 +24,7 @@ The existing Windows/Android system supports native phone input, UI observation,
 
 **Connect → Auto-repair connection** checks the saved link, restarts the Android agent if necessary, re-registers with Windows, and confirms that the Windows worker can read phone status before reporting success. An already healthy connection is preserved.
 
-**Connect → Force reinitialize · keep pairing** asks for confirmation, restarts only the Android phone listener and re-registers it. It preserves Windows pairing, credentials, files, and app settings. Android screen capture may require renewed OS consent. A successful service-start call alone is never reported as proof that the native link works.
+**Connect → Force reinitialize all components** asks for confirmation, restarts the Android listener, runs the Windows recovery endpoint and schedules a safe Windows-worker restart when idle. It preserves Windows pairing, credentials, files, and app settings. Android screen capture may require renewed OS consent. A successful service-start call alone is never reported as proof that the native link works.
 
 These controls are **implemented in Android source as of 2026-11-11**, but deployment status must be tracked separately: source change is not a compiled, installed, or phone-tested APK. The previously existing "Repair connection" lacked post-recovery verification.
 
@@ -33,3 +37,7 @@ For real-time PC/phone interaction use the existing authenticated WebSocket `/ap
 ## Release and evidence discipline
 
 Latest source state and actual installed build may differ. See [PROGRESS.md](PROGRESS.md) for dated verified receipts. [RELEASE_STATUS.md](RELEASE_STATUS.md) and [README_CONTROL_ADDENDUM.md](README_CONTROL_ADDENDUM.md) are historical records, **not connection instructions**. Never equate source implementation, compilation, app installation, device operation and direct ChatGPT tool availability.
+
+### Current recovery acceptance ledger (v0.9.26)
+
+Windows recovery code and independent watchdog installed into the existing worker with backup; the authenticated `/api/v1/recovery/status` endpoint returned HTTP 200 after a safe restart. The phone previously reported paired native transport and direct WSS connected. **An end-to-end Auto-repair/Force-reinitialize invocation, fresh video permission, Android v0.9.26 installation and multi-turn cycle acceptance remain unverified; never report these as complete until actual device receipts confirm them.**
