@@ -1,0 +1,27 @@
+name: Control Git bridge recovery focused tests
+on:
+  push:
+    branches:
+      - work/android-primary-continuation-observation-20261105
+    paths:
+      - 'asterion_remote/github_bridge_git.py'
+      - 'scripts/recover_control_git_transport.py'
+      - 'tests/test_control_worker_recovery.py'
+      - 'tests/test_control_bridge_queue.py'
+      - '.github/workflows/control-git-bridge-recovery.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install source test requirements
+        run: python -m pip install -r requirements.txt pytest
+      - name: Verify only bridge recovery and no-replay invariants
+        run: python -m pytest -q tests/test_control_worker_recovery.py tests/test_control_bridge_queue.py
