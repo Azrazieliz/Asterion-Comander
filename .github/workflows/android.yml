@@ -1,8 +1,5 @@
 name: Android APK
 on:
-  push:
-    branches: [main]
-    paths: ['android/**', '.github/workflows/android.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -30,8 +27,3 @@ jobs:
       - name: Compile native Android APK
         working-directory: android
         run: gradle --no-daemon --stacktrace assembleDebug
-      - uses: actions/upload-artifact@v4
-        with:
-          name: Asterion-Control-v0.8.1-CI-build
-          path: android/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
