@@ -499,9 +499,13 @@ public final class ControlAccessibilityService extends AccessibilityService {
         done.countDown();
       }
     });
-    try{if(!done.await(3,TimeUnit.SECONDS))
-      return new JSONObject().put("requested",false)
+    try{if(!done.await(3,TimeUnit.SECONDS)){
+      JSONObject timeout=new JSONObject();
+      try{timeout.put("requested",false)
         .put("reason","Original ChatGPT task restoration timed out");}
+      catch(Exception ignored){}
+      return timeout;
+    }}
     catch(InterruptedException e){Thread.currentThread().interrupt();return new JSONObject();}
     return output[0];
   }
