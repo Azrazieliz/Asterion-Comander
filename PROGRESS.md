@@ -1,3 +1,14 @@
+# 2026-11-11 — v0.9.30 truth-in-status UI audit
+
+- **Corrected (source):** misleading local capture "Streaming" label when frames are stale, "SHARING ON" when only the phone agent is active, "Remote control enabled" before the listener is verified, and unqualified private GitHub queue "Connected" from historic success. The UI now distinguishes local capture, listener readiness, verified frame freshness, recent relay activity and unverified Windows reachability.
+- **Corrected (source):** premature "Windows connected" during pairing/registration, ambiguous transfer acceptance/completion/claimed SHA verification, an initial "automatic management active" claim without a status read, configuration target screen-refresh presented as actual measured FPS, a "Turns" count that was actually the pending turn index, and an unsupported claim that integration teams had been asked to act.
+- **Corrected (source):** the separate **Open ChatGPT checkpoint** button now uses the existing ChatGPT task-restoration flow rather than the generic launcher that can open a new conversation.
+- **Regression evidence:** 18 source/native tests passed; Android release Java compilation completed successfully; owner-signature-compatible v0.9.30 APK built (versionCode 930). APK SHA-256 `006c8c77a644cdb2c6f85ae0b9a8f910bb5a9dbd5300ede3fa472ec8edf4cbc6`; compiled source commit `887e547299596df7cb613a2423f51b53d7cdda99`; published to `main` on commit `1441eb7` through the existing in-app update manifests.
+- **Not proven:** installation of v0.9.30 on Samsung; comprehensive screenshot-by-screenshot UI review; accurate UI behavior with live connection interruptions; fully unattended two-turn/overnight cycles; 10-second end-to-end *ChatGPT-inclusive* action latency. Source tests cannot certify all visible states.
+- **Next gate:** Install with existing updater, inspect each major UI status in disconnected/partial/full/recovery conditions and validate a real abridged cycle with original-conversation restoration, video reapproval and exact reply acknowledgment. Do not mark the complete UI audit or cycle acceptance passed until tested on the actual phone.
+
+---
+
 # 2026-11-11 — v0.9.29: fix premature ChatGPT conversation change and normal Send-keyboard dismissal
 
 - **Owner's observed issue:** after the first short-cycle checkpoint, ChatGPT appeared on a blank/new conversation. This was **not** automatic rollover: the actual cycle was started with `conversation="same"`, `turns_in_chat=0`, `chat_rollover_messages=20`, so `ContinuationCycle` did not enter `awaiting_new_chat`.
