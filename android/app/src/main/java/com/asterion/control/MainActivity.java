@@ -103,6 +103,8 @@ public final class MainActivity extends Activity {
   private TextView privacyStatus;
   private int currentTab=0;
   private boolean webStarted=false,hostRefreshing=false;
+  private boolean fullRepairInProgress=false;
+  private String fullRepairTicket="";
   private String workerPhoneState="Windows-to-phone connection not checked yet";
   private long lastHostRefresh=0;
   private boolean destroyed=false;
@@ -210,7 +212,7 @@ public final class MainActivity extends Activity {
     margin(phoneCopy,t(Build.MODEL,15,DesignSystem.TEXT,true),6);
     homeAgent=t("Remote access is off",12,DesignSystem.MUTED,false);margin(phoneCopy,homeAgent,6);
     phoneR.addView(phoneCopy,new LinearLayout.LayoutParams(0,-2,1));phoneR.addView(icon("arrow",DesignSystem.MUTED,19));wide(phone,phoneR);wide(homeBody,phone);
-    gap(homeBody,10);button(homeBody,"Force activate connection","refresh",true,this::forceActivateConnection);
+    gap(homeBody,10);button(homeBody,"Auto-repair connection","refresh",true,()->fullRepair(false));
     homeConnectionIssue=t("Checking native connection…",12,DesignSystem.MUTED,false);
     homeConnectionIssue.setMaxLines(6);margin(homeBody,homeConnectionIssue,8);
     gap(homeBody,26);LinearLayout healthTitle=h();healthTitle.addView(eyebrow("PHONE HEALTH"),new LinearLayout.LayoutParams(0,-2,1));
@@ -332,6 +334,101 @@ public final class MainActivity extends Activity {
     if(connectionIssue!=null)connectionIssue.setText(detail);
     if(homeConnectionIssue!=null)homeConnectionIssue.setText(detail);
   }
+  private void fullRepair(boolean force){
+    if(fullRepairInProgress){setPairingFeedback("Recovery already in progress. The existing job is being checked.");return;}
+    if(force){
+      new AlertDialog.Builder(this).setTitle("Force reinitialize Asterion Control?")
+        .setMessage("Recover the Windows worker, direct gateway, phone listener and streaming path. Other active Windows jobs will be preserved or the restart will be blocked. Existing pairing, credentials, app data and files are kept. Android may request screen-sharing consent again.")
+        .setPositiveButton("Reinitialize",(d,w)->beginFullRepair(true))
+        .setNegativeButton("Cancel",null).show();
+    }else beginFullRepair(false);
+  }
+  private void beginFullRepair(boolean force){
+    if(prefs.getString("url","").isEmpty()||prefs.getString("token","").isEmpty()){
+      setPairingFeedback("No saved Windows pairing. Discover your existing computer; nothing was reset.");
+      discoverComputer();return;
+    }
+    fullRepairInProgress=true;
+    fullRepairTicket="";
+    setPairingFeedback(force?"Force reinitialize: recovering Windows, native WebSocket and Android…":
+      "Auto-repair: checking Windows, native WebSocket, Android and video…");
+    if(force){
+      // Android only: restart listener without revoking saved authorization.
+      stopService(new Intent(this,AgentService.class));
+      handler.postDelayed(()->{if(!destroyed){startAgent();submitFullRepair(force,0);}},1200);
+    }else{startAgent();submitFullRepair(force,0);}
+  }
+  private void submitFullRepair(boolean force,int retry){
+    if(destroyed||!fullRepairInProgress)return;
+    io.execute(()->{
+      try{
+        JSONObject job=pcTransferRequest("/api/v1/recovery/start","POST",
+          new JSONObject().put("mode",force?"force":"auto"));
+        String ticket=job.getString("id");
+        runOnUiThread(()->{
+          if(destroyed||!fullRepairInProgress)return;
+          fullRepairTicket=ticket;
+          setPairingFeedback("Windows repair started · verifying worker, phone, direct WebSocket and video…");
+          if(AgentService.running)registerPhone();
+          pollFullRepair(ticket,0,force);
+        });
+      }catch(Exception e){
+        runOnUiThread(()->{
+          if(destroyed||!fullRepairInProgress)return;
+          if(retry<15){
+            setPairingFeedback("Waiting for the independent Windows worker watchdog · "+
+              (retry+1)+"/16 checks. Pairing preserved.");
+            handler.postDelayed(()->submitFullRepair(force,retry+1),4000);
+          }else{
+            fullRepairInProgress=false;
+            setPairingFeedback("Full recovery incomplete: Windows worker or recovery endpoint "+
+              "could not be contacted. The independent Windows watchdog must be installed. "+
+              "Existing pairing was not changed.");
+          }
+        });
+      }
+    });
+  }
+  private void pollFullRepair(String ticket,int attempt,boolean force){
+    if(destroyed||!fullRepairInProgress||!ticket.equals(fullRepairTicket))return;
+    io.execute(()->{
+      String phase="running",detail="Waiting for native recovery verification";
+      try{
+        JSONObject result=pcTransferRequest("/api/v1/recovery/status","GET",null);
+        if(!ticket.equals(result.optString("id")))
+          throw new IllegalStateException("Different repair receipt: no replay");
+        phase=result.optString("phase","running");
+        JSONObject steps=result.optJSONObject("steps");
+        detail="Windows: "+(steps==null?"unchecked":steps.optString("windows_worker","checking"))+
+          "\\nPhone: "+(steps==null?"unchecked":steps.optString("phone_listener","checking"))+
+          "\\nDirect WebSocket: "+(steps==null?"unchecked":steps.optString("native_websocket","checking"))+
+          "\\nInput: "+(steps==null?"unchecked":steps.optString("accessibility","checking"))+
+          "\\nVideo: "+(steps==null?"unchecked":steps.optString("live_video","checking"));
+        if(result.has("error")&&!result.optString("error").isEmpty())
+          detail+="\\n"+result.optString("error","");
+      }catch(Exception e){detail="Windows recovery receipt unavailable: "+e.getClass().getSimpleName();}
+      final String state=phase,summary=detail;
+      runOnUiThread(()->{
+        if(destroyed||!fullRepairInProgress||!ticket.equals(fullRepairTicket))return;
+        if("verified".equals(state)){
+          fullRepairInProgress=false;
+          setPairingFeedback("FULL PATH VERIFIED\\n"+summary);
+          ConnectionDiagnostics.success(this);checkHost();updateConnectionIssue();
+        }else if("permission_required".equals(state)){
+          fullRepairInProgress=false;
+          setPairingFeedback("Direct Windows/phone link recovered. Android consent required.\\n"+summary);
+          if(!CaptureService.active)beginCapture();
+        }else if("partial".equals(state)||"failed".equals(state)||"stale".equals(state)||attempt>=45){
+          fullRepairInProgress=false;
+          setPairingFeedback("Full repair NOT verified. Pairing preserved.\\n"+summary);
+          updateConnectionIssue();
+        }else{
+          setPairingFeedback("Recovering entire native connection ("+(attempt+1)+"/46)\\n"+summary);
+          handler.postDelayed(()->pollFullRepair(ticket,attempt+1,force),2000);
+        }
+      });
+    });
+  }
   private void repairDeviceLink(){
     if(!prefs.getString("token","").isEmpty()&&!prefs.getString("url","").isEmpty()){
       startAgent();
@@ -350,9 +447,11 @@ public final class MainActivity extends Activity {
     gap(summary,16);
     if(prefs.getString("url","").isEmpty())
       button(summary,"Find Windows computer","devices",true,this::discoverComputer);
-    else button(summary,"Force activate connection","refresh",true,this::forceActivateConnection);
+    else button(summary,"Auto-repair connection","refresh",true,()->fullRepair(false));
+    gap(summary,9);button(summary,"Force reinitialize all components","power",false,()->fullRepair(true));
+    gap(summary,9);button(summary,"How development cycles work","check",false,this::showCycleStatus);
     gap(summary,10);pairingFeedback=t("Your phone is the controller. Connect once; the Windows worker follows.",12,DesignSystem.MUTED,false);
-    pairingFeedback.setMaxLines(5);wide(summary,pairingFeedback);
+    pairingFeedback.setMaxLines(13);wide(summary,pairingFeedback);
     gap(summary,10);connectionIssue=t("Checking last disconnection…",12,DesignSystem.MUTED,false);
     connectionIssue.setMaxLines(9);wide(summary,connectionIssue);
     wide(devicesBody,summary);
@@ -1007,17 +1106,25 @@ public final class MainActivity extends Activity {
   private void showCycleStatus(){
     try{
       JSONObject ledger=ContinuationLedger.get(this).status();
-      String info="Controller: ChatGPT (external)"
-        +"\nAndroid-owned automatic cycles: disabled"
-        +"\nAccessibility active: "+(ControlAccessibilityService.active!=null)
-        +"\nAgent service active: "+AgentService.running
-        +"\nContinuation enabled: "+ledger.optBoolean("enabled")
-        +"\nCheckpoint phase: "+ledger.optString("state","idle")
-        +"\nLast checkpoint: "+ledger.optString("last_checkpoint","none")
-        +"\nLast dispatch error: "+ledger.optString("last_error","none");
-      new AlertDialog.Builder(this).setTitle("ChatGPT operator checkpoint status")
-        .setMessage(info).setPositiveButton("Close",null).show();
-    }catch(Exception e){toast("Checkpoint status unavailable");}
+      JSONObject cycle=ContinuationCycle.get(this).status();
+      String explanation="ONE DEVELOPMENT CYCLE = 1 verified ChatGPT work iteration.\\n\\n"+
+        "1. ChatGPT performs the actual project work and records evidence.\\n"+
+        "2. Control submits the next normal message in the REAL ChatGPT composer, only after the previous reply was observed complete.\\n"+
+        "3. The next reply is checked before continuing; a tap/queue receipt is NOT a completed cycle.\\n"+
+        "4. If a draft exists, Send is uncertain, the UI changed, or permissions are missing, Control pauses for review rather than duplicating the message.\\n"+
+        "5. Stop blocks future cycles but cannot retract an already submitted ChatGPT message.\\n\\n"+
+        "Conversation safety: at most 10 additional turns in an existing chat, or 20 in a newly opened chat. Rollover requires a verified canonical handoff.\\n\\n"+
+        "No AI model or independent ChatGPT session runs inside Control. ChatGPT must remain the actual external operator.\\n\\n"+
+        "Cycle: "+cycle.optString("state","idle")+
+        " | active: "+cycle.optBoolean("active",false)+
+        " | iteration: "+cycle.optInt("index",0)+
+        " | verified replies: "+cycle.optInt("ack_count",0)+
+        "\\nContinuation owner-enabled: "+ledger.optBoolean("enabled",false)+
+        "\\nCheckpoint: "+ledger.optString("state","idle")+
+        "\\nLast error: "+cycle.optString("last_error","none");
+      new AlertDialog.Builder(this).setTitle("How Asterion Control cycles work")
+        .setMessage(explanation).setPositiveButton("Close",null).show();
+    }catch(Exception e){toast("Cycle status unavailable: "+e.getClass().getSimpleName());}
   }
   private void testVoiceDialogue(){
     if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){
