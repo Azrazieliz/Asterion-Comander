@@ -97,6 +97,13 @@ final class ContinuationLedger {
         +"\nSpecification level: "+tier+"\nCanonical reference: "+spec
         +"\nResume instructions: Inspect the canonical files and latest source/progress in GitHub."
         +" Distinguish committed, built, installed and device-verified.\n"
+        +"Use real tools to implement work before claiming progress.\n"
+        +"At the END of your reply, write exactly one marker by joining a prefix and the"
+        +" checkpoint ID above with no space: prefix ASTERION-CYCLE-ACK: when verified"
+        +" work remains, or ASTERION-CYCLE-DONE: ONLY after all required work is"
+        +" implemented and acceptance-verified. Do not quote a fully assembled marker"
+        +" in the user prompt or issue both markers. This final marker is needed for"
+        +" the native phone's exact-response check, not for the task itself.\n"
         +"Next work: "+text;
     JSONObject item = new JSONObject().put("project", project).put("checkpoint_id", checkpoint)
       .put("priority_tier", tier).put("spec_reference", spec).put("message", envelope)
