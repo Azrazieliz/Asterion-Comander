@@ -94,6 +94,34 @@ def git(*args,timeout=60):
         raise RuntimeError('Git transport error '+str(p.returncode)+': '+(p.stderr or p.stdout)[-450:])
     return p.stdout.strip()
 
+def sync_remote():
+    """Recover committed, unpublished receipts after competing Git writers.
+
+    A failed push can leave HEAD ahead of origin/main. An ff-only merge alone
+    then blocks every future command, even while the native agent is healthy.
+    Never drop local commits or replay an already journaled phone action.
+    """
+    git('fetch','--quiet','origin','main')
+    unpublished=int(git('rev-list','--count','origin/main..HEAD'))
+    if not unpublished:
+        git('merge','--ff-only','origin/main')
+        return
+    paths=[p.strip() for p in git('log','--format=','--name-only',
+                                  'origin/main..HEAD').splitlines() if p.strip()]
+    if not paths or any(not p.startswith('results/') or not p.endswith('.json')
+                        for p in paths):
+        raise RuntimeError('Local bridge commits contain non-receipt changes; preserve and inspect')
+    for attempt in range(10):
+        git('fetch','--quiet','origin','main')
+        git('rebase','origin/main')
+        try:
+            git('push','--quiet','origin','HEAD:main')
+            return
+        except RuntimeError:
+            if attempt==9:raise
+            time.sleep(min(10,1+attempt))
+
+
 def setup():
     ROOT.parent.mkdir(parents=True,exist_ok=True)
     if not (ROOT/'.git').exists():
@@ -101,8 +129,7 @@ def setup():
     remote=git('remote','get-url','origin').rstrip('/')
     if remote.lower()!=URL.lower():
         raise RuntimeError('Unexpected bridge remote: refusing to execute')
-    git('fetch','--quiet','origin','main')
-    git('merge','--ff-only','origin/main')
+    sync_remote()
 
 def publish(paths):
     git('add','--',*[str(p) for p in paths])
@@ -203,8 +230,7 @@ def migrate():
     STAMP.write_text('migrated',encoding='utf8')
 
 def cycle(key):
-    git('fetch','--quiet','origin','main')
-    git('merge','--ff-only','origin/main')
+    sync_remote()
     tasks=entries()
     unfinished=outstanding_jobs()
     if tasks or unfinished:
