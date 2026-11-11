@@ -31,7 +31,8 @@ $appOld=[IO.File]::ReadAllText($app)
 $replace=@(
   "from .mcp_setup import router as mcp_setup_router",
   "app.include_router(mcp_setup_router)",
-  "# Register MCP /mcp endpoint in the same REST server.`nfrom . import mcp_protocol  # noqa: E402,F401"
+  "# Register MCP /mcp endpoint in the same REST server.",
+  "from . import mcp_protocol  # noqa: E402,F401"
 )
 $appNew=$appOld
 foreach($obsolete in $replace){
