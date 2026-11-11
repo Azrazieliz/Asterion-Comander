@@ -83,11 +83,11 @@ public final class ControlAccessibilityService extends AccessibilityService {
         InputMethod.AccessibilityInputConnection input=chatKeyboard();
         String remaining=inputText(input);
         if(message.equals(remaining))
-          output[0]=chatOutcome(false,false,
-            "ChatGPT text still in composer; Send did not complete");
-        else if(remaining==null)
           output[0]=chatOutcome(false,true,
-            "ChatGPT keyboard changed; inspect UI before any retry");
+            "Send tap completed but message remains visible; do not replay an uncertain submission");
+        else if(remaining==null)
+          output[0]=chatOutcome(true,true,
+            "Send tap completed; keyboard dismissed normally. Delivery unverified until exact assistant reply.");
         else output[0]=chatOutcome(true,false,
           "Blue Send action cleared draft; await visible ChatGPT reply");
       }catch(Exception e){output[0]=chatOutcome(false,true,
@@ -460,39 +460,109 @@ public final class ControlAccessibilityService extends AccessibilityService {
     try{done.await(3,TimeUnit.SECONDS);}catch(InterruptedException e){Thread.currentThread().interrupt();}
     return result[0];
   }
-  /** Request ChatGPT foreground through Android's own launcher intent, or dismiss
-   * a blocking SystemUI shade. Never treat intent dispatch as confirmed focus. */
+  /**
+   * Resume the EXISTING ChatGPT Android task, never launch a generic ChatGPT
+   * home intent while a cycle is active. The latter can navigate to a blank
+   * new conversation even though no 20-message rollover was authorized.
+   * Samsung Recents includes an exact accessible ChatGPT task card. Fail
+   * closed if the original task or its card cannot be identified.
+   */
   JSONObject requestChatForeground(){
     final CountDownLatch done=new CountDownLatch(1);
     final JSONObject[] output={new JSONObject()};
     main.post(()->{
       try{
         AccessibilityNodeInfo root=getRootInActiveWindow();
-        String pkg=root==null||root.getPackageName()==null?"":root.getPackageName().toString();
+        String pkg=root==null||root.getPackageName()==null?
+          "":root.getPackageName().toString();
         if("com.openai.chatgpt".equals(pkg)){
-          output[0]=new JSONObject().put("requested",false).put("already_foreground",true);
-        }else if("com.android.systemui".equals(pkg)){
-          output[0]=new JSONObject().put("requested",performGlobalAction(GLOBAL_ACTION_BACK))
-            .put("reason","Dismissed SystemUI obstruction; recheck ChatGPT");
-        }else{
-          android.content.Intent intent=getPackageManager().getLaunchIntentForPackage("com.openai.chatgpt");
-          if(intent==null){
-            output[0]=new JSONObject().put("requested",false)
-              .put("reason","ChatGPT launch activity unavailable");
-          }else{
-            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(intent);
-            output[0]=new JSONObject().put("requested",true)
-              .put("verified_foreground",false);
-          }
+          output[0]=new JSONObject().put("requested",false)
+            .put("already_foreground",true).put("existing_task_preserved",true);
+          done.countDown();return;
         }
+        if(isSamsungRecents(root,0)){
+          activateExistingChatTask(output,done);
+          return;
+        }
+        if(!performGlobalAction(GLOBAL_ACTION_RECENTS)){
+          output[0]=new JSONObject().put("requested",false)
+            .put("reason","Could not open recent tasks; original ChatGPT conversation preserved");
+          done.countDown();return;
+        }
+        // Give SystemUI a short native transition before reading the card.
+        // A successful Recents gesture alone never authorizes a new message.
+        main.postDelayed(()->activateExistingChatTask(output,done),420L);
       }catch(Exception e){
         try{output[0]=new JSONObject().put("requested",false)
-          .put("reason",e.getClass().getSimpleName());}catch(Exception ignored){}
-      }finally{done.countDown();}
+          .put("reason","Original ChatGPT task unavailable: "+e.getClass().getSimpleName());}
+        catch(Exception ignored){}
+        done.countDown();
+      }
     });
-    try{done.await(3,TimeUnit.SECONDS);}catch(InterruptedException e){Thread.currentThread().interrupt();}
+    try{if(!done.await(3,TimeUnit.SECONDS))
+      return new JSONObject().put("requested",false)
+        .put("reason","Original ChatGPT task restoration timed out");}
+    catch(InterruptedException e){Thread.currentThread().interrupt();return new JSONObject();}
     return output[0];
+  }
+  private void activateExistingChatTask(JSONObject[] output,CountDownLatch done){
+    try{
+      AccessibilityNodeInfo root=getRootInActiveWindow();
+      if(!isSamsungRecents(root,0)){
+        output[0]=new JSONObject().put("requested",false)
+          .put("reason","Recent tasks view could not be verified; no new-chat intent used");
+        return;
+      }
+      AccessibilityNodeInfo card=findChatRecentCard(root,0,new int[]{0});
+      if(card==null){
+        output[0]=new JSONObject().put("requested",false)
+          .put("reason","Existing ChatGPT task card not visible; refusing new conversation");
+        return;
+      }
+      boolean clicked=card.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+      output[0]=new JSONObject().put("requested",clicked)
+        .put("existing_task_preserved",clicked)
+        .put("verified_foreground",false)
+        .put("reason",clicked?"Existing ChatGPT task selected; verifying foreground":
+          "Could not select existing ChatGPT task; no launch-intent fallback");
+    }catch(Exception e){
+      try{output[0]=new JSONObject().put("requested",false)
+        .put("reason","Recent-task restoration failed: "+e.getClass().getSimpleName());}
+      catch(Exception ignored){}
+    }finally{done.countDown();}
+  }
+  private boolean isSamsungRecents(AccessibilityNodeInfo node,int depth){
+    if(node==null||depth>25)return false;
+    for(CharSequence t:new CharSequence[]{node.getText(),node.getContentDescription()}){
+      if(t==null)continue;
+      String s=t.toString().trim().toLowerCase(java.util.Locale.ROOT);
+      if(s.equals("close all")||s.equals("tout fermer")||
+         s.equals("fermer tout"))return true;
+    }
+    for(int i=0;i<node.getChildCount();i++)
+      if(isSamsungRecents(node.getChild(i),depth+1))return true;
+    return false;
+  }
+  private AccessibilityNodeInfo findChatRecentCard(AccessibilityNodeInfo node,
+      int depth,int[] checked){
+    if(node==null||depth>25||checked[0]++>400)return null;
+    if(node.isVisibleToUser()){
+      for(CharSequence value:new CharSequence[]{node.getText(),node.getContentDescription()}){
+        if(value==null)continue;
+        if(!"chatgpt".equalsIgnoreCase(value.toString().trim()))continue;
+        AccessibilityNodeInfo cursor=node;
+        for(int i=0;i<4&&cursor!=null;i++){
+          if(cursor.isVisibleToUser()&&cursor.isEnabled()&&cursor.isClickable())
+            return cursor;
+          cursor=cursor.getParent();
+        }
+      }
+    }
+    for(int i=0;i<node.getChildCount()&&checked[0]<400;i++){
+      AccessibilityNodeInfo match=findChatRecentCard(node.getChild(i),depth+1,checked);
+      if(match!=null)return match;
+    }
+    return null;
   }
   JSONObject sendChatMessage(String message) {
     final CountDownLatch done=new CountDownLatch(1);
