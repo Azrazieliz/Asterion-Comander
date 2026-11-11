@@ -18,7 +18,7 @@ import java.nio.charset.StandardCharsets;
  */
 final class ContinuationCycle {
   // Conversation rollover is independent of the unlimited development cycle.
-  private static final int CHAT_ROLLOVER_TURNS=20;
+  private static final int CHAT_ROLLOVER_MESSAGES=20; // 10 user prompts + 10 assistant replies
   private static volatile ContinuationCycle singleton;
   private final AtomicFile disk;
   private final ContinuationLedger ledger;
@@ -51,8 +51,9 @@ final class ContinuationCycle {
       .put("minimum_substantial_turn_minutes",25)
       .put("per_action_deadline_ms",10000)
       .put("simple_action_target_ms",1000)
-      .put("chat_rollover_turns",CHAT_ROLLOVER_TURNS)
+      .put("chat_rollover_messages",CHAT_ROLLOVER_MESSAGES)
       .put("turns_in_chat",state.optInt("turns_in_chat",0))
+      .put("messages_in_chat",state.optInt("turns_in_chat",0)*2)
       .put("rollover_count",state.optInt("rollover_count",0));
   }
   synchronized JSONObject start(JSONObject input)throws Exception {
@@ -99,7 +100,7 @@ final class ContinuationCycle {
       .put("per_action_deadline_ms",10000).put("simple_action_target_ms",1000)
       .put("overnight_unbounded",maximum==0)
       .put("turns_in_chat",0).put("rollover_count",0)
-      .put("chat_rollover_turns",CHAT_ROLLOVER_TURNS)
+      .put("chat_rollover_messages",CHAT_ROLLOVER_MESSAGES)
       .put("last_error","").put("started_at_ms",System.currentTimeMillis());
     save();
     return status();
@@ -391,7 +392,7 @@ final class ContinuationCycle {
     // conversation with canonical handoff; NEVER end the overall cycle.
     boolean initialNew="new".equals(state.optString("conversation")) &&
        state.optInt("new_chat_verified_index",0)==0;
-    boolean rollover=state.optInt("turns_in_chat",0)>=CHAT_ROLLOVER_TURNS;
+    boolean rollover=state.optInt("turns_in_chat",0)*2>=CHAT_ROLLOVER_MESSAGES;
     if(initialNew||rollover){
       state.put("state","awaiting_new_chat").put("new_chat_requested",false)
         .put("rollover_pending",rollover)
@@ -414,7 +415,7 @@ final class ContinuationCycle {
       "do not recreate systems, discard historical requirements, or claim "+
       "new work until source/test receipts prove it. This reply MUST be "+
       "another substantial development turn. "):"";
-    String closingHandoff=state.optInt("turns_in_chat",0)==CHAT_ROLLOVER_TURNS-1?(
+    String closingHandoff=state.optInt("turns_in_chat",0)*2==CHAT_ROLLOVER_MESSAGES-2?(
       "\nBEFORE ACK: the next message will roll into a new ChatGPT conversation. "+
       "Update the canonical repository progress/handoff with exact branch, "+
       "latest commit, completed and incomplete work, test/build status, "+
