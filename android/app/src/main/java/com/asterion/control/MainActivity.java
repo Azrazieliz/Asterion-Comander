@@ -898,19 +898,77 @@ public final class MainActivity extends Activity {
   }
   private String thermalName(int level){switch(level){case PowerManager.THERMAL_STATUS_NONE:return "Nominal";case PowerManager.THERMAL_STATUS_LIGHT:return "Light";case PowerManager.THERMAL_STATUS_MODERATE:return "Moderate";case PowerManager.THERMAL_STATUS_SEVERE:return "Severe";case PowerManager.THERMAL_STATUS_CRITICAL:return "Critical";case PowerManager.THERMAL_STATUS_EMERGENCY:return "Emergency";case PowerManager.THERMAL_STATUS_SHUTDOWN:return "Shutdown";default:return "Unavailable";}}
   private String networkName(){try{ConnectivityManager cm=(ConnectivityManager)getSystemService(CONNECTIVITY_SERVICE);Network n=cm.getActiveNetwork();NetworkCapabilities cap=cm.getNetworkCapabilities(n);if(cap==null)return "Offline";if(cap.hasTransport(NetworkCapabilities.TRANSPORT_WIFI))return "Wi-Fi connected";if(cap.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR))return "Mobile data";if(cap.hasTransport(NetworkCapabilities.TRANSPORT_VPN))return "VPN connected";if(cap.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))return "Ethernet";return "Connected";}catch(Exception e){return "Unavailable";}}
-  private void checkHost(){String url=prefs.getString("url","").replaceAll("/+$","");String token=prefs.getString("token","");
-    if(url.isEmpty()||token.isEmpty()){if(pcConnection!=null)pcConnection.setText("Not linked yet · Connect to start");if(hostHealth!=null)hostHealth.setText("Windows agent not paired.");return;}
-    hostRefreshing=true;io.execute(()->{String status="Offline · Check connection",metric="Windows telemetry unavailable";
-      try{URL u=new URL(url+"/api/v1/device-health");HttpURLConnection c=(HttpURLConnection)u.openConnection();c.setConnectTimeout(2400);c.setReadTimeout(2600);c.setRequestProperty("Authorization","Bearer "+token);int code=c.getResponseCode();
-        if(code==200){byte[] bytes=c.getInputStream().readNBytes(500000);JSONObject data=new JSONObject(new String(bytes,java.nio.charset.StandardCharsets.UTF_8));
-          status="Online · Secure key accepted";double cpu=data.optDouble("cpu_percent",-1);
-          JSONObject mem=data.optJSONObject("memory");metric="CPU "+(cpu>=0?String.format(Locale.US,"%.1f%%",cpu):"—")+"  ·  RAM "+(mem!=null?mem.optInt("percent")+"%":"—")+"\n\n";
-          JSONObject thermal=data.optJSONObject("thermals");metric+=thermal!=null&&thermal.optBoolean("available")?"Thermal sensors available":"No OS thermal sensors reported";
-        }else status="Agent rejected request · HTTP "+code;c.disconnect();
-      }catch(Exception ignored){}
-      final String state=status,details=metric;
-      runOnUiThread(()->{hostRefreshing=false;if(destroyed)return;if(pcConnection!=null)pcConnection.setText(state);if(hostHealth!=null)hostHealth.setText(details);
-        if(remoteConnection!=null)remoteConnection.setText(state.startsWith("Online")?"Connected to Windows agent":state);
+  private void checkHost(){
+    String url=prefs.getString("url","").replaceAll("/+$",""),token=prefs.getString("token","");
+    if(url.isEmpty()||token.isEmpty()){
+      workerPhoneState="Windows not paired";
+      if(pcConnection!=null)pcConnection.setText("Not linked yet · Connect to start");
+      if(hostHealth!=null)hostHealth.setText("Windows agent not paired.");
+      updateConnectionIssue();return;
+    }
+    hostRefreshing=true;
+    io.execute(()->{
+      String status="Offline · Check connection",metric="Windows telemetry unavailable";
+      String peer="Worker not reachable";
+      try{
+        HttpURLConnection c=(HttpURLConnection)new URL(url+"/api/v1/device-health").openConnection();
+        try{
+          c.setConnectTimeout(2400);c.setReadTimeout(2600);
+          c.setRequestProperty("Authorization","Bearer "+token);
+          int code=c.getResponseCode();
+          if(code==200){
+            byte[] bytes=c.getInputStream().readNBytes(500000);
+            JSONObject data=new JSONObject(new String(bytes,StandardCharsets.UTF_8));
+            status="Online · Secure key accepted";
+            double cpu=data.optDouble("cpu_percent",-1);
+            JSONObject mem=data.optJSONObject("memory");
+            metric="CPU "+(cpu>=0?String.format(Locale.US,"%.1f%%",cpu):"—")
+              +"  ·  RAM "+(mem!=null?mem.optInt("percent")+"%":"—")+"\n\n";
+            JSONObject thermal=data.optJSONObject("thermals");
+            metric+=thermal!=null&&thermal.optBoolean("available")
+              ?"Thermal sensors available":"No OS thermal sensors reported";
+          }else{
+            status="Windows rejected request · HTTP "+code;
+            peer=code==401||code==403?"Windows rejected the saved authorization (HTTP "+code+")"
+              :"Windows worker health returned HTTP "+code;
+            ConnectionDiagnostics.failure(this,"windows_http_"+code,peer);
+          }
+        }finally{c.disconnect();}
+        if(status.startsWith("Online")){
+          HttpURLConnection c=(HttpURLConnection)new URL(url+"/api/v1/phone").openConnection();
+          try{
+            c.setConnectTimeout(2800);c.setReadTimeout(4500);
+            c.setRequestProperty("Authorization","Bearer "+token);
+            int code=c.getResponseCode();
+            if(code==200){
+              JSONObject p=new JSONObject(new String(c.getInputStream().readNBytes(16384),StandardCharsets.UTF_8));
+              if(p.optBoolean("reachable")){
+                peer="Windows verified native phone agent reachable";
+                ConnectionDiagnostics.success(this);
+              }else{
+                String why=p.optString("reason","");
+                peer=why.isEmpty()?"Windows worker cannot reach Android agent":why;
+                ConnectionDiagnostics.failure(this,"worker_phone_unreachable",peer);
+              }
+            }else{
+              peer="Windows-to-phone status returned HTTP "+code;
+              ConnectionDiagnostics.failure(this,"worker_probe_http_"+code,peer);
+            }
+          }finally{c.disconnect();}
+        }
+      }catch(Exception ex){
+        peer="Windows link probe failed: "+ex.getClass().getSimpleName();
+        ConnectionDiagnostics.failure(this,"worker_probe_failed",peer);
+      }
+      final String state=status,details=metric,phoneStatus=peer;
+      runOnUiThread(()->{
+        hostRefreshing=false;if(destroyed)return;
+        workerPhoneState=phoneStatus;
+        if(pcConnection!=null)pcConnection.setText(state);
+        if(hostHealth!=null)hostHealth.setText(details);
+        if(remoteConnection!=null)remoteConnection.setText(
+          state.startsWith("Online")?"Windows worker online":state);
+        updateConnectionIssue();
       });
     });
   }
@@ -1216,15 +1274,39 @@ public final class MainActivity extends Activity {
     }}
   private void beginCapture(){try{MediaProjectionManager p=(MediaProjectionManager)getSystemService(Context.MEDIA_PROJECTION_SERVICE);startActivityForResult(p.createScreenCaptureIntent(),CAPTURE_REQUEST);}catch(Exception e){toast("Screen capture not available");}}
   @Override protected void onActivityResult(int request,int code,Intent data){super.onActivityResult(request,code,data);
-    if(request==CAPTURE_REQUEST&&code==RESULT_OK&&data!=null){try{Intent i=new Intent(this,CaptureService.class);i.putExtra("result",code);i.putExtra("data",data);startForegroundService(i);handler.postDelayed(this::updateHealth,450);}catch(Exception e){toast("Screen share could not start");}}
+    if(request==CAPTURE_REQUEST){
+      if(code==RESULT_OK&&data!=null){
+        try{Intent i=new Intent(this,CaptureService.class);i.putExtra("result",code);
+          i.putExtra("data",data);startForegroundService(i);
+          handler.postDelayed(this::updateHealth,450);
+        }catch(Exception e){
+          ConnectionDiagnostics.failure(this,"capture_launch_failed",
+            "Android could not start screen sharing: "+e.getClass().getSimpleName());
+          toast("Screen share could not start");
+        }
+      }else{
+        ConnectionDiagnostics.failure(this,"capture_permission_denied",
+          "Screen sharing authorization was not granted by Android");
+      }
+      handler.postDelayed(this::updateConnectionIssue,500);
+    }
   }
   private void registerPhone(){
-    if(!AgentService.running){setPairingFeedback("Enable phone access to register this device");return;}
+    if(!AgentService.running){
+      ConnectionDiagnostics.failure(this,"agent_not_running","Android phone agent is not running");
+      setPairingFeedback("Enable phone access to register this device");updateConnectionIssue();return;
+    }
     io.execute(()->{
       String raw=prefs.getString("url","").replaceAll("/+$","");
-      if(raw.isEmpty()){runOnUiThread(()->toast("Windows is not paired"));return;}
+      if(raw.isEmpty()){
+        ConnectionDiagnostics.failure(this,"windows_not_paired","No saved Windows pairing");
+        runOnUiThread(()->{toast("Windows is not paired");updateConnectionIssue();});return;
+      }
       String ip=localIpForPeer(raw);
-      if(ip.equals("Unavailable")){runOnUiThread(()->toast("Phone has no private network route to Windows"));return;}
+      if(ip.equals("Unavailable")){
+        ConnectionDiagnostics.failure(this,"no_private_route","Phone has no private network route to Windows");
+        runOnUiThread(()->{toast("Phone has no private network route to Windows");updateConnectionIssue();});return;
+      }
       String bearer=prefs.getString("token","");
       for(int attempt=0;attempt<4;attempt++){
         HttpURLConnection conn=null;
@@ -1240,31 +1322,46 @@ public final class MainActivity extends Activity {
           try(OutputStream out=conn.getOutputStream()){out.write(body.toString().getBytes(StandardCharsets.UTF_8));}
           int status=conn.getResponseCode();
           if(status==200){
+            ConnectionDiagnostics.success(this);
             runOnUiThread(()->{
+              workerPhoneState="Phone registered; Windows reachability being verified";
               setPairingFeedback("Connected · Samsung is the controller and Windows is the worker");
+              updateConnectionIssue();
               toast("Phone registered with Windows");
               updateHealth();
             });return;
           }
           if(status!=502&&status!=503){
             final int failure=status;
+            ConnectionDiagnostics.failure(this,"registration_http_"+failure,
+              failure==401||failure==403?"Windows rejected saved phone registration authorization"
+                :"Windows registration returned HTTP "+failure);
             runOnUiThread(()->{
-              setPairingFeedback("Phone registration HTTP "+failure+" — retry using Repair connection");
+              workerPhoneState="Registration rejected: HTTP "+failure;
+              setPairingFeedback("Phone registration HTTP "+failure+" — use Force activate connection");
+              updateConnectionIssue();
               toast("Phone registration returned HTTP "+failure);
             });return;
           }
         }catch(Exception e){
           if(attempt==3){
             final String failure=e.getClass().getSimpleName();
+            ConnectionDiagnostics.failure(this,"registration_exception",
+              "Phone registration failed: "+failure);
             runOnUiThread(()->{
-              setPairingFeedback("Phone registration failed: "+failure+" — retry using Repair connection");
+              workerPhoneState="Registration failed: "+failure;
+              setPairingFeedback("Phone registration failed: "+failure+" — use Force activate connection");
+              updateConnectionIssue();
               toast("Phone registration failed: "+failure);
             });
           }
         }finally{if(conn!=null)conn.disconnect();}
         try{Thread.sleep(700);}catch(InterruptedException e){Thread.currentThread().interrupt();return;}
       }
-      runOnUiThread(()->toast("Phone agent is not reachable from Windows"));
+      ConnectionDiagnostics.failure(this,"registration_retry_exhausted",
+        "Windows could not confirm reaching the Android phone after registration attempts");
+      runOnUiThread(()->{workerPhoneState="Windows cannot reach phone after retries";
+        toast("Phone agent is not reachable from Windows");updateConnectionIssue();});
     });
   }
   /** Select the phone address Windows can actually reach, not an arbitrary VPN/cellular interface. */
