@@ -1,48 +1,33 @@
-# ASTERION CONTROL · Android-first remote control
+# Asterion Control — authoritative operator and recovery contract
 
-**Build:** v0.8.1 native Android beta + Windows companion. **Project scope:** [7* frozen master](7STAR_FROZEN_MASTER.md).
+**Current operating rule (2026-11-11): Android is the owner-facing head; the existing Windows worker executes commands. Preserve the working pairing, Windows process, Android permissions, signer, project sources, and installations.** This page overrides historical README addenda, release snapshots and superseded connection experiments. The frozen product scope is [7STAR_FROZEN_MASTER.md](7STAR_FROZEN_MASTER.md).
 
-Android is the primary user interface. Windows executes desktop jobs and supplies the remote screen, file, process and health APIs. Control contains **no AI**. Script execution, terminal and logcat are hidden internal tools for ChatGPT, not normal end-user navigation.
+## Connect ChatGPT without wasting time
 
-## Installable downloads
+1. **Direct authenticated Windows worker session is primary.** When an authorized direct Control session is genuinely callable, use the existing native WebSocket/Accessibility/MediaProjection state for fast, adaptive interactions. Keep the session open, use live frames where available and tap grounded Accessibility elements or coordinates. For a short deterministic navigation sequence, prefer the existing state-checked session/batch API. Avoid repeated connection discovery, per-tap status requests and screenshot polling. **Report end-to-end operator latency**, including time between observation and command creation, not merely device execution time.
+2. **Existing private GitHub worker relay is the immediate fallback.** If a direct callable worker control is not exposed in a particular conversation, do **not** conclude Asterion Control/Windows/phone is down, stop, or request installation/pairing. Send the command through [Azrazieliz/Asterion-Control-Bridge](https://github.com/Azrazieliz/Asterion-Control-Bridge) `main`: create `commands/active/<id>.json`, read matching `results/<id>.json`. That repository is only message transport; **the same Windows worker actually executes the action**. A completed `ok:true` receipt is required. The fallback is not equivalent to live viewed video.
+3. If neither route is callable, distinguish *conversation tool exposure* from *Windows service health* and *native phone reachability*. Never claim the service is broken without its own error evidence. Do not install another controller, rotate existing credentials or use Remote Desktop/ADB as a prerequisite.
 
-- **Android:** [Asterion-Control-v0.8.1-debug.apk](dist/Asterion-Control-v0.8.1-debug.apk) — native Samsung Android APK; compiled on the development PC. See [SHA-256](dist/SHA256SUMS-v0.8.1.txt).
-- **Windows:** [Asterion-Control-Windows-v0.8.1.zip](dist/Asterion-Control-Windows-v0.8.1.zip) — Windows API, service launcher, autostart installation and firewall setup.
-- **Evidence:** [PROGRESS.md](PROGRESS.md). Compilation and backend tests **do not** constitute independent remote-control acceptance.
+### Verified current evidence
 
-## Initial connection (no ADB)
+2026-11-11: An authenticated `phone_ui` command executed via the existing GitHub fallback returned `ok:true`, `status:complete`, Android foreground `com.openai.chatgpt`, Accessibility tree and worker `elapsed_ms:77`. This proves native phone UI reachability via the established worker **at that moment**, not that a directly callable ChatGPT tool or in-chat live video was exposed. The 77 ms is worker execution time **only**, not end-to-end navigation latency.
 
-1. On Windows, extract the Windows ZIP and run **INSTALL_ASTERION_CONTROL.bat**; approve the Windows private-network firewall dialog once. The Windows agent runs under your login and is configured to restart at next Windows login.
-2. On Android, install the APK (existing older debug-signed builds signed by the same Windows key should update normally), launch Control, and tap **Find my Windows computer**. Both devices must initially be on the same Wi-Fi or a trusted private VPN. If UDP discovery is blocked, Control scans its local subnet for the Control TCP endpoint; no IP entry is normally necessary.
-3. Enter the **8-digit one-time pairing code** shown by the Windows agent. The code expires after ten minutes. Control retains its device-specific key internally for reconnections. Never paste permanent access tokens into the UI.
-4. To enable independent Android control, use **Enable phone access** and grant Accessibility, notification, and MediaProjection screen-sharing permissions when Android requests them. Screen sharing is an ongoing approved session; the OS may require renewed approval after service restart.
-5. Open **Screen** to operate the Windows desktop. Health reports OS-exposed sensors. Advanced remote commands, logcat and saved scripts remain available only through authorized internal APIs.
+The existing Windows/Android system supports native phone input, UI observation, Android screen sharing with OS consent and a Windows-side authenticated WebSocket stream. The Windows real-time stream code still needs actual end-to-end stream/viewer acceptance. An HTTP/MCP tool response is not continuous real-time video.
 
-**The Android build does not require USB or ADB for runtime communication.** You cannot silently install an APK or approve sensitive Android permissions remotely until that device has an already authorized, working control channel. The app does not override Android's secure-window rules.
+## Recovery from the Android app
 
-## Host API and operational limits
+**Connect → Auto-repair connection** checks the saved link, restarts the Android agent if necessary, re-registers with Windows, and confirms that the Windows worker can read phone status before reporting success. An already healthy connection is preserved.
 
-The Windows agent exposes authenticated HTTP REST and MCP endpoints on TCP port 8911; LAN discovery uses UDP 8912 with TCP discovery fallback. These are for an authorized **private** network only. **Do not port-forward HTTP 8911 onto the public internet.** Use a VPN or a protected HTTPS tunnel for cross-network access. Persistent end-to-end internet relay and automatic VPN enrollment have not yet been implemented.
+**Connect → Force reinitialize · keep pairing** asks for confirmation, restarts only the Android phone listener and re-registers it. It preserves Windows pairing, credentials, files, and app settings. Android screen capture may require renewed OS consent. A successful service-start call alone is never reported as proof that the native link works.
 
-Native Android support: a foreground phone agent with token authorization, Accessibility-driven input/gesture dispatch, MediaProjection snapshots and continuous session capture, and device health.
+These controls are **implemented in Android source as of 2026-11-11**, but deployment status must be tracked separately: source change is not a compiled, installed, or phone-tested APK. The previously existing "Repair connection" lacked post-recovery verification.
 
-Native PC support: image/video frame delivery, UI input, file operations, process/command operations, parameterized saved scripts, and resource monitoring.
+## Service and security
 
-The Android app is the user-facing head; the Windows agent is a remote executor. No other Asterion application engine has been copied into Control.
+Windows API: authenticated private-network HTTP on TCP `8911`; UDP discovery `8912`; Android foreground phone agent listener `8973`. There is an MCP-only gateway on loopback `8995` for approved HTTPS tunnel connections. Direct ChatGPT access requires an actual authorized callable connector in the current conversation; mere deployment of an MCP endpoint does not supply that interface.
 
-## ChatGPT connection
+For real-time PC/phone interaction use the existing authenticated WebSocket `/api/v1/stream/{source}` and state-checked interaction-session APIs rather than a GitHub command per gesture **where the client can actually consume these APIs**. The direct endpoint remains the production priority; GitHub commands are contingency only. Use private LAN/encrypted VPN and existing bearer authorization, never unauthenticated public listeners or credentials in the repository. Android foreground, Accessibility and MediaProjection permissions remain user-controlled.
 
-Control exposes an MCP server and native-phone tools, but **an MCP endpoint does not automatically register a ChatGPT plugin**. The account/workspace must support creation of custom MCP connections, and a publicly reachable HTTPS or Secure MCP Tunnel endpoint must be authorized through ChatGPT Plugins. A local 192.168.x.x URL is not directly reachable by ChatGPT cloud tools.
+## Release and evidence discipline
 
-Current OpenAI documentation limits full custom MCP write access primarily to ChatGPT Business and Enterprise/Edu customers. On other plans, use the phone's own interface and a separately supported external workflow; **do not mistake the existing GitHub or Desktop Commander connector for a Control connection**.
-
-## Acceptance contract
-
-Only report **operational** when, with USB unplugged and Desktop Commander unavailable, the same authorized Control channel is demonstrated to:
-- view and send mouse/keyboard actions to the Windows desktop;
-- view and send accessibility gestures to the Samsung device;
-- retrieve PC/phone health and job status;
-- reconnect after Wi-Fi disruption; and
-- allow ChatGPT to invoke the Control API through an actually connected tool, not through a simulated test.
-
-**Currently:** Backend and Android compilation tests are verified; independent end-to-end device acceptance is still pending. See [PROGRESS.md](PROGRESS.md).
+Latest source state and actual installed build may differ. See [PROGRESS.md](PROGRESS.md) for dated verified receipts. [RELEASE_STATUS.md](RELEASE_STATUS.md) and [README_CONTROL_ADDENDUM.md](README_CONTROL_ADDENDUM.md) are historical records, **not connection instructions**. Never equate source implementation, compilation, app installation, device operation and direct ChatGPT tool availability.
