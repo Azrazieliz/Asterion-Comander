@@ -111,8 +111,23 @@ def main():
                         res.headers.get("content-type","").startswith("image/jpeg"),
                         "captured_bytes":len(res.content)})
     finally:
-        # Restore ChatGPT as owner requested even when Asterion UI fails.
-        try:open_from_launcher("ChatGPT","com.openai.chatgpt")
+        # Return directly from the VISIBLE Control Activity. This is the
+        # authorized native app-launch mechanism; app-drawer search is not
+        # reliable across Samsung pages and was the original failure.
+        try:
+            fg=ui().get("foreground_package","")
+            if fg=="com.asterion.control":
+                from asterion_remote.phone_bridge import request
+                launch=request("/apps/launch","POST",{"package":"com.openai.chatgpt"},timeout=6).json()
+                LOG.append({"chatgpt_launch_from_visible_control":launch})
+                if not launch.get("intent_dispatched"):
+                    raise RuntimeError("CHATGPT_INTENT_NOT_ACCEPTED")
+                wait_foreground("com.openai.chatgpt",7)
+                LOG.append({"chatgpt_return_verified":True})
+            elif fg=="com.openai.chatgpt":
+                LOG.append({"chatgpt_return_verified":True})
+            else:
+                LOG.append({"return_to_chatgpt_error":"Control not foreground; avoid blind app launch"})
         except Exception as e:LOG.append({"return_to_chatgpt_error":str(e)})
     after=ui().get("foreground_package","")
     output={"test":"chatgpt-control-chatgpt-real-ui","before":before,
