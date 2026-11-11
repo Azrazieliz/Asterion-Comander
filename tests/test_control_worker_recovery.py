@@ -199,3 +199,30 @@ def test_guarded_recovery_script_syntax_and_preservation_contract():
     assert "PHONE_UI_CONFIRMED" in source
     assert "adb kill-server" not in source
     assert "git reset --hard" not in source
+
+
+def test_dirty_receipt_and_untracked_command_are_preserved(tmp_path, monkeypatch):
+    import importlib.util
+    source = Path(__file__).resolve().parents[1] / "scripts" / "recover_control_git_transport.py"
+    spec = importlib.util.spec_from_file_location("control_recovery", source)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    worktree = tmp_path / "private-bridge"
+    active = worktree / "commands" / "active"
+    active.mkdir(parents=True)
+    command = active / "core-20261111-1454-apk-log-job-32.json"
+    command.write_text(json.dumps({
+        "id": command.stem, "op": "pc_job_status", "params": {"job_id": "example"}
+    }), encoding="utf8")
+    backup_dir = tmp_path / "backup"
+    backup_dir.mkdir()
+    monkeypatch.setattr(module, "git", lambda *a:
+                        " M results/core-20261111-1450-assembly-tail-31.json\\n"
+                        "?? commands/active/core-20261111-1454-apk-log-job-32.json")
+    module.ensure_clean_enough(worktree, backup_dir)
+    held = backup_dir / "held-unsubmitted-local-commands" / command.name
+    assert held.exists()
+    assert not command.exists()
+    assert json.loads(held.read_text(encoding="utf8"))["id"] == command.stem
+
+
