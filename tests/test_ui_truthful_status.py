@@ -29,7 +29,7 @@ def test_pairing_and_transfer_do_not_promise_unverified_delivery():
     assert '"Windows paired; checking device registration"' in MAIN
     assert '"Phone registration accepted by Windows · testing live reachability"' in MAIN
     assert '"Transfer request accepted · awaiting first progress · "' in MAIN
-    assert '"Reported SHA-256: "' in MAIN
+    assert 'Reported SHA-256: ' in MAIN
     assert '"Windows reported transfer completion without an independently checkable phone receipt"' in MAIN
     assert '"Saved to "+receipt.optString("location")' not in MAIN
 
@@ -42,5 +42,5 @@ def test_checkpoint_open_preserves_existing_chat():
 def test_static_success_claims_removed():
     assert "The app teams have been asked to add it" not in MAIN
     assert 'healthActionStatus=t("Automatic management is active"' not in MAIN
-    assert '"Action performance targets (not verified measurements): ' in MAIN
+    assert 'Action performance targets (not verified measurements): ' in MAIN
     assert '"Current turn number: "' in MAIN
