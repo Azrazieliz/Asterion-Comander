@@ -55,7 +55,10 @@ public final class CaptureService extends Service {
       MediaProjectionManager manager=(MediaProjectionManager)getSystemService(Context.MEDIA_PROJECTION_SERVICE);
       projection=manager.getMediaProjection(intent.getIntExtra("result",0),result);
       if(projection==null)throw new IllegalStateException("Permission denied");
-      projection.registerCallback(new MediaProjection.Callback(){@Override public void onStop(){stopCapture();stopSelf();}},new Handler(getMainLooper()));
+      projection.registerCallback(new MediaProjection.Callback(){@Override public void onStop(){
+        if(active)ConnectionDiagnostics.failure(CaptureService.this,"capture_revoked",
+          "Android ended screen sharing; new MediaProjection approval is required");
+        stopCapture();stopSelf();}},new Handler(getMainLooper()));
       DisplayMetrics metrics=new DisplayMetrics();((WindowManager)getSystemService(WINDOW_SERVICE)).getDefaultDisplay().getRealMetrics(metrics);
       int nativeW=metrics.widthPixels,nativeH=metrics.heightPixels;
       width=Math.max(360,Math.min(900,nativeW));height=(int)Math.max(1,Math.round((double)nativeH*width/nativeW));
@@ -86,7 +89,9 @@ public final class CaptureService extends Service {
       display=projection.createVirtualDisplay("AsterionScreen",width,height,metrics.densityDpi,
         DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,reader.getSurface(),null,new Handler(thread.getLooper()));
       active=true;
-    }catch(Exception e){android.util.Log.e("AsterionCapture","Capture failed",e);stopCapture();stopSelf();}
+    }catch(Exception e){
+      ConnectionDiagnostics.failure(this,"capture_failed","Screen capture failed: "+e.getClass().getSimpleName());
+      android.util.Log.e("AsterionCapture","Capture failed",e);stopCapture();stopSelf();}
     return START_NOT_STICKY;
   }
   private void stopCapture(){active=false;latest=null;latestAtMs=0L;try{if(display!=null)display.release();}catch(Exception ignored){}display=null;
