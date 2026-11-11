@@ -108,14 +108,28 @@ async def main():
                 return (abs(xy[0]-expect[0])<=3 and abs(xy[1]-expect[1])<=3,
                         "cursor_expected" if abs(xy[0]-expect[0])<=3 and abs(xy[1]-expect[1])<=3 else "cursor_not_at_target")
             async def read_phone(phase):
-                obj=(await client.get("/api/v1/phone/ui")).json()
-                fg=obj.get("foreground_package","")
-                if phase=="home":return ("launcher" in fg,fg)
-                if phase=="notifications":
-                    root=obj.get("root",{})
-                    v=json.dumps(root,ensure_ascii=False).lower()
-                    return ("systemui" in fg or "notification" in v or "notifications" in v,fg)
-                return (bool(fg),fg)
+                # Accessibility state can lag an acknowledged Android global
+                # gesture by a few hundred milliseconds. A single immediate
+                # GET is NOT a reliable outcome check. Poll <=1.2s.
+                until=time.perf_counter()+1.2
+                last=""
+                while True:
+                    obj=(await client.get("/api/v1/phone/ui")).json()
+                    fg=obj.get("foreground_package","")
+                    last=fg
+                    if phase=="home":
+                        valid="launcher" in fg
+                    elif phase=="notifications":
+                        root=obj.get("root",{})
+                        v=json.dumps(root,ensure_ascii=False).lower()
+                        valid="systemui" in fg or "notification" in v
+                    elif phase=="back":
+                        valid="launcher" in fg
+                    else:
+                        valid=bool(fg)
+                    if valid or time.perf_counter()>=until:
+                        return (valid,last)
+                    await asyncio.sleep(0.06)
             # Both native video WebSocket connections stay open through all actions.
             try:
                 await issue("pc",pc,"mouse_move_small",
