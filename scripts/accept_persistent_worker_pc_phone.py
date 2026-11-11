@@ -111,10 +111,10 @@ async def main():
                 obj=(await client.get("/api/v1/phone/ui")).json()
                 fg=obj.get("foreground_package","")
                 if phase=="home":return ("launcher" in fg,fg)
-                if phase=="recents":
+                if phase=="notifications":
                     root=obj.get("root",{})
                     v=json.dumps(root,ensure_ascii=False).lower()
-                    return ("systemui" in fg or "recents" in v or "recent apps" in v,fg)
+                    return ("systemui" in fg or "notification" in v or "notifications" in v,fg)
                 return (bool(fg),fg)
             # Both native video WebSocket connections stay open through all actions.
             try:
@@ -126,8 +126,8 @@ async def main():
                 await issue("pc",pc,"mouse_restore",
                     {"action":"move","monitor":selected["index"],"x":x,"y":y},
                     lambda:read_pc((selected["left"]+x,selected["top"]+y)))
-                await issue("phone",phone,"recents",
-                    {"action":"recents"},lambda:read_phone("recents"))
+                await issue("phone",phone,"notifications",
+                    {"action":"notifications"},lambda:read_phone("notifications"))
                 await issue("pc",pc,"mouse_move_again",
                     {"action":"move","monitor":selected["index"],"x":newx,"y":newy},
                     lambda:read_pc((selected["left"]+newx,selected["top"]+newy)))
