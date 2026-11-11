@@ -1,5 +1,6 @@
 """Read-only phone telemetry and explicit input proxy over private network/VPN."""
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
 from fastapi.responses import Response
 from .security import require_token
 from .phone_bridge import PairPhone, PhoneInput, register, request, load
