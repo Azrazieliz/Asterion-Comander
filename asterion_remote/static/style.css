@@ -24,3 +24,5 @@ body.embedded #toast{bottom:12px;left:12px;right:12px;max-width:none;font-size:1
 .status-details{margin-top:11px;white-space:pre-line;padding:11px 13px;border:1px solid #343f5b;background:#0f1829;border-radius:12px;font-size:12px;color:#ced8ee;line-height:1.55}
 .status-details[hidden]{display:none!important}
 @media(max-width:700px){body.embedded .app{padding:6px 8px 12px}body.embedded .phone-viewer{height:55vh;min-height:290px}body.embedded .viewer{height:49vh;min-height:235px}body.embedded .rowtools button{font-size:12px}body.embedded .inputrow{flex-wrap:nowrap}body.embedded .inputrow input{min-width:0}}
+
+body.embedded #desktop-shot,body.embedded #refresh-devices{display:none!important}
