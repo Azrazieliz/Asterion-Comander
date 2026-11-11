@@ -935,13 +935,13 @@ public final class MainActivity extends Activity {
           }
         }finally{c.disconnect();}
         if(status.startsWith("Online")){
-          HttpURLConnection c=(HttpURLConnection)new URL(url+"/api/v1/phone").openConnection();
+          HttpURLConnection phoneConn=(HttpURLConnection)new URL(url+"/api/v1/phone").openConnection();
           try{
-            c.setConnectTimeout(2800);c.setReadTimeout(4500);
-            c.setRequestProperty("Authorization","Bearer "+token);
-            int code=c.getResponseCode();
+            phoneConn.setConnectTimeout(2800);phoneConn.setReadTimeout(4500);
+            phoneConn.setRequestProperty("Authorization","Bearer "+token);
+            int code=phoneConn.getResponseCode();
             if(code==200){
-              JSONObject p=new JSONObject(new String(c.getInputStream().readNBytes(16384),StandardCharsets.UTF_8));
+              JSONObject p=new JSONObject(new String(phoneConn.getInputStream().readNBytes(16384),StandardCharsets.UTF_8));
               if(p.optBoolean("reachable")){
                 peer="Windows verified native phone agent reachable";
                 ConnectionDiagnostics.success(this);
@@ -954,7 +954,7 @@ public final class MainActivity extends Activity {
               peer="Windows-to-phone status returned HTTP "+code;
               ConnectionDiagnostics.failure(this,"worker_probe_http_"+code,peer);
             }
-          }finally{c.disconnect();}
+          }finally{phoneConn.disconnect();}
         }
       }catch(Exception ex){
         peer="Windows link probe failed: "+ex.getClass().getSimpleName();
