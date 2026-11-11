@@ -43,4 +43,4 @@ def test_static_success_claims_removed():
     assert "The app teams have been asked to add it" not in MAIN
     assert 'healthActionStatus=t("Automatic management is active"' not in MAIN
     assert 'Action performance targets (not verified measurements): ' in MAIN
-    assert '"Current turn number: "' in MAIN
+    assert 'Current turn number: ' in MAIN
