@@ -1,3 +1,13 @@
+# 2026-11-11 — Native persistent PC/Android switching and Windows console repair
+
+- **Installed and executed on the actual Windows worker:** the minute watchdog scheduled task `Asterion Control Self-Healing Worker` now runs `wscript.exe //B //Nologo D:\\AsterionControlRelease\\scripts\\control_watchdog_hidden.vbs` rather than opening `powershell.exe` directly. Scheduler reported last result **0**. Existing credentials, watchdog health checks, Android pairing and service were preserved.
+- **Live worker command-launch fix:** patched all four subprocess call sites to use Windows `CREATE_NO_WINDOW` on the existing production worker with a pre-change backup. Source equivalent committed as `asterion_remote/app.py` on `work/control-0927-overnight-cycles-20261111`. Safe idle restart completed; worker and phone immediately recovered.
+- **Actual window test:** newly spawned Windows worker command returned `{"visible_console":false,"has_console":false}`. This confirms that new Control commands do not allocate a visible PowerShell console. It cannot rule out unrelated third-party console launches.
+- **Persistent multi-device real-action acceptance:** owner-authenticated existing Windows worker maintained **two concurrent live WebSockets** for Windows desktop and Samsung. Actions alternated PC mouse move → Android Home → PC restore → Android notifications shade → PC mouse move → Android Back. Both live streams produced frames; **6/6 native actions were acknowledged AND visually/Accessibility/Win32-state verified**, and the pointer was restored. First clean test median command-to-verification **140.4 ms** (slowest 624.8 ms). Post-restart test **6/6**, median **202.0 ms**, slowest **818.7 ms**. Under 1 second per action *inside the worker* in that test. Test source `scripts/accept_persistent_worker_pc_phone.py` on the above branch.
+- **Not proven:** ChatGPT's own decision time or ChatGPT→worker link on this chat. A working persistent Windows→PC/Android native connection is not itself proof of the user-required **sub-10-second complete ChatGPT decision/transport/execute/verify cycle**, or **~1-second simple complete interaction**. This session used the GitHub relay as the available ChatGPT→worker fallback. No unattended development cycle was started. Abridged-turn cycle testing is the next owner-requested stage.
+
+---
+
 # 2026-11-11 — v0.9.28 release of 20-message conversation rollover
 
 - Corrected continuous-cycle controller published in owner-signed v0.9.28 from source `6513771`; APK SHA-256 `c74daa7a31323edea1cf780163d23db39ed764ac9586df060563fdb28534f90a`.
