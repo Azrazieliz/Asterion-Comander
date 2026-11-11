@@ -17,6 +17,8 @@ import java.nio.charset.StandardCharsets;
  * Durable stable IDs and ledger history prevent replay on Android restarts.
  */
 final class ContinuationCycle {
+  // Conversation rollover is independent of the unlimited development cycle.
+  private static final int CHAT_ROLLOVER_TURNS=20;
   private static volatile ContinuationCycle singleton;
   private final AtomicFile disk;
   private final ContinuationLedger ledger;
@@ -48,7 +50,10 @@ final class ContinuationCycle {
       .put("target_turn_minutes",30)
       .put("minimum_substantial_turn_minutes",25)
       .put("per_action_deadline_ms",10000)
-      .put("simple_action_target_ms",1000);
+      .put("simple_action_target_ms",1000)
+      .put("chat_rollover_turns",CHAT_ROLLOVER_TURNS)
+      .put("turns_in_chat",state.optInt("turns_in_chat",0))
+      .put("rollover_count",state.optInt("rollover_count",0));
   }
   synchronized JSONObject start(JSONObject input)throws Exception {
     if(!ledger.status().optBoolean("enabled",false))
@@ -93,6 +98,8 @@ final class ContinuationCycle {
       .put("target_turn_minutes",30).put("minimum_substantial_turn_minutes",25)
       .put("per_action_deadline_ms",10000).put("simple_action_target_ms",1000)
       .put("overnight_unbounded",maximum==0)
+      .put("turns_in_chat",0).put("rollover_count",0)
+      .put("chat_rollover_turns",CHAT_ROLLOVER_TURNS)
       .put("last_error","").put("started_at_ms",System.currentTimeMillis());
     save();
     return status();
@@ -242,6 +249,7 @@ final class ContinuationCycle {
           save();return status();
         }
         state.put("ack_count",state.optInt("ack_count",0)+1)
+          .put("turns_in_chat",state.optInt("turns_in_chat",0)+1)
           .put("index",index+1).put("state","ready")
           .put("last_acknowledged",expected)
           .put("response_completed_work",false)
@@ -340,27 +348,54 @@ final class ContinuationCycle {
       return status();
     }
     if("awaiting_new_chat".equals(phase)) {
-      // Request navigation once only. The external operator must verify the
-      // new conversation, because an Accessibility click is not proof.
-      if(!state.optBoolean("new_chat_requested",false)){
-        ControlAccessibilityService view=ControlAccessibilityService.active;
-        if(view!=null&&"com.openai.chatgpt".equals(view.currentPackage())){
-          JSONObject nav=view.requestNewChat();
-          if(nav.optBoolean("requested",false)){
-            state.put("new_chat_requested",true);
-            save();
-          }
+      // The full development cycle never stops at this boundary. Navigate
+      // exactly once, then verify an actual EMPTY new-chat landing screen.
+      // Never treat a mere click or an empty old-chat composer as proof.
+      ControlAccessibilityService view=ControlAccessibilityService.active;
+      if(view==null)return status();
+      if(!"com.openai.chatgpt".equals(view.currentPackage())){
+        long now=System.currentTimeMillis();
+        if(now-state.optLong("last_foreground_request_ms",0L)>12000L){
+          JSONObject launch=view.requestChatForeground();
+          state.put("last_foreground_request_ms",now)
+            .put("last_foreground_request",launch.optString("reason","requested"));
+          save();
         }
+        return status();
+      }
+      if(!state.optBoolean("new_chat_requested",false)){
+        JSONObject nav=view.requestNewChat();
+        if(nav.optBoolean("requested",false)){
+          state.put("new_chat_requested",true)
+            .put("new_chat_request_ms",System.currentTimeMillis());
+          save();
+        }else{
+          state.put("last_error",nav.optString("reason","New chat control not ready"));
+          save();
+        }
+        return status();
+      }
+      JSONObject verified=view.verifyNewChatLanding(state.optString("last_acknowledged",""));
+      if(verified.optBoolean("verified",false)){
+        // Safe to continue without waking the owner: the *visible* ChatGPT UI
+        // proves this is a fresh chat, not merely a navigation acknowledgment.
+        confirmNewChat("native-new-chat-verified-"+state.optInt("index",1));
+      }else if(!verified.optString("reason","").isEmpty()){
+        state.put("last_error",verified.optString("reason"));
+        save();
       }
       return status();
     }
     if(!"ready".equals(phase))return status();
-    // A verified new chat is required only ONCE when a cycle begins with
-    // conversation="new". Do not request a new chat every iteration.
-    if("new".equals(state.optString("conversation")) &&
-       state.optInt("new_chat_verified_index",0)==0) {
+    // At the 20th confirmed turn boundary, roll into a new ChatGPT
+    // conversation with canonical handoff; NEVER end the overall cycle.
+    boolean initialNew="new".equals(state.optString("conversation")) &&
+       state.optInt("new_chat_verified_index",0)==0;
+    boolean rollover=state.optInt("turns_in_chat",0)>=CHAT_ROLLOVER_TURNS;
+    if(initialNew||rollover){
       state.put("state","awaiting_new_chat").put("new_chat_requested",false)
-        .put("last_error","Wait for external operator to verify New chat navigation");
+        .put("rollover_pending",rollover)
+        .put("last_error","Waiting for verified ChatGPT new-chat landing before continuing");
       save();return status();
     }
     String checkpointId=state.getString("cycle_id")+"-"+index;
@@ -370,7 +405,22 @@ final class ContinuationCycle {
       "\nThe owner answered your previous spoken question via Asterion Control."+
       "\nYour question: "+previousQuestion+
       "\nOwner's speech-to-text answer: "+spokenInput);
+    String rolloverContext=state.optBoolean("new_conversation_handoff",false)?(
+      "\\nCONVERSATION ROLLOVER: this is a VERIFIED fresh ChatGPT conversation. "+
+      "The overall development cycle has NOT restarted. The last verified "+
+      "checkpoint is "+state.optString("last_acknowledged","unknown")+". "+
+      "FIRST read the canonical project repository, progress report, recorded "+
+      "handoff and committed decisions. Continue from exact existing work; "+
+      "do not recreate systems, discard historical requirements, or claim "+
+      "new work until source/test receipts prove it. This reply MUST be "+
+      "another substantial development turn. "):"";
+    String closingHandoff=state.optInt("turns_in_chat",0)==CHAT_ROLLOVER_TURNS-1?(
+      "\\nBEFORE ACK: the next message will roll into a new ChatGPT conversation. "+
+      "Update the canonical repository progress/handoff with exact branch, "+
+      "latest commit, completed and incomplete work, test/build status, "+
+      "outstanding defects and the next substantial tasks. No empty handoff. "):"";
     String instructions=state.getString("instruction")+voiceContext+
+      rolloverContext+closingHandoff+
       "\nCycle: "+index+". Continue from the same canonical specification and "+
       "the latest verified project progress. Carry out approximately 30 minutes "+
       "of substantial project implementation/testing per ChatGPT turn; turns "+
@@ -409,7 +459,7 @@ final class ContinuationCycle {
     save();
     try {
       ledger.queue(body);
-      state.put("state","queued");
+      state.put("state","queued").put("new_conversation_handoff",false);
       // Only clear an acknowledged voice answer after its next prompt was
       // durably queued. A failed queue operation preserves the user's answer.
       state.remove("voice_answer");state.remove("voice_question");
@@ -436,8 +486,19 @@ final class ContinuationCycle {
       throw new IllegalArgumentException("Observed new-chat verification required");
     if(!state.optBoolean("new_chat_requested",false))
       throw new IllegalStateException("New chat control has not been requested yet");
+    // A caller-provided string alone cannot authorize an automatic rollover.
+    ControlAccessibilityService observer=ControlAccessibilityService.active;
+    JSONObject proof=observer==null?new JSONObject():
+      observer.verifyNewChatLanding(state.optString("last_acknowledged",""));
+    if(!proof.optBoolean("verified",false))
+      throw new IllegalStateException("A fresh ChatGPT conversation is not independently verified");
+    boolean rollover=state.optBoolean("rollover_pending",false);
     state.put("new_chat_verified_index",state.optInt("index",1))
-      .put("new_chat_receipt",verification).put("state","ready")
+      .put("new_chat_receipt",verification)
+      .put("state","ready").put("turns_in_chat",0)
+      .put("rollover_count",state.optInt("rollover_count",0)+(rollover?1:0))
+      .put("new_conversation_handoff",true)
+      .put("rollover_pending",false)
       .put("last_error","");
     save();return status();
   }
