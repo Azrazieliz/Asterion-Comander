@@ -58,9 +58,9 @@ final class ContinuationCycle {
     String conversation=input.optString("conversation","same");
     String voiceLocale=input.optString("voice_locale","en-US");
     int maximum=input.optInt("max_cycles",0);
-    // A bounded cycle cannot silently run forever. Zero selects the safe default.
-    int allowedTurns="new".equals(conversation)?20:10;
-    if(maximum==0)maximum=allowedTurns;
+    // Owner-defined cycle is continuous. Zero means no artificial turn cap.
+    // Each turn still requires a verified assistant reply before the next submission.
+    // An explicit positive cap is an optional user choice, never an app default.
     if(!id.matches("[A-Za-z][A-Za-z0-9_.-]{2,65}")||
        !project.matches("[A-Za-z0-9_.-]{3,70}")||
        spec.length()<3||spec.length()>250||
@@ -68,7 +68,7 @@ final class ContinuationCycle {
        !(tier.equals("5*")||tier.equals("6*")||tier.equals("7*"))||
        !("same".equals(conversation)||"new".equals(conversation))||
        !voiceLocale.matches("[a-z]{2}(-[A-Z]{2})?")||
-       maximum<1||maximum>allowedTurns)
+       maximum<0||maximum>1000000)
       throw new IllegalArgumentException("Invalid canonical Control cycle parameters");
     if(id.equals(state.optString("cycle_id","")))
       throw new IllegalStateException("Reusing a prior cycle ID could replay checkpoint history");
