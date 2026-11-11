@@ -1114,7 +1114,7 @@ public final class MainActivity extends Activity {
         +"\nOvernight/unbounded: "+cycle.optBoolean("overnight_unbounded",true)
         +"\nSubstantial work target: ~30 minutes per turn (25-minute minimum quality warning)"
         +"\nEvery individual action: <10 seconds end-to-end; trivial navigation ~1 second"
-        +"\nConversation: "+cycle.optInt("turns_in_chat",0)+"/"+cycle.optInt("chat_rollover_turns",20)+" verified turns"
+        +"\nCurrent chat: "+cycle.optInt("messages_in_chat",0)+"/"+cycle.optInt("chat_rollover_messages",20)+" messages"
         +"\nAutomatic rollover count: "+cycle.optInt("rollover_count",0)
         +"\nContinuation enabled: "+ledger.optBoolean("enabled",false)
         +"\nCheckpoint: "+ledger.optString("state","idle")
