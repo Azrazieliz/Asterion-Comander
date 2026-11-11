@@ -3,6 +3,7 @@ import json
 import time
 from fastapi.testclient import TestClient
 from asterion_remote.app import app
+from asterion_remote.security import configured_token
 from asterion_remote import recovery
 
 AUTH = {"Authorization": "Bearer test-asterion-token-abcdefghijklmnopqrstuvwxyz"}
