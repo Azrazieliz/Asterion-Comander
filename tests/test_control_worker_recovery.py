@@ -226,3 +226,22 @@ def test_dirty_receipt_and_untracked_command_are_preserved(tmp_path, monkeypatch
     assert json.loads(held.read_text(encoding="utf8"))["id"] == command.stem
 
 
+
+
+def test_execute_preserves_git_porcelain_status_prefix(monkeypatch):
+    import importlib.util
+    import subprocess
+    from pathlib import Path
+
+    script = Path(__file__).resolve().parents[1] / "scripts" / "recover_control_git_transport.py"
+    spec = importlib.util.spec_from_file_location("control_recovery_git_status", script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    class Result:
+        returncode = 0
+        stdout = " M results/core-20261111-1450-assembly-tail-31.json\\n?? commands/active/example.json\\n"
+        stderr = ""
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: Result())
+    result = module.execute(["git", "status"])
+    assert result.startswith(" M results/")
+    assert result.splitlines()[1].startswith("?? commands/")
