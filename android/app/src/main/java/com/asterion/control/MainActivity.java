@@ -400,30 +400,30 @@ public final class MainActivity extends Activity {
         phase=result.optString("phase","running");
         JSONObject steps=result.optJSONObject("steps");
         detail="Windows: "+(steps==null?"unchecked":steps.optString("windows_worker","checking"))+
-          "\\nPhone: "+(steps==null?"unchecked":steps.optString("phone_listener","checking"))+
-          "\\nDirect WebSocket: "+(steps==null?"unchecked":steps.optString("native_websocket","checking"))+
-          "\\nInput: "+(steps==null?"unchecked":steps.optString("accessibility","checking"))+
-          "\\nVideo: "+(steps==null?"unchecked":steps.optString("live_video","checking"));
+          "\nPhone: "+(steps==null?"unchecked":steps.optString("phone_listener","checking"))+
+          "\nDirect WebSocket: "+(steps==null?"unchecked":steps.optString("native_websocket","checking"))+
+          "\nInput: "+(steps==null?"unchecked":steps.optString("accessibility","checking"))+
+          "\nVideo: "+(steps==null?"unchecked":steps.optString("live_video","checking"));
         if(result.has("error")&&!result.optString("error").isEmpty())
-          detail+="\\n"+result.optString("error","");
+          detail+="\n"+result.optString("error","");
       }catch(Exception e){detail="Windows recovery receipt unavailable: "+e.getClass().getSimpleName();}
       final String state=phase,summary=detail;
       runOnUiThread(()->{
         if(destroyed||!fullRepairInProgress||!ticket.equals(fullRepairTicket))return;
         if("verified".equals(state)){
           fullRepairInProgress=false;
-          setPairingFeedback("FULL PATH VERIFIED\\n"+summary);
+          setPairingFeedback("FULL PATH VERIFIED\n"+summary);
           ConnectionDiagnostics.success(this);checkHost();updateConnectionIssue();
         }else if("permission_required".equals(state)){
           fullRepairInProgress=false;
-          setPairingFeedback("Direct Windows/phone link recovered. Android consent required.\\n"+summary);
+          setPairingFeedback("Direct Windows/phone link recovered. Android consent required.\n"+summary);
           if(!CaptureService.active)beginCapture();
         }else if("partial".equals(state)||"failed".equals(state)||"stale".equals(state)||attempt>=45){
           fullRepairInProgress=false;
-          setPairingFeedback("Full repair NOT verified. Pairing preserved.\\n"+summary);
+          setPairingFeedback("Full repair NOT verified. Pairing preserved.\n"+summary);
           updateConnectionIssue();
         }else{
-          setPairingFeedback("Recovering entire native connection ("+(attempt+1)+"/46)\\n"+summary);
+          setPairingFeedback("Recovering entire native connection ("+(attempt+1)+"/46)\n"+summary);
           handler.postDelayed(()->pollFullRepair(ticket,attempt+1,force),2000);
         }
       });
@@ -1107,21 +1107,21 @@ public final class MainActivity extends Activity {
     try{
       JSONObject ledger=ContinuationLedger.get(this).status();
       JSONObject cycle=ContinuationCycle.get(this).status();
-      String explanation="ONE DEVELOPMENT CYCLE = 1 verified ChatGPT work iteration.\\n\\n"+
-        "1. ChatGPT performs the actual project work and records evidence.\\n"+
-        "2. Control submits the next normal message in the REAL ChatGPT composer, only after the previous reply was observed complete.\\n"+
-        "3. The next reply is checked before continuing; a tap/queue receipt is NOT a completed cycle.\\n"+
-        "4. If a draft exists, Send is uncertain, the UI changed, or permissions are missing, Control pauses for review rather than duplicating the message.\\n"+
-        "5. Stop blocks future cycles but cannot retract an already submitted ChatGPT message.\\n\\n"+
-        "Conversation safety: at most 10 additional turns in an existing chat, or 20 in a newly opened chat. Rollover requires a verified canonical handoff.\\n\\n"+
-        "No AI model or independent ChatGPT session runs inside Control. ChatGPT must remain the actual external operator.\\n\\n"+
+      String explanation="ONE DEVELOPMENT CYCLE = 1 verified ChatGPT work iteration.\n\n"+
+        "1. ChatGPT performs the actual project work and records evidence.\n"+
+        "2. Control submits the next normal message in the REAL ChatGPT composer, only after the previous reply was observed complete.\n"+
+        "3. The next reply is checked before continuing; a tap/queue receipt is NOT a completed cycle.\n"+
+        "4. If a draft exists, Send is uncertain, the UI changed, or permissions are missing, Control pauses for review rather than duplicating the message.\n"+
+        "5. Stop blocks future cycles but cannot retract an already submitted ChatGPT message.\n\n"+
+        "Conversation safety: at most 10 additional turns in an existing chat, or 20 in a newly opened chat. Rollover requires a verified canonical handoff.\n\n"+
+        "No AI model or independent ChatGPT session runs inside Control. ChatGPT must remain the actual external operator.\n\n"+
         "Cycle: "+cycle.optString("state","idle")+
         " | active: "+cycle.optBoolean("active",false)+
         " | iteration: "+cycle.optInt("index",0)+
         " | verified replies: "+cycle.optInt("ack_count",0)+
-        "\\nContinuation owner-enabled: "+ledger.optBoolean("enabled",false)+
-        "\\nCheckpoint: "+ledger.optString("state","idle")+
-        "\\nLast error: "+cycle.optString("last_error","none");
+        "\nContinuation owner-enabled: "+ledger.optBoolean("enabled",false)+
+        "\nCheckpoint: "+ledger.optString("state","idle")+
+        "\nLast error: "+cycle.optString("last_error","none");
       new AlertDialog.Builder(this).setTitle("How Asterion Control cycles work")
         .setMessage(explanation).setPositiveButton("Close",null).show();
     }catch(Exception e){toast("Cycle status unavailable: "+e.getClass().getSimpleName());}
