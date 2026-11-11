@@ -79,7 +79,8 @@ def api_error(e: Exception, feature: str) -> HTTPException:
 
 def run_external(args: list[str], timeout: int = 20, raw: bool = False):
     try:
-        cp = subprocess.run(args, capture_output=True, timeout=timeout, check=False)
+        cp = subprocess.run(args, capture_output=True, timeout=timeout, check=False,
+                            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
     except (FileNotFoundError, subprocess.TimeoutExpired, PermissionError) as exc:
         raise HTTPException(503, detail=f'Tool unavailable or timed out: {type(exc).__name__}') from exc
     if cp.returncode:
@@ -348,7 +349,8 @@ def launch_command(data: CommandRequest):
         with logfile.open('wb') as out:
             proc = subprocess.Popen(data.command, shell=True, cwd=cwd, stdout=out,
                                     stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                                    start_new_session=os.name != 'nt')
+                                    start_new_session=os.name != 'nt',
+                                    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         COMMANDS[jobid] = {'proc': proc, 'log': logfile, 'started': time.time()}
     return {'id': jobid, 'pid': proc.pid, 'status': 'running'}
 
@@ -383,7 +385,9 @@ def stop_command(jobid: str):
         raise HTTPException(404, 'Unknown job')
     if row['proc'].poll() is None:
         if os.name == 'nt':
-            subprocess.run(['taskkill', '/PID', str(row['proc'].pid), '/T', '/F'], capture_output=True, timeout=10)
+            subprocess.run(['taskkill', '/PID', str(row['proc'].pid), '/T', '/F'],
+                           capture_output=True, timeout=10,
+                           creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         else:
             import signal
             os.killpg(row['proc'].pid, signal.SIGTERM)
@@ -440,7 +444,8 @@ def _launch_argv(argv: list[str], cwd: Path) -> dict:
         with logfile.open('wb') as out:
             proc = subprocess.Popen(argv, shell=False, cwd=cwd, stdout=out,
                                     stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                                    start_new_session=os.name != 'nt')
+                                    start_new_session=os.name != 'nt',
+                                    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         COMMANDS[jobid] = {'proc': proc, 'log': logfile, 'started': time.time(), 'argv': argv}
     return {'id': jobid, 'pid': proc.pid, 'status': 'running'}
 
