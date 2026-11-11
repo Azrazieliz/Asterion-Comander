@@ -89,7 +89,7 @@ public final class MainActivity extends Activity {
   private final LinearLayout[] tabButtons=new LinearLayout[4];
   private final DesignSystem.Icon[] tabIcons=new DesignSystem.Icon[4];
   private final TextView[] tabLabels=new TextView[4];
-  private TextView headerStatus,pcConnection,homeAgent,homeBattery,homeMemory,homeThermal;
+  private TextView headerStatus,pcConnection,homeAgent,homeBattery,homeMemory,homeThermal,homeConnectionIssue,connectionIssue;
   private TextView healthBattery,healthTemp,healthMemory,healthStorage,healthThermal,healthWifi,healthActionStatus,pcPerformanceActionStatus;
   private TextView remoteConnection,remotePlaceholder,agentConnection,captureConnection,accessConnection,phoneAddress,hostHealth,pairingFeedback,transferFeedback,updateFeedback,phoneBridgeFeedback;
   private String activeTransferId=null;
@@ -103,6 +103,7 @@ public final class MainActivity extends Activity {
   private TextView privacyStatus;
   private int currentTab=0;
   private boolean webStarted=false,hostRefreshing=false;
+  private String workerPhoneState="Windows-to-phone connection not checked yet";
   private long lastHostRefresh=0;
   private boolean destroyed=false;
   private boolean runVoiceTestAfterPermission=false;
@@ -209,6 +210,9 @@ public final class MainActivity extends Activity {
     margin(phoneCopy,t(Build.MODEL,15,DesignSystem.TEXT,true),6);
     homeAgent=t("Remote access is off",12,DesignSystem.MUTED,false);margin(phoneCopy,homeAgent,6);
     phoneR.addView(phoneCopy,new LinearLayout.LayoutParams(0,-2,1));phoneR.addView(icon("arrow",DesignSystem.MUTED,19));wide(phone,phoneR);wide(homeBody,phone);
+    gap(homeBody,10);button(homeBody,"Force activate connection","refresh",true,this::forceActivateConnection);
+    homeConnectionIssue=t("Checking native connection…",12,DesignSystem.MUTED,false);
+    homeConnectionIssue.setMaxLines(6);margin(homeBody,homeConnectionIssue,8);
     gap(homeBody,26);LinearLayout healthTitle=h();healthTitle.addView(eyebrow("PHONE HEALTH"),new LinearLayout.LayoutParams(0,-2,1));
     TextView details=t("VIEW ALL  ›",11,DesignSystem.PURPLE,true);details.setOnClickListener(w->show(2));healthTitle.addView(details);wide(homeBody,healthTitle);gap(homeBody,11);
     LinearLayout metrics=h();metrics.setGravity(Gravity.TOP);
@@ -276,6 +280,58 @@ public final class MainActivity extends Activity {
     return scroll(healthBody);
   }
   private TextView serviceLine(LinearLayout card,String title,String iconName){LinearLayout row=h();row.setPadding(0,dp(11),0,dp(11));row.addView(icon(iconName,DesignSystem.PURPLE,20));TextView titleText=t(title,13,DesignSystem.TEXT,true);titleText.setPadding(dp(14),0,0,0);row.addView(titleText,new LinearLayout.LayoutParams(0,-2,1));TextView value=t("Checking",12,DesignSystem.MUTED,false);row.addView(value);wide(card,row);return value;}
+  /** Explicit owner action: re-arm existing agent and re-register with the same Windows worker.
+      Android must still grant Accessibility and MediaProjection when unavailable. */
+  private void forceActivateConnection(){
+    if(homeConnectionIssue!=null)homeConnectionIssue.setText("Activating the existing native control link…");
+    if(connectionIssue!=null)connectionIssue.setText("Activating the existing native control link…");
+    startAgent(); // onStartCommand also wakes the already installed direct transport.
+    String url=prefs.getString("url",""),token=prefs.getString("token","");
+    if(url.isEmpty()||token.isEmpty()){
+      ConnectionDiagnostics.failure(this,"not_paired","No saved Windows pairing; connect your computer once");
+      updateConnectionIssue();
+      return;
+    }
+    handler.postDelayed(()->{
+      if(destroyed)return;
+      if(!AgentService.running||!AgentService.listenerReady){
+        ConnectionDiagnostics.failure(this,"agent_listener_unavailable",
+          "Android phone control listener is not active; service may be restricted or recovering");
+        updateConnectionIssue();
+      }else{
+        registerPhone();
+      }
+      checkHost();
+    },1300);
+    if(!CaptureService.active) {
+      beginCapture(); // Android itself asks for fresh user consent; no silent recording.
+    } else if(ControlAccessibilityService.active==null) {
+      toast("Android input access needs your approval");
+      try{startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));}
+      catch(Exception e){ConnectionDiagnostics.failure(this,"accessibility_settings",
+        "Android Accessibility settings could not be opened");}
+    }
+    updateConnectionIssue();
+  }
+  private void updateConnectionIssue(){
+    String issue;
+    boolean wanted=getSharedPreferences("agent",MODE_PRIVATE)
+      .getBoolean(AgentService.PREF_REMOTE_ENABLED,false);
+    if(prefs.getString("url","").isEmpty()||prefs.getString("token","").isEmpty())
+      issue="Not paired with a Windows worker";
+    else if(!wanted)issue="Phone remote access is disabled";
+    else if(!AgentService.running)issue="Android phone agent stopped";
+    else if(!AgentService.listenerReady)issue="Phone control listener not accepting connections";
+    else if(ControlAccessibilityService.active==null)issue="Android Accessibility input is not authorized";
+    else if(!CaptureService.active)issue="Native screen sharing stopped; Android approval required";
+    else if(CaptureService.latestAtMs==0L||System.currentTimeMillis()-CaptureService.latestAtMs>5000L)
+      issue="Screen sharing started but frames are stale";
+    else issue="Phone listener, input and screen capture are active";
+    String detail=issue+"\nWindows link: "+workerPhoneState+
+      "\n"+ConnectionDiagnostics.lastFailure(this);
+    if(connectionIssue!=null)connectionIssue.setText(detail);
+    if(homeConnectionIssue!=null)homeConnectionIssue.setText(detail);
+  }
   private void repairDeviceLink(){
     if(!prefs.getString("token","").isEmpty()&&!prefs.getString("url","").isEmpty()){
       startAgent();
@@ -294,9 +350,11 @@ public final class MainActivity extends Activity {
     gap(summary,16);
     if(prefs.getString("url","").isEmpty())
       button(summary,"Find Windows computer","devices",true,this::discoverComputer);
-    else button(summary,"Reconnect Windows","refresh",false,this::repairDeviceLink);
+    else button(summary,"Force activate connection","refresh",true,this::forceActivateConnection);
     gap(summary,10);pairingFeedback=t("Your phone is the controller. Connect once; the Windows worker follows.",12,DesignSystem.MUTED,false);
     pairingFeedback.setMaxLines(5);wide(summary,pairingFeedback);
+    gap(summary,10);connectionIssue=t("Checking last disconnection…",12,DesignSystem.MUTED,false);
+    connectionIssue.setMaxLines(9);wide(summary,connectionIssue);
     wide(devicesBody,summary);
 
     gap(devicesBody,12);LinearLayout phone=card();
@@ -790,7 +848,8 @@ public final class MainActivity extends Activity {
       AgentService.running?"Phone agent active · "+(ControlAccessibilityService.active!=null?"input authorized":"touch permission needed")+" · "+(CaptureService.active?"screen shared":"screen private"):
       "Remote phone access is disabled. No screen or input is shared.");
     if(headerStatus!=null)headerStatus.setText(AgentService.running?"SHARING ON":"ON DEVICE");
-    if(!hostRefreshing&&(currentTab==0||currentTab==2)&&System.currentTimeMillis()-lastHostRefresh>12000){lastHostRefresh=System.currentTimeMillis();checkHost();}
+    updateConnectionIssue();
+    if(!hostRefreshing&&(currentTab==0||currentTab==2||currentTab==3)&&System.currentTimeMillis()-lastHostRefresh>12000){lastHostRefresh=System.currentTimeMillis();checkHost();}
   }catch(Exception ignored){} }
   private void applyPerformanceAction(String mode){
     try{
