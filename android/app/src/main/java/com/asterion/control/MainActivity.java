@@ -103,6 +103,8 @@ public final class MainActivity extends Activity {
   private TextView privacyStatus;
   private int currentTab=0;
   private boolean webStarted=false,hostRefreshing=false;
+  private boolean fullRepairInProgress=false;
+  private String fullRepairTicket="";
   private String workerPhoneState="Windows-to-phone connection not checked yet";
   private long lastHostRefresh=0;
   private boolean destroyed=false;
@@ -210,7 +212,7 @@ public final class MainActivity extends Activity {
     margin(phoneCopy,t(Build.MODEL,15,DesignSystem.TEXT,true),6);
     homeAgent=t("Remote access is off",12,DesignSystem.MUTED,false);margin(phoneCopy,homeAgent,6);
     phoneR.addView(phoneCopy,new LinearLayout.LayoutParams(0,-2,1));phoneR.addView(icon("arrow",DesignSystem.MUTED,19));wide(phone,phoneR);wide(homeBody,phone);
-    gap(homeBody,10);button(homeBody,"Force activate connection","refresh",true,this::forceActivateConnection);
+    gap(homeBody,10);button(homeBody,"Auto-repair full connection","refresh",true,()->fullRepair(false));
     homeConnectionIssue=t("Checking native connection…",12,DesignSystem.MUTED,false);
     homeConnectionIssue.setMaxLines(6);margin(homeBody,homeConnectionIssue,8);
     gap(homeBody,26);LinearLayout healthTitle=h();healthTitle.addView(eyebrow("PHONE HEALTH"),new LinearLayout.LayoutParams(0,-2,1));
@@ -332,6 +334,115 @@ public final class MainActivity extends Activity {
     if(connectionIssue!=null)connectionIssue.setText(detail);
     if(homeConnectionIssue!=null)homeConnectionIssue.setText(detail);
   }
+  /** Complete repair: Android listener + Windows service watchdog + direct MCP gateway + private bridge.
+      The Windows side runs independently, so a dead worker can be revived by its Windows scheduled watchdog.
+      Never report the full chain as healthy based only on a successful HTTP request. */
+  private void fullRepair(boolean force){
+    if(fullRepairInProgress){setPairingFeedback("Recovery already in progress. The existing job is being checked.");return;}
+    if(force){
+      new AlertDialog.Builder(this).setTitle("Force reinitialize Asterion Control?")
+        .setMessage("Recover the Windows worker, direct gateway, phone listener and streaming path. Other active Windows jobs will be preserved or the restart will be blocked. Existing pairing, credentials, app data and files are kept. Android may request screen-sharing consent again.")
+        .setPositiveButton("Reinitialize",(d,w)->beginFullRepair(true))
+        .setNegativeButton("Cancel",null).show();
+    }else beginFullRepair(false);
+  }
+  private void beginFullRepair(boolean force){
+    if(prefs.getString("url","").isEmpty()||prefs.getString("token","").isEmpty()){
+      setPairingFeedback("No saved Windows pairing. Discover your existing computer; nothing was reset.");
+      discoverComputer();return;
+    }
+    fullRepairInProgress=true;
+    fullRepairTicket="";
+    setPairingFeedback(force?"Force reinitialize: recovering all existing Control components…":
+      "Auto-repair: checking Windows, direct gateway, Android and video…");
+    if(force){
+      // Android only: restart listener without revoking saved authorization.
+      stopService(new Intent(this,AgentService.class));
+      handler.postDelayed(()->{if(!destroyed){startAgent();submitFullRepair(force,0);}},1200);
+    }else{startAgent();submitFullRepair(force,0);}
+  }
+  private void submitFullRepair(boolean force,int retry){
+    if(destroyed||!fullRepairInProgress)return;
+    io.execute(()->{
+      try{
+        JSONObject job=pcTransferRequest("/api/v1/recovery/start","POST",
+          new JSONObject().put("mode",force?"force":"auto"));
+        String ticket=job.getString("id");
+        runOnUiThread(()->{
+          if(destroyed||!fullRepairInProgress)return;
+          fullRepairTicket=ticket;
+          setPairingFeedback("Windows repair job accepted · verifying direct gateway and phone registration…");
+          if(AgentService.running)registerPhone();
+          pollFullRepair(ticket,0,force);
+        });
+      }catch(Exception e){
+        runOnUiThread(()->{
+          if(destroyed||!fullRepairInProgress)return;
+          if(retry<15){
+            setPairingFeedback("Waiting for the independent Windows worker watchdog · "+
+              (retry+1)+"/16 checks. Pairing preserved.");
+            handler.postDelayed(()->submitFullRepair(force,retry+1),4000);
+          }else{
+            fullRepairInProgress=false;
+            setPairingFeedback("Full recovery incomplete: Windows worker or recovery endpoint "+
+              "could not be contacted. The independent Windows watchdog must be installed. "+
+              "Existing pairing was not changed.");
+          }
+        });
+      }
+    });
+  }
+  private void pollFullRepair(String ticket,int retry,boolean force){
+    if(destroyed||!fullRepairInProgress||!ticket.equals(fullRepairTicket))return;
+    io.execute(()->{
+      String text="Recovery pending",phase="running";
+      boolean ready=false;
+      try{
+        JSONObject job=pcTransferRequest("/api/v1/recovery/status","GET",null);
+        if(!ticket.equals(job.optString("id")))throw new IllegalStateException("Different recovery receipt");
+        phase=job.optString("phase","running");
+        JSONObject parts=job.optJSONObject("steps");
+        String gateway=parts==null?"not checked":parts.optString("direct_mcp_gateway","not checked");
+        String worker=parts==null?"not checked":parts.optString("windows_worker","not checked");
+        String phone=parts==null?"not checked":parts.optString("phone_agent","not checked");
+        text="Windows: "+worker+"\nDirect gateway: "+gateway+"\nPhone: "+phone;
+        if(phase.equals("verified_core")||phase.equals("partial")){
+          JSONObject state=pcTransferRequest("/api/v1/phone","GET",null);
+          ready=state.optBoolean("paired")&&state.optBoolean("reachable");
+          if(!ready)text+="\nWindows cannot yet reach the phone listener";
+        }
+        if(phase.equals("failed"))text+="\n"+job.optString("error","Recovery script failed");
+      }catch(Exception e){text="Recovery verification interrupted: "+e.getClass().getSimpleName();}
+      final String details=text,stage=phase;
+      final boolean phoneReady=ready;
+      runOnUiThread(()->{
+        if(destroyed||!fullRepairInProgress||!ticket.equals(fullRepairTicket))return;
+        boolean gatewayOK=details.contains("Direct gateway: verified");
+        boolean localOK=AgentService.running&&AgentService.listenerReady;
+        boolean inputOK=ControlAccessibilityService.active!=null;
+        boolean screenOK=CaptureService.active&&CaptureService.latestAtMs>0L&&
+          System.currentTimeMillis()-CaptureService.latestAtMs<5000L;
+        if((stage.equals("verified_core")||stage.equals("partial"))&&phoneReady&&gatewayOK&&localOK
+           &&(!force||retry>=4)){
+          fullRepairInProgress=false;
+          setPairingFeedback("Windows + direct gateway + Android network verified.\n"+
+            (inputOK?"Input access ready.":"Android Accessibility authorization needed.")+" "+
+            (screenOK?"Live screen frames fresh.":"Screen sharing requires Android approval or fresh frames.")+
+            "\nDirect ChatGPT tool registration must be checked in ChatGPT.");
+          checkHost();updateConnectionIssue();
+          if(!screenOK)beginCapture();
+          else if(!inputOK)try{startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));}catch(Exception ignored){}
+        }else if(stage.equals("failed")||retry>=45){
+          fullRepairInProgress=false;
+          setPairingFeedback("Full recovery incomplete · "+details+"\nNo pairing or app data was erased.");
+          updateConnectionIssue();
+        }else{
+          setPairingFeedback("Full-path recovery "+(retry+1)+"/46\n"+details);
+          handler.postDelayed(()->pollFullRepair(ticket,retry+1,force),2000);
+        }
+      });
+    });
+  }
   private void repairDeviceLink(){
     if(!prefs.getString("token","").isEmpty()&&!prefs.getString("url","").isEmpty()){
       startAgent();
@@ -350,7 +461,8 @@ public final class MainActivity extends Activity {
     gap(summary,16);
     if(prefs.getString("url","").isEmpty())
       button(summary,"Find Windows computer","devices",true,this::discoverComputer);
-    else button(summary,"Force activate connection","refresh",true,this::forceActivateConnection);
+    else button(summary,"Auto-repair full connection","refresh",true,()->fullRepair(false));
+    gap(summary,9);button(summary,"Force reinitialize entire connection","power",false,()->fullRepair(true));
     gap(summary,10);pairingFeedback=t("Your phone is the controller. Connect once; the Windows worker follows.",12,DesignSystem.MUTED,false);
     pairingFeedback.setMaxLines(5);wide(summary,pairingFeedback);
     gap(summary,10);connectionIssue=t("Checking last disconnection…",12,DesignSystem.MUTED,false);
