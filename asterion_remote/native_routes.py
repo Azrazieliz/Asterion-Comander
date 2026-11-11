@@ -1,6 +1,7 @@
 """Read-only phone telemetry and explicit input proxy over private network/VPN."""
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
+from pydantic import BaseModel, Field
 from .security import require_token
 from .phone_bridge import PairPhone, PhoneInput, register, request, load
 from .native_transfer import TransferRequest, start_transfer, transfer_status, cancel_transfer
