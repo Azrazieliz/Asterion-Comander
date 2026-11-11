@@ -41,7 +41,7 @@ def git(repo, *args):
 
 def windows_processes():
     command = ("Get-CimInstance Win32_Process | "
-               "Where-Object {$_.Name -match '^(python|pythonw|powershell|pwsh)\\.exe$'} | "
+               "Where-Object {$_.Name -match '^(python|pythonw|powershell|pwsh)\.exe$'} | "
                "Select-Object ProcessId,Name,CommandLine | ConvertTo-Json -Compress")
     raw = execute(["powershell.exe", "-NoProfile", "-NonInteractive",
                    "-Command", command])
