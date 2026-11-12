@@ -85,4 +85,50 @@ if($bridge.Count -eq 0){
   $launch=Join-Path $PSScriptRoot 'start_git_bridge.ps1'
   if(Test-Path $launch){Start-Process powershell.exe -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',('"'+$launch+'"')) -WorkingDirectory $root -WindowStyle Hidden|Out-Null}
 }
+
+# Native WSS recovery: a running process alone is not proof of a usable phone link.
+# Only intervene after two real phone-side handshake rejections while the phone
+# remains reachable. Never alter Android permissions, keys, pairing or other services.
+$nativeFailuresFile=Join-Path $state 'native-wss-handshake-failures.txt'
+try{
+  $phone=Invoke-RestMethod ($url+'/api/v1/phone') -Headers @{Authorization=('Bearer '+$token)} -TimeoutSec 3
+  $direct=$phone.info.remote_transport.direct_mcp
+  $rejected=[bool]($nativeRelayOk -and $phone.reachable -and $direct -and
+    -not $direct.connected -and $direct.last_stage -eq 'wss_upgrade' -and
+    $direct.last_error_detail -like '*WSS handshake rejected*')
+  $failures=0
+  if($rejected){
+    if(Test-Path $nativeFailuresFile){
+      [void][int]::TryParse((Get-Content $nativeFailuresFile -Raw).Trim(),[ref]$failures)
+    }
+    $failures=[math]::Min(99,$failures+1)
+    if($failures -ge 2){
+      $local=Invoke-RestMethod 'http://127.0.0.1:8995/healthz' -TimeoutSec 3
+      if($local.ok -and -not $local.phone_connected){
+        $socket=@(Get-NetTCPConnection -State Listen -LocalPort 8995 -ErrorAction SilentlyContinue)
+        if($socket.Count -eq 1){
+          $owner=Get-CimInstance Win32_Process -Filter ('ProcessId='+$socket[0].OwningProcess) -ErrorAction SilentlyContinue
+          if($owner -and $owner.CommandLine -like '*asterion_remote.native_phone_relay:app*'){
+            Stop-Process -Id $owner.ProcessId -Force -ErrorAction Stop
+            Start-Sleep -Milliseconds 400
+            $python=Join-Path $root '.venv\Scripts\python.exe'
+            if(Test-Path $python){
+              Start-Process -FilePath $python -ArgumentList @('-m','uvicorn',
+                'asterion_remote.native_phone_relay:app','--host','127.0.0.1','--port','8995') `
+                -WorkingDirectory $root -WindowStyle Hidden `
+                -RedirectStandardOutput (Join-Path $state 'native-wss.stdout.log') `
+                -RedirectStandardError (Join-Path $state 'native-wss.stderr.log')|Out-Null
+              Add-Content (Join-Path $state 'control-watchdog-recovery.log') ('Native WSS handshake relay restart '+(Get-Date -Format o))
+            }
+          }
+        }
+      }
+      $failures=0
+    }
+  }
+  Set-Content -LiteralPath $nativeFailuresFile -Value ([string]$failures) -NoNewline -Encoding ASCII
+}catch{
+  # A failed health probe is not permission to reset credentials or the phone.
+}
+
 exit 0
