@@ -65,9 +65,11 @@ def main():
         raise RuntimeError("Pinned SSH host key unexpectedly changed")
     import msvcrt
     with LOCK.open("a+b") as lock:
-        lock.seek(0)
-        if not lock.read(1):
-            lock.seek(0);lock.write(b"0");lock.flush()
+        # Windows denies reading another process's byte-range lock before
+        # msvcrt.locking can detect the owner. Check size without reading.
+        if os.fstat(lock.fileno()).st_size == 0:
+            lock.write(b"0")
+            lock.flush()
         lock.seek(0)
         try:msvcrt.locking(lock.fileno(),msvcrt.LK_NBLCK,1)
         except OSError:
