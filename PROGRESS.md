@@ -1,3 +1,13 @@
+# 2026-11-13 — Windows Control command relay dirty-receipt recovery guardrail
+
+- **Confirmed failure:** a locally modified tracked `results/*.json` receipt blocked `git rebase origin/main` with `cannot rebase: You have unstaged changes`. The Windows API on port 8911 remained healthy while the relay supervisor repeatedly relaunched the failing worker.
+- **Permanent source fix:** `asterion_remote/github_bridge_git.py` now checks raw porcelain output before every fetch/rebase, validates result identity/status, saves each exact receipt in a content-addressed local recovery directory, commits only valid receipt journals for publication, and fails closed on unrelated tracked changes or invalid receipts. It deliberately preserves incomplete untracked `.pending` journal markers without interpreting or deleting them. Existing pairing, WSS and Windows API remain unchanged.
+- **Actual Windows deployment:** deployed into the existing `D:/AsterionControlRelease` Python worker with backed-up originals under the existing LocalAppData AsterionControl state. Windows source install was automatically rolled back on failing early regression runs; the final revision passed **4/4 isolated Git-repository regression tests** before being left installed.
+- **Live recovery evidence:** following a controlled bridge process restart, the new guardrail created and published a `Recover durable local Asterion Control result receipts` commit for the exact Adaptive Study result previously responsible for the startup failure. A subsequent read-only `pc_status` returned `ok=true`, confirming restored command transport and Windows API responsiveness.
+- **Scope:** Windows command relay only; no Android APK/signature, app data, credentials, native WSS pairing, or persistent owner files were changed. Asynchronous transfer acceptance is not proof of completed APK delivery.
+
+---
+
 # 2026-11-11 — Owner-approved two-turn Control app-switch test, TURN 1
 
 - **Source branch:** `work/control-0927-overnight-cycles-20261111`. Canonical detailed real-test report: [docs/CYCLE_ABRIDGED_APPSWITCH_ACCEPTANCE_20261111.md](docs/CYCLE_ABRIDGED_APPSWITCH_ACCEPTANCE_20261111.md), report commit `4dcf2a9`; source recovery helper `scripts/restore_chatgpt_from_control.py`, commit `61df73d`.
