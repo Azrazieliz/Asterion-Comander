@@ -101,7 +101,13 @@ def preserve_dirty_receipts():
     the process restarts before publishing it, git rebase otherwise refuses
     to start and the supervisor repeatedly launches an unusable worker.
     """
-    status=git('status','--porcelain','--untracked-files=all')
+    # The shared git() helper strips leading whitespace. Porcelain's first
+    # column can be a space (e.g. " M results/foo.json"), so read raw output.
+    probe=subprocess.run(['git','status','--porcelain','--untracked-files=all'],
+        cwd=ROOT,text=True,capture_output=True,timeout=60,check=False)
+    if probe.returncode:
+        raise RuntimeError('Unable to inspect local bridge receipts: '+probe.stderr[-300:])
+    status=probe.stdout
     candidates=[]
     for row in status.splitlines():
         flags,path=row[:2],row[3:]
