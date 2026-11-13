@@ -94,6 +94,89 @@ def git(*args,timeout=60):
         raise RuntimeError('Git transport error '+str(p.returncode)+': '+(p.stderr or p.stdout)[-450:])
     return p.stdout.strip()
 
+def preserve_dirty_receipts():
+    """Preserve local result journals before a fetch/rebase, never reset them.
+
+    A finished Windows job can update an already-tracked accepted receipt. If
+    the process restarts before publishing it, git rebase otherwise refuses
+    to start and the supervisor repeatedly launches an unusable worker.
+    """
+    status=git('status','--porcelain','--untracked-files=all')
+    candidates=[]
+    for row in status.splitlines():
+        flags,path=row[:2],row[3:]
+        # Unrelated untracked files do not need intervention.
+        if flags=='??' and not path.startswith('results/'):
+            continue
+        if (flags not in (' M','M ','MM','??','A ','AM') or
+            not path.startswith('results/') or not path.endswith('.json') or
+            not NAME.fullmatch(Path(path).stem)):
+            raise RuntimeError('Unsafe local bridge change; left untouched: '+path[:160])
+        candidate=ROOT/path
+        try:
+            value=json.loads(candidate.read_text(encoding='utf8'))
+            if value.get('id')!=candidate.stem or not isinstance(value.get('status'),str):
+                raise ValueError('Result identity/status mismatch')
+        except (OSError,ValueError,AttributeError) as exc:
+            raise RuntimeError('Invalid local result; left untouched: '+path) from exc
+        candidates.append((path,candidate))
+    if not candidates:return 0
+    # Back up every exact receipt outside the Git worktree before staging.
+    # Backups are content-addressed and never overwritten or pushed.
+    import hashlib
+    backup=ROOT.parent/'receipt-recovery'
+    backup.mkdir(parents=True,exist_ok=True)
+    for path,candidate in candidates:
+        content=candidate.read_bytes()
+        name=candidate.stem+'-'+hashlib.sha256(content).hexdigest()+'.json'
+        destination=backup/name
+        try:
+            with destination.open('xb') as stream:
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+        except FileExistsError:
+            if destination.read_bytes()!=content:
+                raise RuntimeError('Receipt recovery backup mismatch: '+path)
+    git('add','--',*[path for path,_ in candidates])
+    git('-c','user.name=Asterion Control',
+        '-c','user.email=asterion-control@users.noreply.github.com',
+        'commit','--quiet','-m','Recover durable local Asterion Control result receipts')
+    print('Bridge preserved',len(candidates),'dirty receipt(s) before remote sync',flush=True)
+    return len(candidates)
+
+
+def sync_remote():
+    """Recover committed, unpublished receipts after competing Git writers.
+
+    A failed push can leave HEAD ahead of origin/main. An ff-only merge alone
+    then blocks every future command, even while the native agent is healthy.
+    Never drop local commits or replay an already journaled phone action.
+    """
+    # Never rebase over uncommitted result journals; this guard runs at startup
+    # and on every polling cycle, even after a failed publish or agent restart.
+    preserve_dirty_receipts()
+    git('fetch','--quiet','origin','main')
+    unpublished=int(git('rev-list','--count','origin/main..HEAD'))
+    if not unpublished:
+        git('merge','--ff-only','origin/main')
+        return
+    paths=[p.strip() for p in git('log','--format=','--name-only',
+                                  'origin/main..HEAD').splitlines() if p.strip()]
+    if not paths or any(not p.startswith('results/') or not p.endswith('.json')
+                        for p in paths):
+        raise RuntimeError('Local bridge commits contain non-receipt changes; preserve and inspect')
+    for attempt in range(10):
+        git('fetch','--quiet','origin','main')
+        git('rebase','origin/main')
+        try:
+            git('push','--quiet','origin','HEAD:main')
+            return
+        except RuntimeError:
+            if attempt==9:raise
+            time.sleep(min(10,1+attempt))
+
+
 def setup():
     ROOT.parent.mkdir(parents=True,exist_ok=True)
     if not (ROOT/'.git').exists():
@@ -101,8 +184,7 @@ def setup():
     remote=git('remote','get-url','origin').rstrip('/')
     if remote.lower()!=URL.lower():
         raise RuntimeError('Unexpected bridge remote: refusing to execute')
-    git('fetch','--quiet','origin','main')
-    git('merge','--ff-only','origin/main')
+    sync_remote()
 
 def publish(paths):
     git('add','--',*[str(p) for p in paths])
@@ -203,8 +285,7 @@ def migrate():
     STAMP.write_text('migrated',encoding='utf8')
 
 def cycle(key):
-    git('fetch','--quiet','origin','main')
-    git('merge','--ff-only','origin/main')
+    sync_remote()
     tasks=entries()
     unfinished=outstanding_jobs()
     if tasks or unfinished:
@@ -273,3 +354,4 @@ def main():
             time.sleep(min(45,failures*5))
 
 if __name__=='__main__':main()
+
