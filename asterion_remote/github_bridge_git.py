@@ -112,7 +112,9 @@ def preserve_dirty_receipts():
     for row in status.splitlines():
         flags,path=row[:2],row[3:]
         # Unrelated untracked files do not need intervention.
-        if flags=='??' and not path.startswith('results/'):
+        # Keep incomplete atomic journal markers (.pending) and other
+        # untracked auxiliary files untouched; only JSON receipts are synced.
+        if flags=='??' and not (path.startswith('results/') and path.endswith('.json')):
             continue
         if (flags not in (' M','M ','MM','??','A ','AM') or
             not path.startswith('results/') or not path.endswith('.json') or
