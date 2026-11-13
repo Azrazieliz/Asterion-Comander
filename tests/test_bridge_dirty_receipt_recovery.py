@@ -59,6 +59,13 @@ class DirtyReceiptRecoveryTest(unittest.TestCase):
         git(self.publisher,'pull','--ff-only')
         self.assertEqual(json.loads((self.publisher/'results'/'test-job.json').read_text()),complete)
 
+    def test_untracked_incomplete_journal_is_preserved(self):
+        pending=self.worker/'results'/'test-job.pending'
+        pending.write_text('partial durable journal')
+        with patch.object(bridge,'ROOT',self.worker):
+            bridge.sync_remote()
+        self.assertEqual(pending.read_text(),'partial durable journal')
+
     def test_unrelated_tracked_changes_remain_untouched(self):
         note=self.worker/'notes.txt'
         note.write_text('owner change')
