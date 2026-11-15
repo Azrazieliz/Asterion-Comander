@@ -12,6 +12,7 @@ NAME=re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.-]{2,95}$')
 ALLOWED={
  'pc_status':('GET','/api/v1/health'),
  'pc_health':('GET','/api/v1/device-health'),
+ 'pc_diagnostic_triage':('GET','/api/v1/diagnostics/triage'),
  'pc_screen':('GET','/api/v1/screen'),
  'pc_monitors':('GET','/api/v1/monitors'),
  'pc_input':('POST','/api/v1/input'),
@@ -145,6 +146,24 @@ def run(request,key):
         return phone_native(path,method,args if method=='POST' else None)
     if op not in ALLOWED:raise ValueError('Unsupported operation')
     method,path=ALLOWED[op]
+    if op=='pc_diagnostic_triage':
+        # Explicit read-only operation; never allow arbitrary API paths or
+        # unbounded results through a GitHub fallback response.
+        allowed={'app','lookback_minutes','limit','stale_after_seconds'}
+        if set(args)-allowed:
+            raise ValueError('Unsupported diagnostic query parameter')
+        app=args.get('app','')
+        if not isinstance(app,str) or (app and not NAME.fullmatch(app)):
+            raise ValueError('Invalid diagnostic app')
+        ranges={'lookback_minutes':(1,10080),'limit':(1,3000),
+                'stale_after_seconds':(30,86400)}
+        for name,(minimum,maximum) in ranges.items():
+            value=args.get(name)
+            if value is not None and (type(value) is not int or
+                                     not minimum<=value<=maximum):
+                raise ValueError('Invalid diagnostic bound '+name)
+        query=urllib.parse.urlencode(args)
+        return pc(path+('?' + query if query else ''),key)
     if method=='GET' and args:raise ValueError('GET takes no body')
     if op=='pc_command' and (not isinstance(args.get('command'),str) or len(args['command'])>8192):
         raise ValueError('Invalid command')
