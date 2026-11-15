@@ -165,7 +165,7 @@ class _Extract(HTMLParser):
             if link and len(link)<1000:
                 absolute=urljoin(self.base,link)
                 try:_url(absolute,onion_mode=(urlsplit(self.base).hostname or "").endswith(".onion"))
-                except (ValueError,PermissionError):continue
+                except (ValueError,PermissionError):return
                 self.links.append(absolute)
     def handle_endtag(self,tag):
         if tag=="title":self._title=False
