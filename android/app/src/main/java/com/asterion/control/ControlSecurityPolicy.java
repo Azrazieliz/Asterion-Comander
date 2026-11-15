@@ -61,7 +61,7 @@ final class ControlSecurityPolicy {
     else if(name.contains("transfer"))path="/transfer/chunk";
     else if(name.contains("cycle")||name.contains("continuation")||
             name.contains("chat_"))path="/cycles/start";
-    else if(name.matches("control_phone_(status|health|ui|screen|stream_status|apps|app_bridges|bridge_status|direct_status|network_status|own_logcat|diagnostic_events|exit_history|performance_status|security_status|permission_matrix|observation_status|observation_events|observation_timeline)"))
+    else if(name.matches("control_phone_(status|health|ui|screen|stream_status|apps|app_bridges|bridge_status|direct_status|network_status|own_logcat|diagnostic_events|exit_history|performance_status|security_status|permission_matrix|vpn_status|observation_status|observation_events|observation_timeline)"))
       path="/health";
     else path="/restricted-operation";
     return canRemote(c,path.equals("/health")?"GET":"POST",path);
