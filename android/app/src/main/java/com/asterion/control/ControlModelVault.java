@@ -48,6 +48,7 @@ final class ControlModelVault {
   private static volatile String artifactSha="", artifactRevision="";
   private static final String REPO=ModelDownloadPolicy.DEFAULT_REPOSITORY;
   private static final String FILE=ModelDownloadPolicy.DEFAULT_FILENAME;
+  private static final String VERIFIED_RECORD="verified-current-model.json";
   private ControlModelVault(){}
 
   private static void requireOwner(Activity a){
@@ -88,6 +89,7 @@ final class ControlModelVault {
         if(finished.isFile()){
           phase="verifying_previous_weights";
           if(ModelDownloadPolicy.verifiedFile(finished,model)){
+            saveVerifiedRecord(root,model);
             completed=expected;phase="weights_verified";
             notify(callback,"Verified GGUF weights already installed. Inference engine pending.");
             return;
@@ -127,6 +129,7 @@ final class ControlModelVault {
           Files.move(partial.toPath(),finished.toPath());
         }
         Files.deleteIfExists(receipt.toPath());
+        saveVerifiedRecord(root,model);
         completed=expected;phase="weights_verified";
         notify(callback,"GGUF model weights downloaded and SHA-256 verified.");
       }catch(Exception e){
@@ -250,18 +253,92 @@ final class ControlModelVault {
     }finally{conn.disconnect();}
   }
 
+  private static void saveVerifiedRecord(File root,
+      ModelDownloadPolicy.Manifest model)throws Exception{
+    JSONObject record=new JSONObject()
+      .put("repository",model.repository).put("revision",model.revision)
+      .put("filename",model.filename).put("sha256",model.sha256)
+      .put("size_bytes",model.sizeBytes).put("license",model.license);
+    File temporary=new File(root,VERIFIED_RECORD+".tmp");
+    try(FileOutputStream output=new FileOutputStream(temporary)){
+      output.write(record.toString().getBytes(StandardCharsets.UTF_8));
+      output.getFD().sync();
+    }
+    File saved=new File(root,VERIFIED_RECORD);
+    try {
+      Files.move(temporary.toPath(),saved.toPath(),
+        StandardCopyOption.ATOMIC_MOVE,
+        StandardCopyOption.REPLACE_EXISTING);
+    }catch(AtomicMoveNotSupportedException e){
+      Files.move(temporary.toPath(),saved.toPath(),
+        StandardCopyOption.REPLACE_EXISTING);
+    }
+  }
+
+  private static ModelDownloadPolicy.Manifest savedVerifiedRecord(
+      File root)throws Exception{
+    File file=new File(root,VERIFIED_RECORD);
+    if(!file.isFile()||file.length()>4096)return null;
+    JSONObject data=new JSONObject(new String(Files.readAllBytes(file.toPath()),
+       StandardCharsets.UTF_8));
+    return new ModelDownloadPolicy.Manifest(
+      data.getString("repository"),data.getString("revision"),
+      data.getString("filename"),data.getString("sha256"),
+      data.getLong("size_bytes"),data.getString("license"));
+  }
+
+  static void verifyInstalled(Activity owner,Consumer<String> callback){
+    requireOwner(owner);
+    if(busy){callback.accept("Model transfer already active");return;}
+    busy=true;
+    Context context=owner.getApplicationContext();
+    WORK.execute(()->{
+      try {
+        File root=directory(context);
+        ModelDownloadPolicy.Manifest model=savedVerifiedRecord(root);
+        if(model==null)throw new IOException("No verified model manifest");
+        phase="verifying_sha256_and_gguf";
+        File weights=new File(root,model.privateFilename());
+        if(!ModelDownloadPolicy.verifiedFile(weights,model))
+          throw new IOException("Stored model weights failed SHA-256 verification");
+        artifactSha=model.sha256;artifactRevision=model.revision;
+        completed=model.sizeBytes;expected=model.sizeBytes;
+        phase="weights_verified";lastError="";
+        notify(callback,"Offline model weights passed full SHA-256 verification.");
+      }catch(Exception e){
+        lastError=e.getClass().getSimpleName();
+        phase="failed";
+        notify(callback,"Offline model verification failed: "+lastError);
+      }finally{busy=false;}
+    });
+  }
+
   static JSONObject status(Context context)throws Exception{
     boolean present=false;
+    boolean hashVerifiedThisProcess="weights_verified".equals(phase);
     File root=new File(context.getFilesDir(),"ai-models");
-    if(root.isDirectory()&&artifactSha.length()==64)
-      present=new File(root,artifactSha.substring(0,18)+"-"+FILE).isFile();
+    if(root.isDirectory()){
+      try {
+        ModelDownloadPolicy.Manifest saved=savedVerifiedRecord(root);
+        if(saved!=null){
+          File known=new File(root,saved.privateFilename());
+          present=known.isFile()&&known.length()==saved.sizeBytes;
+          if(artifactSha.isEmpty()){
+            artifactSha=saved.sha256;artifactRevision=saved.revision;
+            expected=saved.sizeBytes;completed=present?saved.sizeBytes:0;
+          }
+        }
+      }catch(Exception ignored){}
+    }
     return new JSONObject()
       .put("ok",true).put("phase",phase)
       .put("download_active",busy)
       .put("downloaded_bytes",completed)
       .put("expected_bytes",expected)
       .put("verified_weight_file_present",
-           "weights_verified".equals(phase)&&present)
+           hashVerifiedThisProcess&&present)
+      .put("previously_verified_weight_file_present",present)
+      .put("hash_rechecked_this_process",hashVerifiedThisProcess)
       .put("model_sha256",artifactSha)
       .put("revision",artifactRevision)
       .put("download_requires_foreground_owner_approval",true)
