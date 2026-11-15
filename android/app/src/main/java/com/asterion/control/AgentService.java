@@ -225,6 +225,11 @@ public final class AgentService extends Service {
       if(key.equals("x-transfer-offset"))offset=Long.parseLong(val);
     }
     if(!auth.equals("Bearer "+token(this))){json(out,401,error("Unauthorized"));return;}
+    if(!ControlSecurityPolicy.canRemote(this,method,path)){
+      ControlEventJournal.write(this,"security_failure","remote_api","rejected",
+        "owner_policy_denied",0);
+      json(out,403,error("Denied by owner's local Control security level"));return;
+    }
     if(method.equals("PUT")&&path.startsWith("/transfer/chunk/")){
       String id=path.substring("/transfer/chunk/".length());
       try{
@@ -483,6 +488,14 @@ public final class AgentService extends Service {
         }
         json(out,200,ControlEventJournal.recent(this,since,limit));
       }catch(Exception e){json(out,400,error("Invalid local diagnostic cursor"));}return;
+    }
+    if(method.equals("GET")&&path.equals("/diagnostics/security")){
+      try{json(out,200,ControlSecurityPolicy.status(this));}
+      catch(Exception e){json(out,503,error("Owner security level unavailable"));}return;
+    }
+    if(method.equals("GET")&&path.equals("/diagnostics/permissions")){
+      try{json(out,200,ControlPermissionMatrix.status(this));}
+      catch(Exception e){json(out,503,error("Android permission matrix unavailable"));}return;
     }
     if(method.equals("GET")&&path.equals("/diagnostics/exit-history")){
       try{json(out,200,ControlCrashDiagnostics.recentExitHistory(this));}
