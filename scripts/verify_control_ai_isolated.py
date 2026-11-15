@@ -30,6 +30,8 @@ TESTS = [
     "test_mcp_tool_routes.py",
     "test_native_assistant.py",
     "test_assistant_routes.py",
+    "test_model_admission.py",
+    "test_model_capacity_routes.py",
 ]
 
 
