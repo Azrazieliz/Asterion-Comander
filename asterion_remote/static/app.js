@@ -54,7 +54,7 @@ async function request(path,options={}){
  return type.includes('json')?r.json():r.text();
 }
 function qp(obj){return '?'+new URLSearchParams(obj).toString()}
-function showPage(name){ state.page=name;document.querySelectorAll('.page').forEach(e=>e.classList.toggle('active',e.id===name));document.querySelectorAll('.tabs button').forEach(e=>e.classList.toggle('active',e.dataset.page===name)); if(name==='android')discover().catch(e=>toast(e.message));if(name==='files')files().catch(e=>toast(e.message));if(name==='processes')processes().catch(e=>toast(e.message));if(name==='system')system().catch(e=>toast(e.message)); startLive();}
+function showPage(name){ state.page=name;document.querySelectorAll('.page').forEach(e=>e.classList.toggle('active',e.id===name));document.querySelectorAll('.tabs button').forEach(e=>e.classList.toggle('active',e.dataset.page===name)); if(name==='android')discover().catch(e=>toast(e.message));if(name==='files')files().catch(e=>toast(e.message));if(name==='processes')processes().catch(e=>toast(e.message));if(name==='system')system().catch(e=>toast(e.message));if(name==='diagnostics')loadDiagnostics().catch(e=>toast(e.message)); startLive();}
 async function connect(){
  state.token=$('#token').value.trim()||state.token;
  if(!state.token){toast('Enter the Windows access key');return;}
@@ -66,6 +66,7 @@ async function connect(){
    $('#token').value='';
    if($('#health-body'))$('#health-body').textContent=JSON.stringify(h,null,2);
    if(state.page==='android')await discover();
+   if(state.page==='diagnostics')await loadDiagnostics();
    await discoverMonitors();
    startLive();
  }catch(e){
@@ -89,6 +90,73 @@ async function screen(){
    if(state.page==='android')phoneStatus(friendlyError(e));
    else toast(e);
  }finally{state.busy=false;}
+}
+// Read-only diagnosis is deliberately not an inferred live phone status.
+function diagnosticRecord(parent,title,detail,severity='neutral'){
+ const item=document.createElement('article');
+ item.className='diagnostic-record '+(severity==='warning'?'diagnostic-warning':'');
+ const heading=document.createElement('strong');heading.textContent=title;
+ const body=document.createElement('p');body.textContent=detail;
+ item.append(heading,body);parent.append(item);
+}
+async function loadDiagnostics(){
+ if(!state.token){$('#diagnostic-state').textContent='Connect to load diagnostics.';return;}
+ const status=$('#diagnostic-state');
+ status.textContent='Loading recorded diagnostic evidence…';
+ const filter=$('#diagnostic-app').value.trim();
+ const minutes=Number($('#diagnostic-window').value);
+ try{
+  const query={lookback_minutes:minutes,limit:1200,stale_after_seconds:300};
+  if(filter)query.app=filter;
+  const data=await request('/diagnostics/triage'+qp(query));
+  const count=data.events_examined||0;
+  const operations=data.operations||[];
+  const needs=data.needs_fresh_state||[];
+  status.className='device-status';
+  status.textContent=count+' recorded events · '+operations.length+' observed operations · '+
+    needs.length+' needing fresh evidence'+(data.window_may_be_truncated?' · Result limit reached':'');
+  const metrics=$('#diagnostic-metrics');metrics.replaceChildren();
+  const labels=[
+   ['Recorded events',String(count)],
+   ['Observed apps',String((data.observed_apps||[]).length)],
+   ['Historical operations',String(operations.length)],
+   ['Potentially stale',String(needs.length)],
+  ];
+  for(const [title,value] of labels){
+   const card=document.createElement('article');card.className='diagnostic-metric';
+   const number=document.createElement('strong');number.textContent=value;
+   const label=document.createElement('span');label.textContent=title;
+   card.append(number,label);metrics.append(card);
+  }
+  const findings=$('#diagnostic-findings');findings.replaceChildren();
+  const records=data.findings||[];
+  if(!records.length)diagnosticRecord(findings,'No classified symptoms in the selected window',
+    'This does not establish that the app is healthy or that all activity was instrumented.');
+  for(const finding of records.slice(0,20)){
+   diagnosticRecord(findings,finding.code||'Observed finding',
+     (finding.meaning||'')+' · Next evidence: '+(finding.required_next_evidence||'unknown'),
+     'warning');
+  }
+  const ops=$('#diagnostic-operations');ops.replaceChildren();
+  const review=operations.filter(o=>o.review_reason);
+  if(!review.length)diagnosticRecord(ops,'No operations flagged for review',
+    'Only recorded states are checked; uninstrumented work is not visible.');
+  for(const op of review.slice(0,35)){
+   const stateLabel=op.last_state||'unknown';
+   const age=Math.max(0,Math.round(op.seconds_since_last_observation||0));
+   diagnosticRecord(ops,(op.app||'unknown')+' · '+(op.operation_id||'unknown'),
+     'Last recorded: '+stateLabel+' · '+age+'s ago · '+
+     (op.review_reason||'')+' · Trace: '+(op.trace_id||'unspecified'),'warning');
+  }
+  $('#diagnostic-limits').textContent=(data.limitations||[]).join(' · ')+
+    (data.operations_truncated?' · More operations exist than displayed.':'');
+ }catch(err){
+  status.textContent='Unable to load recorded diagnostics: '+friendlyError(err);
+  status.className='device-status warn';
+  $('#diagnostic-metrics').replaceChildren();
+  $('#diagnostic-findings').replaceChildren();
+  $('#diagnostic-operations').replaceChildren();
+ }
 }
 async function discoverMonitors(){try{const data=await request('/monitors');const select=$('#desktop-monitor');select.replaceChildren();for(const m of data.items){const o=document.createElement('option');o.value=m.index;o.textContent=m.index===0?'All monitors':'Monitor '+m.index;select.append(o);}select.value=String(data.items.length>1?1:0);}catch(e){toast(e.message)}}
 function startScreenRefresh(){clearInterval(frameTimer);frameTimer=setInterval(()=>{if(live&&live.readyState===WebSocket.OPEN)return;if(!state.token)return;if(state.page==='desktop'||state.page==='android'&&state.device)screen();},1600);}
@@ -240,5 +308,6 @@ bind('#file-search',async()=>{const q=prompt('Find filename containing:');if(q){
 bind('#file-download',async()=>{if(!state.selectedFile)return;const blob=await request('/files/download'+qp({path:state.selectedFile}),{blob:true});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=state.selectedFile.split('/').pop();a.click();setTimeout(()=>URL.revokeObjectURL(url),2000)});
 $('#file-upload').addEventListener('change',async e=>{const file=e.target.files[0];if(!file)return;let path=($('#path').value==='.'?'':$('#path').value.replace(/\/$/,'')+'/')+file.name;try{await request('/files/upload'+qp({path}),{method:'PUT',body:file,headers:{'Content-Type':'application/octet-stream'}});toast('Uploaded '+file.name);await files()}catch(err){toast(err.message)}e.target.value=''});
 bind('#process-refresh',processes);bind('#system-refresh',system);
+bind('#diagnostic-refresh',loadDiagnostics);$('#diagnostic-app').addEventListener('keydown',e=>{if(e.key==='Enter')loadDiagnostics()});
 bindPointer($('#desktop-image'),'desktop');bindPointer($('#android-image'),'android');
 startScreenRefresh();
