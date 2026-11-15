@@ -170,7 +170,16 @@ def _parse_and_apply(worktree: Path, policy: GitProject, text: str) -> list[dict
         if exists:
             if not expected:
                 raise ValueError("existing_file_requires_exact_sha256")
-            original=target.read_bytes()
+            # Git on Windows can materialize LF blobs as CRLF checkout
+            # files. Compare the canonical committed blob the model saw,
+            # not checkout-dependent line endings.
+            blob=subprocess.run(
+                ["git","-C",str(worktree),"show","HEAD:"+path],
+                stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,timeout=20)
+            if blob.returncode:
+                raise RuntimeError("tracked_source_blob_not_found")
+            original=blob.stdout
             if _sha(original)!=expected:
                 raise RuntimeError("source_changed_since_model_observation")
             if not isinstance(search,dict) or newfile is not None:
