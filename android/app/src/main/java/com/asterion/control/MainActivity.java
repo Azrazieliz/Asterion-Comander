@@ -310,7 +310,7 @@ public final class MainActivity extends Activity {
     twoActions(model,"Load model","activity",()->showNativeAiDetails(),
       "Stop response","stop",()->ControlNativeInference.cancel(this));
     gap(model,7);
-    button(model,"Spoken replies · French / English / Off","activity",false,
+    button(model,"Spoken replies · English / Off","activity",false,
       this::selectNativeAiSpeech);
     wide(body,model);
     gap(body,12);
@@ -420,13 +420,14 @@ public final class MainActivity extends Activity {
   /**
    * Reuse the EXISTING VoiceDialogueService speaker. This doesn't grant new
    * microphone permissions or start persistent background listening.
-   * The owner explicitly selects French, English or Off; disabled by default.
+   * The owner explicitly selects English or Off; disabled by default.
    */
   private void selectNativeAiSpeech(){
     final String current=prefs.getString("native_ai_speech_locale","off");
-    final String[] locales={"off","fr-FR","en-US"};
+    // No French option. Any persisted older locale remains inactive.
+    final String[] locales={"off","en-US"};
     final String[] labels={"Off — text-only replies",
-      "French — installed offline voice","English — installed offline voice"};
+      "English — installed offline voice"};
     int selected=0;
     for(int i=0;i<locales.length;i++)
       if(locales[i].equals(current))selected=i;
@@ -443,7 +444,7 @@ public final class MainActivity extends Activity {
 
   private void speakNativeAiReplyIfEnabled(String reply){
     String locale=prefs.getString("native_ai_speech_locale","off");
-    if(!"fr-FR".equals(locale)&&!"en-US".equals(locale))return;
+    if(!"en-US".equals(locale))return;
     VoiceDialogueService active=VoiceDialogueService.active;
     if(active==null){
       toast("Local response available as text; existing voice service is stopped");
