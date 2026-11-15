@@ -28,6 +28,8 @@ TESTS = [
     "test_model_evaluation.py",
     "test_local_mcp_client.py",
     "test_mcp_tool_routes.py",
+    "test_native_assistant.py",
+    "test_assistant_routes.py",
 ]
 
 
