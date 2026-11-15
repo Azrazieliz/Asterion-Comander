@@ -48,6 +48,10 @@ def app_bridges():return request('/app-bridge/apps').json()
 def app_bridge_invoke(data:AppBridgeAction):
     return request('/app-bridge/invoke','POST',data.model_dump(),timeout=11).json()
 
+@router.get('/phone/diagnostics/vpn')
+def phone_vpn_status():
+    return request('/diagnostics/vpn').json()
+
 @router.get('/phone/diagnostics/security')
 def phone_security_status():
     return request('/diagnostics/security').json()
