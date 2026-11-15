@@ -48,6 +48,14 @@ def app_bridges():return request('/app-bridge/apps').json()
 def app_bridge_invoke(data:AppBridgeAction):
     return request('/app-bridge/invoke','POST',data.model_dump(),timeout=11).json()
 
+@router.get('/phone/diagnostics/security')
+def phone_security_status():
+    return request('/diagnostics/security').json()
+
+@router.get('/phone/diagnostics/permissions')
+def phone_permission_matrix():
+    return request('/diagnostics/permissions').json()
+
 @router.get('/phone/diagnostics/events')
 def phone_diagnostic_events(since: int = 0, limit: int = 100):
     if not 0 <= since < 2**62 or not 1 <= limit <= 200:
