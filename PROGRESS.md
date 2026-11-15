@@ -1,3 +1,12 @@
+# 2026-11-15 — Owner correction: English only in Asterion Intelligence
+
+- User explicitly excludes French. Native AI voice choices are now **English (en-US) / Off**; the newly added French option was removed. Older stored non-English voice preferences are not activated by the new AI response feature.
+- Native Android GGUF assistant and Windows local assistant now explicitly request **English-only responses**. Original voice service and permission infrastructure are retained.
+- Source changed on `work/control-ai-core-20261115`: MainActivity.java, ControlNativeInference.java, assistant_routes.py. No APK build, signing, install, or deployed worker change.
+- The independently initiated source-only regression is tracked under Asterion Control bridge request `ctl-source-20261115-english-voice-c2`; do not mark as passed until its result is verified.
+
+---
+
 # 2026-11-15 — CONTROL PHASE 2: Native assistant tools, IP masking verification and live hardware admission
 
 - Canonical phase-2 implementation record: [docs/CONTROL_AI_PHASE2_NATIVE_TOOLS_IP_PRIVACY_MODEL_ADMISSION_20261115.md](docs/CONTROL_AI_PHASE2_NATIVE_TOOLS_IP_PRIVACY_MODEL_ADMISSION_20261115.md). Current independent branch: work/control-ai-core-20261115. Old broader 7-star/V5 requirements remain, latest user VPN simplification supersedes mandatory geographic selection.
