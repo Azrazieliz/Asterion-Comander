@@ -79,7 +79,7 @@ public final class MainActivity extends Activity {
     MainActivity current=visibleActivity.get();
     return current==null||current.isFinishing()||current.isDestroyed()?null:current;
   }
-  private static final int CAPTURE_REQUEST=112,NOTIFICATION_REQUEST=113,MICROPHONE_REQUEST=115;
+  private static final int CAPTURE_REQUEST=112,NOTIFICATION_REQUEST=113,MICROPHONE_REQUEST=115,VPN_REQUEST=119;
   private final Handler handler=new Handler(Looper.getMainLooper());
   private final ExecutorService io=Executors.newSingleThreadExecutor();
   private SharedPreferences prefs;
@@ -398,19 +398,74 @@ public final class MainActivity extends Activity {
   }
   private void showVpnDetails(){
     try{
-      JSONObject state=ControlPermissionMatrix.status(this);
-      String message="Current Android VPN route detected: "+
-        state.optBoolean("other_vpn_or_active_vpn")+
-        "\nAsterion private VPN: not installed or activated"+
-        "\nExisting paired secure connection remains the default."+
-        "\n\nAsterion VPN requires an audited tunnel backend, device keys and explicit Android system approval. It will not be enabled by opening these settings.";
-      new AlertDialog.Builder(this).setTitle("VPN and secure networking")
-        .setMessage(message).setNegativeButton("Close",null)
-        .setPositiveButton("Android VPN settings",(d,w)->{
-          try{startActivity(new Intent("android.settings.VPN_SETTINGS"));}
-          catch(Exception e){toast("VPN settings unavailable on this device");}
-        }).show();
-    }catch(Exception e){toast("VPN information unavailable");}
+      JSONObject android=ControlPermissionMatrix.status(this);
+      JSONObject tunnel=ControlPrivateVpn.status(this);
+      boolean active=tunnel.optBoolean("active",false);
+      boolean configured=tunnel.optBoolean("configuration_present",false);
+      String message="Asterion WireGuard: "+tunnel.optString("state","off")+
+        "\nConfiguration safely stored: "+configured+
+        "\nAndroid VPN route active: "+android.optBoolean("other_vpn_or_active_vpn")+
+        "\nFull-tunnel owner approved: "+tunnel.optBoolean("full_tunnel_owner_approved")+
+        "\n\nThe current Control secure connection does not require a VPN. " +
+        "A VPN can run only with a valid owner-managed peer and Android system consent. " +
+        "Tunnel UP does not prove remote peer reachability or improved speed.";
+      AlertDialog.Builder dialog=new AlertDialog.Builder(this)
+        .setTitle("Private VPN — WireGuard").setMessage(message)
+        .setNegativeButton("Close",null);
+      if(active){
+        dialog.setPositiveButton("Disconnect",(d,w)->
+          ControlPrivateVpn.disconnect(this,this::toast));
+      }else{
+        if(configured)
+          dialog.setPositiveButton("Connect",(d,w)->requestVpnConsentAndConnect());
+        dialog.setNeutralButton(configured?"Replace configuration":"Import configuration",
+          (d,w)->showVpnImportType());
+      }
+      dialog.show();
+    }catch(Exception e){toast("VPN status unavailable: "+e.getClass().getSimpleName());}
+  }
+  private void showVpnImportType(){
+    final String[] options={"Private-device split routes (recommended)",
+      "Full-device tunnel (requires extra consent)"};
+    new AlertDialog.Builder(this).setTitle("WireGuard traffic scope")
+      .setItems(options,(d,which)->showVpnImportEditor(which==1))
+      .setNegativeButton("Cancel",null).show();
+  }
+  private void showVpnImportEditor(boolean fullTunnel){
+    final EditText editor=new EditText(this);
+    editor.setHint("[Interface]\nPrivateKey = ...\nAddress = ...\n\n[Peer]\nPublicKey = ...\nAllowedIPs = ...\nEndpoint = ...");
+    editor.setSingleLine(false);editor.setMinLines(6);editor.setMaxLines(11);
+    editor.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+    editor.setTransformationMethod(android.text.method.PasswordTransformationMethod.getInstance());
+    editor.setTextSize(12f);editor.setPadding(dp(14),dp(12),dp(14),dp(12));
+    String message=fullTunnel?
+      "Full-device routing may replace another VPN and change how all apps access the internet. The owner must approve Android's VPN prompt.":
+      "Only the private routes declared by the configuration will enter this encrypted tunnel. Existing Control access remains available without it.";
+    new AlertDialog.Builder(this).setTitle("Import encrypted WireGuard profile")
+      .setMessage(message).setView(editor)
+      .setNegativeButton("Cancel",(d,w)->editor.setText(""))
+      .setPositiveButton("Import",(d,w)->{
+        try{
+          ControlPrivateVpn.importLocally(this,editor.getText().toString(),fullTunnel);
+          toast("Encrypted VPN profile imported. Connect when ready.");
+        }catch(Exception e){
+          toast("VPN config rejected: "+e.getClass().getSimpleName());
+        }finally{editor.setText("");}
+      }).show();
+  }
+  private void requestVpnConsentAndConnect(){
+    try{
+      Intent permission=ControlPrivateVpn.consentIntent(this);
+      if(permission!=null){
+        new AlertDialog.Builder(this).setTitle("Android VPN approval")
+          .setMessage("Android will request permission to activate Asterion Private. If another VPN is running, it may be displaced. No VPN is activated without your approval.")
+          .setNegativeButton("Cancel",null)
+          .setPositiveButton("Continue",(d,w)->startActivityForResult(permission,VPN_REQUEST))
+          .show();
+      }else{
+        ControlPrivateVpn.connect(this,this::toast);
+      }
+    }catch(Exception e){toast("Unable to start VPN: "+e.getClass().getSimpleName());}
   }
 
   private TextView serviceLine(LinearLayout card,String title,String iconName){LinearLayout row=h();row.setPadding(0,dp(11),0,dp(11));row.addView(icon(iconName,DesignSystem.PURPLE,20));TextView titleText=t(title,13,DesignSystem.TEXT,true);titleText.setPadding(dp(14),0,0,0);row.addView(titleText,new LinearLayout.LayoutParams(0,-2,1));TextView value=t("Checking",12,DesignSystem.MUTED,false);row.addView(value);wide(card,row);return value;}
@@ -1553,6 +1608,10 @@ public final class MainActivity extends Activity {
           "Screen sharing authorization was not granted by Android");
       }
       handler.postDelayed(this::updateConnectionIssue,500);
+    }
+    if(request==VPN_REQUEST){
+      if(code==RESULT_OK)ControlPrivateVpn.connect(this,this::toast);
+      else toast("Android VPN authorization declined; existing connection unchanged");
     }
   }
   private void registerPhone(){
