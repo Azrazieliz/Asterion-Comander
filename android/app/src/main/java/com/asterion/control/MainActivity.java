@@ -424,7 +424,7 @@ public final class MainActivity extends Activity {
    */
   private void selectNativeAiSpeech(){
     final String current=prefs.getString("native_ai_speech_locale","off");
-    // No French option. Any persisted older locale remains inactive.
+    // Only English voice is selectable; other saved locale values are inactive.
     final String[] locales={"off","en-US"};
     final String[] labels={"Off — text-only replies",
       "English — installed offline voice"};
