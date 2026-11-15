@@ -28,6 +28,13 @@
       </activity>
       <service android:name=".VoiceDialogueService" android:exported="false" android:foregroundServiceType="microphone" />
       <service android:name=".AgentService" android:exported="false" android:stopWithTask="false" android:foregroundServiceType="connectedDevice" />
+      <!-- Official WireGuard userspace VPN. Android must show its own consent
+           before activation; never enabled automatically on installation. -->
+      <service android:name="com.wireguard.android.backend.GoBackend$VpnService"
+          android:permission="android.permission.BIND_VPN_SERVICE"
+          android:exported="true">
+        <intent-filter><action android:name="android.net.VpnService"/></intent-filter>
+      </service>
       <receiver android:name=".RestoreReceiver" android:enabled="true" android:exported="false">
         <intent-filter>
           <action android:name="android.intent.action.BOOT_COMPLETED"/>
