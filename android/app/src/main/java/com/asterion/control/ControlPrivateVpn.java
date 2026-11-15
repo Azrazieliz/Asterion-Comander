@@ -44,6 +44,10 @@ final class ControlPrivateVpn {
   private static volatile GoBackend backend;
   private static volatile String connectionState="off";
   private static volatile String lastErrorCode="";
+  private static volatile String observedPublicIp="";
+  private static volatile String egressVerification="not_checked";
+  private static volatile boolean publicIpChanged=false;
+  private static volatile long egressCheckedAtMs=0;
   private static final Tunnel TUNNEL=new Tunnel(){
     @Override public String getName(){return "AsterionPrivate";}
     @Override public void onStateChange(State state){
@@ -118,6 +122,10 @@ final class ControlPrivateVpn {
     // Store ONLY encrypted configuration. No private keys in logs, source,
     // remote commands, public storage, exception output or UI status.
     String encrypted=encrypt(text);
+    observedPublicIp="";
+    publicIpChanged=false;
+    egressVerification="not_checked";
+    egressCheckedAtMs=0;
     if(!pref(owner).edit().putString("encrypted_configuration",encrypted)
        .putBoolean("allow_full_tunnel",allowFullTunnel).commit())
       throw new IllegalStateException("Could not save encrypted config");
@@ -135,8 +143,16 @@ final class ControlPrivateVpn {
       report.accept("Android VPN approval required");return;
     }
     connectionState="starting";
+    egressVerification="checking";
+    publicIpChanged=false;
+    observedPublicIp="";
     WORKER.submit(()->{
       long started=android.os.SystemClock.elapsedRealtime();
+      // This HTTPS observer is third-party and necessarily sees the public
+      // source IP. It runs ONLY for an owner-initiated VPN connection.
+      String before="";
+      try {before=PublicExitIp.probe();}
+      catch(Exception ignored){} // Probe unavailable is not a tunnel failure.
       try{
         Config config=parseAndValidate(decrypt(context),
           pref(context).getBoolean("allow_full_tunnel",false));
@@ -149,11 +165,30 @@ final class ControlPrivateVpn {
         if(after!=Tunnel.State.UP)
           throw new IllegalStateException("VPN engine did not reach UP");
         connectionState="tunnel_up";lastErrorCode="";
+        String after="";
+        try {after=PublicExitIp.probe();}
+        catch(Exception ignored){}
+        if(!after.isEmpty()){
+          observedPublicIp=after;
+          publicIpChanged=PublicExitIp.changed(before,after);
+          egressVerification=before.isEmpty()?"baseline_unavailable":
+            publicIpChanged?"public_ip_changed":"public_ip_unchanged";
+        }else{
+          observedPublicIp="";
+          publicIpChanged=false;
+          egressVerification="exit_probe_failed";
+        }
+        egressCheckedAtMs=System.currentTimeMillis();
+        final String result=egressVerification;
         ControlEventJournal.write(context,"vpn_tunnel","wireguard",
-          "connected","backend_up",android.os.SystemClock.elapsedRealtime()-started);
-        MAIN.post(()->report.accept("VPN tunnel is up. Peer reachability is not yet verified."));
+          "connected",result,android.os.SystemClock.elapsedRealtime()-started);
+        MAIN.post(()->report.accept(publicIpChanged
+          ?"VPN exit IP changed. Full-device leak and speed tests remain unverified."
+          :"WireGuard backend is up, but IP hiding is NOT verified ("+result+")."));
       }catch(Exception|LinkageError e){
         connectionState="error";lastErrorCode=e.getClass().getSimpleName();
+        publicIpChanged=false;
+        egressVerification="backend_error";
         ControlEventJournal.write(context,"vpn_tunnel","wireguard",
           "failed",lastErrorCode,android.os.SystemClock.elapsedRealtime()-started);
         MAIN.post(()->report.accept("VPN failed: "+lastErrorCode));
@@ -168,6 +203,10 @@ final class ControlPrivateVpn {
         GoBackend instance=backend;
         if(instance!=null)instance.setState(TUNNEL,Tunnel.State.DOWN,null);
         connectionState="off";
+        egressVerification="not_checked";
+        publicIpChanged=false;
+        observedPublicIp="";
+        egressCheckedAtMs=0;
         ControlEventJournal.write(context,"vpn_tunnel","wireguard",
           "disconnected","owner_requested",0);
         MAIN.post(()->report.accept("Asterion VPN disconnected"));
@@ -191,6 +230,13 @@ final class ControlPrivateVpn {
       .put("configuration_encrypted_at_rest",true)
       .put("full_tunnel_owner_approved",pref(c).getBoolean("allow_full_tunnel",false))
       .put("peer_reachability_verified",false)
+      .put("public_exit_ip",observedPublicIp)
+      .put("public_ip_changed_from_direct_baseline",publicIpChanged)
+      .put("public_ip_check_state",egressVerification)
+      .put("public_ip_checked_at_ms",egressCheckedAtMs)
+      .put("full_device_ipv4_ipv6_dns_leak_test_passed",false)
+      .put("full_phone_privacy_verified",false)
+      .put("external_check_provider","https://api.ipify.org")
       .put("android_system_consent_required",true)
       .put("error_code",lastErrorCode);
   }
