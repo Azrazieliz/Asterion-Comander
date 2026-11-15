@@ -139,9 +139,15 @@ def _copy(key: str, path: Path, name: str, paired: dict, cancel: threading.Event
                 "location":done["location"],"android_uri":done["uri"],
                 "transport":"private-wifi","verified":True})
     except Exception as e:
-        label="cancelled" if isinstance(e,InterruptedError) else "failed"
-        _update(key,state=label,error=type(e).__name__+": "+str(e)[:400])
-        if transfer_id:
+        aborted=isinstance(e,InterruptedError)
+        # A disconnected sender cannot assume the phone did not accept data.
+        # Keep partial bytes until explicit cancellation or Android TTL cleanup;
+        # the same SHA/name can resume without a second media publication.
+        unknown=isinstance(e,(httpx.TransportError,httpx.TimeoutException)) or \
+            "outcome uncertain" in str(e).lower()
+        label="cancelled" if aborted else ("outcome_unknown" if unknown else "failed")
+        _update(key,state=label,error=type(e).__name__+": "+str(e)[:160])
+        if transfer_id and aborted:
             try:
                 with httpx.Client(timeout=4,trust_env=False,follow_redirects=False) as c:
                     c.post(base+"/transfer/cancel/"+transfer_id,json={},headers=headers)
