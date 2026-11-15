@@ -38,6 +38,11 @@ class LocalModelConfig:
     timeout_s: int = 90
     max_tokens: int = 2048
     temperature: float = 0.2
+    system_instruction: str = (
+        "You are Asterion's locally hosted development reasoning model. "
+        "Only tool receipts and independent tests establish completed work. "
+        "Do not fabricate files, commits, builds, installs or tool results."
+    )
 
     def __post_init__(self):
         parsed = urllib.parse.urlsplit(self.endpoint)
@@ -55,6 +60,9 @@ class LocalModelConfig:
             raise ValueError("invalid_output_token_budget")
         if not 0 <= self.temperature <= 1:
             raise ValueError("invalid_temperature")
+        if not isinstance(self.system_instruction,str) or not 20 <= len(
+            self.system_instruction) <= 4000:
+            raise ValueError("invalid_local_system_instruction")
 
 
 class LocalModelProvider:
@@ -82,10 +90,7 @@ class LocalModelProvider:
             "temperature": self.config.temperature,
             "max_tokens": self.config.max_tokens,
             "messages": [
-                {"role": "system", "content":
-                 "You are Asterion's locally hosted development reasoning model. "
-                 "Only tool receipts and independent tests establish completed work. "
-                 "Do not fabricate files, commits, builds, installs or tool results."},
+                {"role": "system", "content": self.config.system_instruction},
                 {"role": "user", "content": prompt},
             ],
         }, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
