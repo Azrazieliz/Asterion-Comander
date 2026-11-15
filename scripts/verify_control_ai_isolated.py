@@ -26,6 +26,7 @@ TESTS = [
     "test_mixed_sessions.py",
     "test_vpn_route_policy.py",
     "test_model_evaluation.py",
+    "test_local_mcp_client.py",
 ]
 
 
