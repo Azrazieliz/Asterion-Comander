@@ -37,5 +37,12 @@ android {
       signingConfig signingConfigs.ownerRelease
     }
   }
-  compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+  compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17; coreLibraryDesugaringEnabled true }
+}
+
+// Official audited WireGuard GoBackend. VPN remains OFF until owner approval
+// and a valid peer configuration; no third-party commercial service.
+dependencies {
+  implementation 'com.wireguard.android:tunnel:1.0.20260102'
+  coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.3'
 }
