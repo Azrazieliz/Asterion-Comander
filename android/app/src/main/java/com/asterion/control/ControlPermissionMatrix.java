@@ -45,9 +45,10 @@ final class ControlPermissionMatrix {
       NetworkCapabilities caps=network==null?null:cm.getNetworkCapabilities(network);
       vpnActive=caps!=null&&caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN);
     }catch(Exception ignored){}
+    JSONObject tunnel=ControlPrivateVpn.status(context);
     result.put("other_vpn_or_active_vpn",vpnActive)
-      .put("asterion_vpn_active",false)
-      .put("asterion_vpn_implemented",false)
+      .put("asterion_vpn_active",tunnel.optBoolean("active",false))
+      .put("asterion_vpn_implemented",true)
       .put("vpn_requires_android_system_consent",true)
       .put("own_app_exit_history_available",Build.VERSION.SDK_INT>=30)
       .put("partner_engine_diagnostics_requires_signed_approval",true);
