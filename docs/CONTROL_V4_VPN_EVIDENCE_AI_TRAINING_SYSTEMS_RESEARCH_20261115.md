@@ -1,3 +1,5 @@
+> **V5 OWNER FOLLOW-UP (2026-11-15):** See [broad-content location assessment, shared Browser/Codex integration and Rounder engine reuse, >=10k independent model evaluation](CONTROL_V5_USAGE_GEO_BROWSER_REUSE_12000_EVAL_20261115.md). V4 VPN vendor research remains valid, but V5 corrects the country-use assessment to include Japanese artwork, creator media, visual novels, manga, cosplay, adult media and other sites, NOT just Asterion projects. On-demand geographic exit has real potential value. 500 evaluations are rejected; >=10k unique tests required. No code yet.
+
 # ASTERION CONTROL V4 — VPN Alternatives Investigation + Native General AI/Model Training + Actual Systems
 Research date: 2026-11-15
 Status: EVIDENCE-BACKED RESEARCH / ARCHITECTURE ONLY — OWNER FORBIDS CODING AT PRESENT. No builds, no dependency installation, no APK publication, no Windows/phone deployment, no Android VPN activation, no model downloading or new provider account creation.
