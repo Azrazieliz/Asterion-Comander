@@ -35,6 +35,9 @@ TESTS = [
     "test_development_workbench.py",
     "test_development_cycle_driver.py",
     "test_model_watch_service.py",
+    "test_shared_browser.py",
+    "test_reverse_lab.py",
+    "test_external_tools_routes.py",
 ]
 
 
