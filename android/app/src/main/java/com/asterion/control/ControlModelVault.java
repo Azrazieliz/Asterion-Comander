@@ -48,6 +48,13 @@ final class ControlModelVault {
   private static volatile String artifactSha="", artifactRevision="";
   private static final String REPO=ModelDownloadPolicy.DEFAULT_REPOSITORY;
   private static final String FILE=ModelDownloadPolicy.DEFAULT_FILENAME;
+  // Confirmed using a HEAD-only official Hugging Face response on 2026-11-15.
+  // A newer upstream revision MUST NOT silently replace this pinned model.
+  private static final String PINNED_COMMIT=
+      "7d26695454df6de5fbcce2e58681e62dae06ce43";
+  private static final String PINNED_SHA256=
+      "57a1085840f497d764a7fc5d346922dbde961efb54cc792ea81d694fd846a1d8";
+  private static final long PINNED_BYTES=1396198496L;
   private static final String VERIFIED_RECORD="verified-current-model.json";
   private ControlModelVault(){}
 
@@ -152,7 +159,7 @@ final class ControlModelVault {
     // NO remote arbitrary-repository execution or private tokens. The official
     // Hub returns immutable repository commit, actual LFS SHA and byte size.
     URL source=new URL("https://huggingface.co/"+REPO+
-                       "/resolve/main/"+FILE);
+                       "/resolve/"+PINNED_COMMIT+"/"+FILE);
     if(!ModelDownloadPolicy.trustedArtifactUrl(source,true))
       throw new SecurityException("Untrusted model source");
     HttpURLConnection conn=(HttpURLConnection)source.openConnection();
@@ -168,10 +175,11 @@ final class ControlModelVault {
           conn.getHeaderField("X-Linked-Etag"));
       long size=ModelDownloadPolicy.sizeHeader(
           conn.getHeaderField("X-Linked-Size"));
-      if(size<0||sha.isEmpty()||commit==null)
-        throw new IOException("Model SHA/size/immutable revision unavailable");
+      if(size!=PINNED_BYTES||!PINNED_SHA256.equals(sha)||
+         commit==null||!PINNED_COMMIT.equals(commit.toLowerCase(Locale.ROOT)))
+        throw new IOException("Public HF model bytes differ from owner-pinned model");
       return new ModelDownloadPolicy.Manifest(
-          REPO,commit.toLowerCase(Locale.ROOT),FILE,sha,size,"apache-2.0");
+          REPO,PINNED_COMMIT,FILE,PINNED_SHA256,PINNED_BYTES,"apache-2.0");
     }finally{conn.disconnect();}
   }
 
