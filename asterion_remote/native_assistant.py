@@ -26,13 +26,14 @@ _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{7,99}$")
 _ALLOWED = frozenset({
     "host.health", "sessions.recent", "sessions.status",
     "cycles.status", "skills.list", "models.list",
-    "files.hash", "native.session", "github.mcp",
+    "files.hash", "files.read_text", "native.session", "skills.execute",
+    "github.mcp",
 })
 _DEFAULT_READ = frozenset({
     "host.health", "sessions.recent", "sessions.status",
     "cycles.status", "skills.list", "models.list",
 })
-_MUTATE = frozenset({"native.session", "github.mcp"})
+_MUTATE = frozenset({"native.session", "skills.execute", "github.mcp"})
 _LOCK = threading.RLock()
 _MAX_PROMPT = 8000
 _MAX_STEPS = 12
@@ -245,6 +246,45 @@ def _read_tool(name: str, args: dict, request_id: str) -> dict:
             raise ValueError("invalid_app_filter")
         return {"ok":True,"observed":True,
                 "models":list_models(app)}
+    if name == "files.read_text":
+        from .app import safe_path
+        raw = args.get("path")
+        if not isinstance(raw,str) or not 1<=len(raw)<=2048:
+            raise ValueError("invalid_file_path")
+        # Source only: do not permit a model to exfiltrate credential files,
+        # private keys, .env config or arbitrary binary data. This tool is
+        # never in the default grant set even for the owner.
+        requested = Path(raw)
+        if any(segment.startswith(".") for segment in requested.parts):
+            raise PermissionError("hidden_file_requires_manual_access")
+        file = safe_path(raw)
+        if not file.is_file() or file.stat().st_size > 2_000_000:
+            raise ValueError("source_file_missing_or_too_large")
+        if file.suffix.lower() not in {
+            ".py",".java",".kt",".js",".ts",".tsx",".json",".xml",
+            ".yaml",".yml",".md",".toml",".gradle",".properties",
+            ".html",".css",".sql",".c",".cpp",".h",".hpp",".txt",
+        }:
+            raise PermissionError("file_type_not_authorized_for_model")
+        start = args.get("start_line",1)
+        count = args.get("max_lines",60)
+        if (not isinstance(start,int) or not 1<=start<=100000 or
+            not isinstance(count,int) or not 1<=count<=100):
+            raise ValueError("invalid_source_line_range")
+        lines=[]
+        next_line=None
+        with file.open("r",encoding="utf-8",errors="strict") as stream:
+            for number,text in enumerate(stream,1):
+                if number<start:continue
+                if len(lines)>=count or sum(len(x) for x in lines)+len(text)>7500:
+                    next_line=number
+                    break
+                lines.append(text)
+        return {"ok":True,"observed":True,"text":"".join(lines),
+                "start_line":start,"lines_returned":len(lines),
+                "next_line":next_line,
+                "truncated":next_line is not None,
+                "private_file_content_stored_in_journal":False}
     if name == "files.hash":
         from .app import safe_path
         raw = args.get("path")
@@ -298,6 +338,23 @@ def _write_tool(name: str, args: dict, request_id: str,
                 "reused":receipt.get("reused",False),
                 "result_verified":False,
                 "next_tool":"sessions.status"}
+    if name == "skills.execute":
+        if not allow_device_actions:
+            raise PermissionError("owner_skill_execution_consent_required")
+        skill = args.get("skill_id")
+        sha = args.get("sha256")
+        if (not isinstance(skill,str) or not re.fullmatch(
+                r"[A-Za-z0-9][A-Za-z0-9_.-]{3,71}",skill) or
+            not isinstance(sha,str) or not re.fullmatch(r"[a-f0-9]{64}",sha)):
+            raise ValueError("invalid_approved_skill_reference")
+        if "request_id" in args:
+            raise ValueError("model_cannot_choose_idempotency_key")
+        from .skill_studio import execute as execute_skill
+        receipt=execute_skill(skill,sha,f"{request_id}:{ordinal}")
+        return {"ok":receipt["ok"],"observed":True,
+                "skill_id":skill,"session":receipt["session"],
+                "verification":"session_outcome_pending",
+                "project_work_verified":False}
     if name == "github.mcp":
         if not allow_device_actions:
             raise PermissionError("owner_github_tool_consent_required")
