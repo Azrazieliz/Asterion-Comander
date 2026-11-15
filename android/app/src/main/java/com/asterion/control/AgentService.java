@@ -68,6 +68,7 @@ public final class AgentService extends Service {
   }
   @Override public void onCreate(){
     super.onCreate();
+    ControlEventJournal.write(this,"service_started","lifecycle","running","user_enabled",0);
     transfers=new TransferStore(this);
     continuation=ContinuationLedger.get(this);
     try{continuation.recover();}catch(Exception ignored){}
@@ -466,6 +467,16 @@ public final class AgentService extends Service {
     if(method.equals("POST")&&path.equals("/performance/optimize")){
       try{json(out,200,PerformanceManager.prioritizeForegroundNow(this));}
       catch(Exception e){json(out,400,error(e.getMessage()));}return;
+    }
+    if(method.equals("GET")&&path.equals("/diagnostics/events")){
+      try{
+        android.net.Uri requested=android.net.Uri.parse("http://localhost"+request[1]);
+        String querySince=requested.getQueryParameter("since");
+        String queryLimit=requested.getQueryParameter("limit");
+        long since=querySince==null?0:Long.parseLong(querySince);
+        int limit=queryLimit==null?100:Integer.parseInt(queryLimit);
+        json(out,200,ControlEventJournal.recent(this,since,limit));
+      }catch(Exception e){json(out,400,error("Invalid local diagnostic cursor"));}return;
     }
     if(method.equals("GET")&&path.equals("/diagnostics/exit-history")){
       try{json(out,200,ControlCrashDiagnostics.recentExitHistory(this));}
