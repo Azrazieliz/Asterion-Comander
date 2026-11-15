@@ -45,3 +45,7 @@ To control a device here, use the connected GitHub tool to **create** `commands/
 **Current publication:** owner-signed **v0.9.31** Android release is published on `main` with the existing in-app update feed (compiled source `f5f74e0ba94ceb5152fbbffe50d277ebc2ee3e97`, SHA-256 `800b85fb8114e8d6619620aeef2f82da47d2ef985e64eac523a138774be182bc`). Installation and a completed unattended cycle are **not verified**. For current version/defects read [PROGRESS.md](PROGRESS.md). Source of recent development is `work/control-0927-overnight-cycles-20261111` or a newer verified continuation, not old source on `main`.
 
 Project requirements: [7-star frozen master](7STAR_FROZEN_MASTER.md), [continuous cycle contract](docs/CYCLE_EXECUTION_CONTRACT.md), [cross-app API](docs/CONTROL_CROSS_APP_API_V1.md). Historical MCP gateway/plugin instructions were exploratory and are **revoked**, not a checklist for future implementation.
+
+## Owner-approved 7★ upgrade specification (2026-11-15)
+
+The active implementation contract for universal live crash/engine diagnostics, real-time phone/PC execution, developer-authorized access, optional fast private VPN, adaptive connection recovery and security levels is [docs/7STAR_CONTROL_DIAGNOSTICS_REALTIME_VPN_SECURITY.md](docs/7STAR_CONTROL_DIAGNOSTICS_REALTIME_VPN_SECURITY.md). Preserve the existing working Control infrastructure; implement and verify the requirements incrementally, beginning with instrumented Downloader root-cause analysis. This is a **specification, not a claim of implementation**.
