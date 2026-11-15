@@ -83,7 +83,7 @@ class DiagnosticSnapshotTests(unittest.TestCase):
              patch("asterion_remote.diagnostic_snapshot.phone_bridge.request",
                    side_effect=fake_request) as called:
             result = snapshot.collect()
-        self.assertEqual(called.call_count, 3)
+        self.assertEqual(called.call_count, 4)
         self.assertTrue(result["android"]["reachable"])
         self.assertEqual(result["android"]["own_process_journal"]["records"][0]["kind"],
                          "transport_error")
