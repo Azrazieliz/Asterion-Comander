@@ -295,6 +295,26 @@ final class ControlModelVault {
       data.getLong("size_bytes"),data.getString("license"));
   }
 
+  /**
+   * Called ONLY on a background model-loading worker. Verify real GGUF
+   * model bytes before handing a private local file path to JNI. A remembered
+   * filename, size or prior success flag alone is never sufficient.
+   */
+  static File requireVerifiedWeights(Context context)throws Exception{
+    File root=directory(context);
+    ModelDownloadPolicy.Manifest model=savedVerifiedRecord(root);
+    if(model==null)throw new IOException("No owner-verified GGUF manifest");
+    if(!REPO.equals(model.repository)||!FILE.equals(model.filename)||
+       !PINNED_COMMIT.equals(model.revision)||
+       !PINNED_SHA256.equals(model.sha256)||
+       model.sizeBytes!=PINNED_BYTES)
+      throw new SecurityException("Model manifest does not match pinned weights");
+    File weights=new File(root,model.privateFilename());
+    if(!ModelDownloadPolicy.verifiedFile(weights,model))
+      throw new IOException("GGUF weights failed full SHA-256 verification");
+    return weights;
+  }
+
   static void verifyInstalled(Activity owner,Consumer<String> callback){
     requireOwner(owner);
     if(busy){callback.accept("Model transfer already active");return;}
