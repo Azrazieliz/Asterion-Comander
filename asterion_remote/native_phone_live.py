@@ -15,6 +15,7 @@ import secrets
 from pathlib import Path
 from typing import Any
 
+from .diagnostic_core import try_record
 from .pairing import is_authorized as paired_device_is_authorized
 from .phone_bridge import load as load_registered_phone
 from fastapi import APIRouter, WebSocket
@@ -63,15 +64,22 @@ def _fail_pending(reason: str) -> None:
 async def phone_live(ws: WebSocket):
     global _active
     header = ws.headers.get("authorization", "")
+    # Record exact server-side rejection stage, NEVER the bearer or source IP.
     if not header.startswith("Bearer ") or not _authorized(header[7:]):
+        try_record("security_failure",component="phone_wss_relay",severity="warning",
+                   state="failed",attributes={"stage":"authorization","reason":"unapproved_phone_key"})
         await ws.close(code=1008)
         return
     if _active is not None:
         # Never replace an in-flight session and silently replay its requests.
+        try_record("transport_error",component="phone_wss_relay",severity="warning",
+                   state="failed",attributes={"stage":"upgrade","reason":"session_already_active"})
         await ws.close(code=1008)
         return
     await ws.accept()
     _active = ws
+    try_record("phone_connected",component="phone_wss_relay",state="connected",
+               attributes={"stage":"websocket_accepted"})
     try:
         while True:
             raw = await ws.receive_text()
@@ -98,6 +106,8 @@ async def phone_live(ws: WebSocket):
     finally:
         if _active is ws:
             _active = None
+            try_record("transport_error",component="phone_wss_relay",severity="warning",
+                       state="disconnected",attributes={"stage":"session_end"})
             _fail_pending("Phone direct HTTPS session dropped; outcome uncertain")
 
 
