@@ -90,19 +90,25 @@ if($bridge.Count -eq 0){
 # Only intervene after two real phone-side handshake rejections while the phone
 # remains reachable. Never alter Android permissions, keys, pairing or other services.
 $nativeFailuresFile=Join-Path $state 'native-wss-handshake-failures.txt'
+$nativeLastRestartFile=Join-Path $state 'native-wss-last-restart.txt'
 try{
   $phone=Invoke-RestMethod ($url+'/api/v1/phone') -Headers @{Authorization=('Bearer '+$token)} -TimeoutSec 3
   $direct=$phone.info.remote_transport.direct_mcp
   $rejected=[bool]($nativeRelayOk -and $phone.reachable -and $direct -and
     -not $direct.connected -and $direct.last_stage -eq 'wss_upgrade' -and
-    $direct.last_error_detail -like '*WSS handshake rejected*')
+    $direct.last_error_detail -match 'WSS handshake rejected|WSS upgrade HTTP (400|403|502)')
   $failures=0
   if($rejected){
     if(Test-Path $nativeFailuresFile){
       [void][int]::TryParse((Get-Content $nativeFailuresFile -Raw).Trim(),[ref]$failures)
     }
     $failures=[math]::Min(99,$failures+1)
-    if($failures -ge 2){
+    $lastRestart=[datetime]::MinValue
+    if(Test-Path $nativeLastRestartFile){
+      [void][datetime]::TryParse((Get-Content $nativeLastRestartFile -Raw).Trim(),[ref]$lastRestart)
+    }
+    $cooldownOk=((Get-Date)-$lastRestart).TotalMinutes -ge 10
+    if($failures -ge 2 -and $cooldownOk){
       $local=Invoke-RestMethod 'http://127.0.0.1:8995/healthz' -TimeoutSec 3
       if($local.ok -and -not $local.phone_connected){
         $socket=@(Get-NetTCPConnection -State Listen -LocalPort 8995 -ErrorAction SilentlyContinue)
@@ -118,6 +124,7 @@ try{
                 -WorkingDirectory $root -WindowStyle Hidden `
                 -RedirectStandardOutput (Join-Path $state 'native-wss.stdout.log') `
                 -RedirectStandardError (Join-Path $state 'native-wss.stderr.log')|Out-Null
+              Set-Content -LiteralPath $nativeLastRestartFile -Value (Get-Date -Format o) -Encoding ASCII
               Add-Content (Join-Path $state 'control-watchdog-recovery.log') ('Native WSS handshake relay restart '+(Get-Date -Format o))
             }
           }
