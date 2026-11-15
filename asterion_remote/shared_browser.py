@@ -69,6 +69,10 @@ def _url(value:str, *, onion_mode:bool)->tuple[str,str,int,str]:
         raise ValueError("browser_port_not_authorized")
     path=parts.path or "/"
     if parts.query:path+="?"+parts.query
+    # Never pass raw non-ASCII to HTTP/1.1 request-line encoding.
+    from urllib.parse import quote
+    path=quote(path,safe="/:@!    if parts.query:path+="?"+parts.query
+    if len(path)>1800:'()*+,;=?%[]~")
     if len(path)>1800:
         raise ValueError("browser_request_path_too_long")
     url=urlunsplit((parts.scheme,hostname+(
@@ -161,7 +165,7 @@ class _Extract(HTMLParser):
             link=dict(attrs).get("href")
             if link and len(link)<1000:
                 absolute=urljoin(self.base,link)
-                try:_url(absolute,onion_mode=self.base.endswith(".onion"))
+                try:_url(absolute,onion_mode=(urlsplit(self.base).hostname or "").endswith(".onion"))
                 except (ValueError,PermissionError):continue
                 self.links.append(absolute)
     def handle_endtag(self,tag):
