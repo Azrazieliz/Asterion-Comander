@@ -69,6 +69,8 @@ def _db() -> sqlite3.Connection:
       objective TEXT NOT NULL,
       next_work TEXT NOT NULL,
       state TEXT NOT NULL,
+      pause_requested INTEGER NOT NULL DEFAULT 0,
+      stop_requested INTEGER NOT NULL DEFAULT 0,
       turn_index INTEGER NOT NULL DEFAULT 0,
       verified_turns INTEGER NOT NULL DEFAULT 0,
       max_turns INTEGER NOT NULL DEFAULT 0,
@@ -108,7 +110,10 @@ def _public(row: sqlite3.Row) -> dict:
     return {
         "cycle_id": row["id"], "project": row["project"],
         "spec_reference": row["spec_ref"], "provider": row["provider"],
-        "state": row["state"], "turn_index": row["turn_index"],
+        "state": row["state"],
+        "pause_requested": bool(row["pause_requested"]),
+        "stop_requested": bool(row["stop_requested"]),
+        "turn_index": row["turn_index"],
         "verified_turns": row["verified_turns"],
         "max_turns": row["max_turns"],
         "created_ms": row["created_ms"], "updated_ms": row["updated_ms"],
@@ -195,37 +200,50 @@ def recent(limit: int = 30) -> list[dict]:
 
 
 def pause(cycle_id: str) -> dict:
+    """Stop NEXT turns immediately; do not interrupt an uncertain in-flight send."""
     _require_id(cycle_id)
     with _LOCK:
         con = _db()
         try:
-            con.execute("""UPDATE cycles SET state='paused',updated_ms=?
-                WHERE id=? AND state='ready'""", (_now(), cycle_id))
+            con.execute("""UPDATE cycles SET pause_requested=1,
+                state=CASE WHEN state='ready' THEN 'paused' ELSE state END,
+                updated_ms=? WHERE id=? AND
+                state NOT IN ('finished','stopped','turn_limit_reached')""",
+                (_now(), cycle_id))
         finally:
             con.close()
     return status(cycle_id)
 
 
 def resume(cycle_id: str) -> dict:
-    """Resume a paused cycle; uncertain submission requires human review."""
+    """Resume an owner-paused cycle without replaying pending sends."""
     _require_id(cycle_id)
     with _LOCK:
         con = _db()
         try:
-            con.execute("""UPDATE cycles SET state='ready',updated_ms=?
-                WHERE id=? AND state='paused'""", (_now(), cycle_id))
+            con.execute("""UPDATE cycles SET pause_requested=0,
+                state=CASE WHEN state='paused' THEN 'ready' ELSE state END,
+                updated_ms=?
+                WHERE id=? AND stop_requested=0 AND
+                state NOT IN ('finished','stopped','turn_limit_reached')""",
+                (_now(), cycle_id))
         finally:
             con.close()
     return status(cycle_id)
 
 
 def stop(cycle_id: str) -> dict:
+    """Request stop without deleting evidence of an in-flight operation."""
     _require_id(cycle_id)
     with _LOCK:
         con = _db()
         try:
-            con.execute("""UPDATE cycles SET state='stopped',updated_ms=?
-                WHERE id=? AND state!='finished'""", (_now(), cycle_id))
+            con.execute("""UPDATE cycles SET stop_requested=1,
+                state=CASE WHEN state IN ('ready','paused')
+                   THEN 'stopped' ELSE state END,
+                updated_ms=? WHERE id=? AND
+                state NOT IN ('finished','stopped','turn_limit_reached')""",
+                (_now(), cycle_id))
         finally:
             con.close()
     return status(cycle_id)
@@ -391,8 +409,10 @@ def verify(cycle_id: str, request_id: str, *,
                 raise RuntimeError("no_matching_turn_to_verify")
             reached_limit=(row["max_turns"]>0 and
                            row["turn_index"] >= row["max_turns"])
-            new_state=("finished" if done else
-                       "turn_limit_reached" if reached_limit else "ready")
+            new_state=("stopped" if row["stop_requested"] else
+                       "finished" if done else
+                       "turn_limit_reached" if reached_limit else
+                       "paused" if row["pause_requested"] else "ready")
             con.execute("""UPDATE cycles SET state=?,next_work=?,verified_turns=verified_turns+1,
                 updated_ms=?,completion_evidence_sha256=?
                 WHERE id=? AND state='awaiting_verification'""",
@@ -405,7 +425,7 @@ def verify(cycle_id: str, request_id: str, *,
             con.close()
     result = status(cycle_id)
     result["project_work_verified"] = True
-    result["scope_completed"] = bool(done)
+    result["scope_completed"] = bool(done and not result["stop_requested"])
     result["turn_limit_reached"] = reached_limit and not done
     return result
 
