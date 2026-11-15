@@ -33,6 +33,7 @@ TESTS = [
     "test_model_admission.py",
     "test_model_capacity_routes.py",
     "test_development_workbench.py",
+    "test_development_cycle_driver.py",
 ]
 
 
