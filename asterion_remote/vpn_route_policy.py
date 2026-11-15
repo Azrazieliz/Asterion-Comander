@@ -5,8 +5,9 @@ startup. The native Android VpnService remains the actual data-plane owner.
 Only real owner-authorized, free, eligible and device-measured routes can be
 selected. A route *selection* is never a claim of established protection.
 
-Default preference: trustworthy high-throughput IP replacement; geographic
-country selection is ONLY on demand, with Japan the owner's requested target.
+Default preference: trustworthy high-throughput IP replacement regardless
+of country. Japan is ONLY an optional soft preference; lack of a Japanese
+exit MUST NOT block a working privacy route.
 Tor onion access is a distinct mode and must not be reported as fast VPN.
 """
 from __future__ import annotations
@@ -72,11 +73,15 @@ def assess(candidate: ExitCandidate) -> dict:
         reasons.append("privacy_not_verified")
     if not _global_ip(candidate.exit_ip):
         reasons.append("exit_ip_not_publicly_verified")
-    if candidate.country.strip().upper() not in {
-        "FR","JP","NL","DE","CH","NO","SE","FI","PL","RO","GB","US",
-        "CA","MX","SG","AT","BE","ES","IT","CZ","DK","IE","PT","AU",
-    }:
-        reasons.append("country_not_verified")
+    # Country verification is not a privacy prerequisite. Some free VPNs
+    # deliberately obscure exit geography; the owner prioritizes a different
+    # working public IP, not a paid country-picker.
+    if candidate.country and not (
+        isinstance(candidate.country, str) and
+        len(candidate.country.strip()) == 2 and
+        candidate.country.strip().isalpha()
+    ):
+        reasons.append("invalid_optional_country_label")
     if candidate.samples < MIN_SAMPLES:
         reasons.append("insufficient_real_speed_samples")
     numbers=(candidate.direct_down_mbps,candidate.vpn_down_mbps,
@@ -101,7 +106,7 @@ def assess(candidate: ExitCandidate) -> dict:
     return {
         "provider":candidate.provider,
         "endpoint_id":candidate.endpoint_id,
-        "country":candidate.country.upper(),
+        "country":candidate.country.strip().upper() if isinstance(candidate.country,str) else "",
         "exit_ip":candidate.exit_ip if _global_ip(candidate.exit_ip) else "",
         "eligible":eligible,
         "reject_reasons":reasons,
@@ -116,35 +121,41 @@ def assess(candidate: ExitCandidate) -> dict:
 
 def choose(candidates: Iterable[ExitCandidate], *,
            country: str | None = None, mode: str = "private") -> dict:
-    if mode not in {"private","geo_on_demand"}:
+    """Return the best *eligible*, NOT CONNECTED, private IP replacement.
+
+    "geo_on_demand" is retained for older clients, but any Japan request
+    is a soft preference. No free/country-specific exit? Fall back to any
+    verified privacy route that meets cost, privacy and 25% speed rules.
+    """
+    if mode not in {"private","geo_on_demand","japan_preferred"}:
         raise ValueError("invalid_routing_mode")
-    if mode=="private" and country is not None:
-        raise ValueError("geography_requires_explicit_on_demand_mode")
-    if mode=="geo_on_demand" and country!="JP":
-        raise ValueError("only_Japan_geo_preference_approved")
+    if country not in {None,"JP"}:
+        raise ValueError("country_selection_not_supported")
+    prefer_japan=(mode=="japan_preferred" or
+                  mode=="geo_on_demand" or country=="JP")
     examined=[]
     eligible=[]
     for candidate in candidates:
         assessment=assess(candidate)
         examined.append(assessment)
-        if mode=="geo_on_demand" and assessment["country"]!="JP":
-            assessment["eligible"]=False
-            assessment["reject_reasons"].append("requested_japan_exit_unavailable")
         if assessment["eligible"]:
             eligible.append(assessment)
     if not eligible:
         return {"ok":False,"state":"VPN_UNAVAILABLE_NO_ELIGIBLE_FREE_EXIT",
                 "mode":mode,"selected":None,
                 "examined":examined,"direct_fallback_enabled":False,
+                "japan_preference_satisfied":False,
                 "unverified_connected_claim":False}
     # Throughput is hard gate, RTT target is a preference, not fake hard proof.
     best=max(eligible,key=lambda e:(
+        bool(prefer_japan and e["country"]=="JP"),
         bool(e["latency_25_percent_target_met"]),
         min(e["download_ratio"],e["upload_ratio"]),
         -e["p95_rtt_ratio"]))
     return {"ok":True,"state":"ROUTE_ELIGIBLE_NOT_CONNECTED",
             "mode":mode,"selected":best,
             "examined":examined,"direct_fallback_enabled":False,
+            "japan_preference_satisfied":bool(prefer_japan and best["country"]=="JP"),
             "unverified_connected_claim":False}
 
 
