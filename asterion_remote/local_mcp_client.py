@@ -51,7 +51,8 @@ class McpServerConfig:
             raise ValueError("mcp_server_binary_not_installed")
         if not isinstance(self.sha256, str) or not _SHA.fullmatch(self.sha256):
             raise ValueError("mcp_binary_sha256_required")
-        actual = hashlib.file_digest(file.open("rb"), "sha256").hexdigest()
+        with file.open("rb") as stream:
+            actual = hashlib.file_digest(stream, "sha256").hexdigest()
         if actual != self.sha256:
             raise ValueError("mcp_binary_fingerprint_mismatch")
         if self.protocol not in _PROTOCOLS:
@@ -140,9 +141,13 @@ class McpStdioClient:
                     self._send({"jsonrpc":"2.0",
                                 "method":"notifications/initialized"})
                 else:
-                    # 2026 protocol eliminated the initialize exchange.
-                    # Each request carries its identity/capabilities in _meta.
+                    # The modern protocol eliminated the old handshake.
+                    # Discovery is an actual RPC with per-request metadata.
                     self._selected_version=_MODERN
+                    found=self._rpc("server/discover")
+                    versions=found.get("protocolVersions")
+                    if not isinstance(versions,list) or _MODERN not in versions:
+                        raise RuntimeError("mcp_modern_server_discovery_failed")
                 self._initialized=True
             except BaseException:
                 self.close()
@@ -196,6 +201,7 @@ class McpStdioClient:
         if self._selected_version==_MODERN:
             args.setdefault("_meta",{}).update({
                 "io.modelcontextprotocol/protocolVersion":_MODERN,
+                "io.modelcontextprotocol/clientCapabilities":{},
                 "io.modelcontextprotocol/clientInfo":{
                     "name":"asterion-control","version":"0.9.31"}})
         self._send({"jsonrpc":"2.0","id":ident,
@@ -276,8 +282,13 @@ class McpStdioClient:
                 raise ValueError("mcp_tool_arguments_too_large")
             result=self._rpc("tools/call",{
                 "name":name,"arguments":arguments})
-            # Success is a PROTOCOL result, not verified project work.
-            return {"ok":not bool(result.get("isError",False)),
+            kind=result.get("resultType","complete")
+            if kind not in {"complete","input_required"}:
+                raise RuntimeError("mcp_unknown_result_type")
+            # input_required signals a multi-round-trip owner decision; never
+            # mark a partial tool invocation complete without that decision.
+            return {"ok":kind=="complete" and not bool(result.get("isError",False)),
+                    "input_required":kind=="input_required",
                     "tool_name":name,"result":result,
                     "project_work_verified":False,
                     "mcp_server_attested":False}
