@@ -1,3 +1,13 @@
+# 2026-11-15 — V5 corrected usage scope, app reuse and 12k test requirement; documentation only
+
+- **New source:** [docs/CONTROL_V5_USAGE_GEO_BROWSER_REUSE_12000_EVAL_20261115.md](docs/CONTROL_V5_USAGE_GEO_BROWSER_REUSE_12000_EVAL_20261115.md), committed to existing Control development branch.
+- VPN location benefit must consider ALL owner's relevant online interests, not merely Asterion projects: Japanese/Pixiv artworks, creator content, visual novels and games, cosplay, Koikatsu mods/cards, manga/manhwa/web fiction, adult content sites, research, GitHub and technical sites. Pixiv officially states some art availability varies by accessing region; France's adult-site age-verification restrictions demonstrably change availability for certain services. **On-demand country selection is worthwhile**, while default privacy-first VPN prioritizes replacement public IP, stable throughput >=75% direct, and verified safe network routing. Provider/source-specific geo blocks must be diagnosed rather than assumed from a 403; payment/account/age checks cannot be fixed by IP alone.
+- **Shared Browser, no duplication:** Codex owns game-specific source adapters, normalized mechanics and local analytics; Browser supplies real JS rendering/page extraction/provenance. AsterionRounder already includes offline PDF, EPUB, DOCX/Office, library/archive readers, document/spreadsheet editing code and 3D preview adapters. Control should invoke Rounder rather than build a second document suite. Other specialist app engines remain separate.
+- **Model quality gate:** owner rejects 500 cases. Minimum >=10,000 independent held-out tests; recommended sealed 12,000 case suite across general reasoning, coding, MCP/tools, browser/research, device action, Asterion integrations, documents/data, voice, security/privacy and overnight cycles. Distinct training set, sealed holdout, actual tool receipts, performance/regression tests additional. Owner expects assistant to design and execute training once explicitly authorized; neither model training nor tests were run now.
+- **No-code hold continues:** This change is docs only, no APK build, phone/Windows app changes, training, model download, VPN tunnel or new provider setup; Downloader remains assigned elsewhere.
+
+---
+
 # 2026-11-15 — V4 VPN and native AI research, NO CODE
 
 - **New research:** [docs/CONTROL_V4_VPN_EVIDENCE_AI_TRAINING_SYSTEMS_RESEARCH_20261115.md](docs/CONTROL_V4_VPN_EVIDENCE_AI_TRAINING_SYSTEMS_RESEARCH_20261115.md); detailed provider-by-provider eligibility, primary official sources and 24 proposed actual independent tool/engine subsystems for a ChatGPT-class offline-first Control assistant.
