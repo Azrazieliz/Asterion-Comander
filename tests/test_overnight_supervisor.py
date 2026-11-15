@@ -52,7 +52,7 @@ class SupervisorTests(unittest.TestCase):
         }
 
     def provider(self, prompt, ident):
-        self.assertIn("OVERNIGHT", prompt)
+        self.assertIn("CONTINUOUS PROJECT DEVELOPMENT TURN", prompt)
         self.assertIn(ident, prompt)
         return {"message_id": "local-response-123456", "content":
                 "Plan and tool call proposal with verified receipt to be checked"}
