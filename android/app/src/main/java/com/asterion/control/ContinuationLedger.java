@@ -190,6 +190,44 @@ final class ContinuationLedger {
     return new JSONObject().put("ok",true).put("state","acknowledged")
       .put("checkpoint_id",checkpoint);
   }
+  /**
+   * Recover an UNKNOWN ChatGPT UI Send ONLY when the actual assistant reply
+   * contains this checkpoint's unique final marker. No duplicate Send, no
+   * arbitrary caller-provided receipt, and no override of a different turn.
+   *
+   * The owner-approved cycle observes a stable reply for 12 seconds before
+   * invoking this. A fresh independent Accessibility observation is also
+   * performed here so a remote method cannot declare itself acknowledged.
+   */
+  synchronized JSONObject reconcileObservedReply(String checkpoint) throws Exception {
+    String current=state.optString("state","");
+    if(!("requires_manual_review".equals(current)||
+         "dispatching".equals(current)))
+      throw new IllegalStateException("No uncertain ChatGPT submission to reconcile");
+    if(checkpoint==null||!checkpoint.equals(state.optString("last_checkpoint",""))||
+       !checkpoint.matches("[A-Za-z0-9_.-]{3,100}"))
+      throw new IllegalArgumentException("Checkpoint does not match uncertain submission");
+    ControlAccessibilityService observer=ControlAccessibilityService.active;
+    if(observer==null)
+      throw new IllegalStateException("ChatGPT reply observation unavailable");
+    JSONObject proof=observer.observeCycleResponse(checkpoint);
+    if(!proof.optBoolean("visible",false)||proof.optBoolean("generating",true))
+      throw new IllegalStateException("Matching finished ChatGPT reply not visible");
+    // A verified response proves this checkpoint was submitted; the original
+    // UI Send may have succeeded even though its acknowledgment was lost.
+    long now=System.currentTimeMillis();
+    state.put("state",state.optBoolean("enabled")?"acknowledged":"paused")
+      .put("paused_previous_state",state.optBoolean("enabled")?"":"acknowledged")
+      .put("response_observed_ms",now)
+      .put("response_receipt","accessibility-uncertain-send-reconciled-"+checkpoint+"-"+now)
+      .put("last_error","");
+    state.remove("pending");
+    persist();
+    return new JSONObject().put("ok",true).put("state","acknowledged")
+      .put("checkpoint_id",checkpoint).put("recovered_uncertain_submission",true)
+      .put("finished",proof.optBoolean("finished",false));
+  }
+
   synchronized JSONObject cancel() throws Exception {
     String current=state.optString("state");
     if("dispatching".equals(current) || "submitted_unverified".equals(current))
