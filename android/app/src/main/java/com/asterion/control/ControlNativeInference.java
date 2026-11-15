@@ -171,12 +171,12 @@ final class ControlNativeInference {
               engine=newEngine;
               chat=createActualChat(newEngine);
               loadedAtMs=System.currentTimeMillis();
-              state="loaded";lastError="";
+              state="loaded";lastError="";STARTING.set(false);
               show(feedback,"Offline model loaded by native llama.cpp engine.");
             }else if(type.equals("onModelError")){
               Throwable cause=(args!=null&&args.length>0&&
                 args[0] instanceof Throwable)?(Throwable)args[0]:null;
-              safeStateError(cause);
+              safeStateError(cause);STARTING.set(false);
               show(feedback,"Native model load failed: "+lastError);
             }else if(type.equals("onModelUnloaded")){
               state="not_loaded";chat=null;engine=null;
@@ -192,7 +192,8 @@ final class ControlNativeInference {
         // Library performs the actual native file load in its own coroutine.
         newEngine.getClass().getMethod("loadModel",String.class,listener)
           .invoke(newEngine,source.getAbsolutePath(),callback);
-        STARTING.set(false);
+        // STARTING stays true until the REAL onModelLoaded/onModelError
+        // callback, preventing overlapping native memory allocations.
       }catch(Throwable error){
         safeStateError(error);
         show(feedback,"Offline AI unavailable: "+lastError);
@@ -213,6 +214,7 @@ final class ControlNativeInference {
       feedback.accept("The offline model is already generating");return;
     }
     state="generating";
+    lastTokens=0;
     final Object activeChat=chat;
     WORK.execute(()->{
       try {
@@ -283,6 +285,10 @@ final class ControlNativeInference {
 
   static void unload(Activity owner,Consumer<String> feedback){
     requireOwner(owner);
+    if(STARTING.get()||GENERATING.get()){
+      feedback.accept("Model is busy; cancel generation or finish loading first");
+      return;
+    }
     WORK.execute(()->{
       try {
         Object current=engine;
