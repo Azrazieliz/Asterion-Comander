@@ -45,6 +45,7 @@ final class ControlPrivateVpn {
   private static volatile String connectionState="off";
   private static volatile String lastErrorCode="";
   private static volatile String observedPublicIp="";
+  private static volatile String baselinePublicIp="";
   private static volatile String egressVerification="not_checked";
   private static volatile boolean publicIpChanged=false;
   private static volatile long egressCheckedAtMs=0;
@@ -123,6 +124,7 @@ final class ControlPrivateVpn {
     // remote commands, public storage, exception output or UI status.
     String encrypted=encrypt(text);
     observedPublicIp="";
+    baselinePublicIp="";
     publicIpChanged=false;
     egressVerification="not_checked";
     egressCheckedAtMs=0;
@@ -153,6 +155,7 @@ final class ControlPrivateVpn {
       String before="";
       try {before=PublicExitIp.probe();}
       catch(Exception ignored){} // Probe unavailable is not a tunnel failure.
+      baselinePublicIp=before;
       try{
         Config config=parseAndValidate(decrypt(context),
           pref(context).getBoolean("allow_full_tunnel",false));
@@ -206,6 +209,7 @@ final class ControlPrivateVpn {
         egressVerification="not_checked";
         publicIpChanged=false;
         observedPublicIp="";
+        baselinePublicIp="";
         egressCheckedAtMs=0;
         ControlEventJournal.write(context,"vpn_tunnel","wireguard",
           "disconnected","owner_requested",0);
@@ -213,6 +217,39 @@ final class ControlPrivateVpn {
       }catch(Exception e){
         lastErrorCode=e.getClass().getSimpleName();
         MAIN.post(()->report.accept("VPN disconnect was not verified: "+lastErrorCode));
+      }
+    });
+  }
+  /**
+   * Explicit owner action to re-check the real external address through the
+   * CURRENT Android routing. Does not reconnect, rotate profiles, leak owner
+   * credentials or imply all apps share the verified exit.
+   */
+  static void verifyCurrentEgress(Activity owner,Consumer<String> report){
+    requireLocal(owner);
+    Context context=owner.getApplicationContext();
+    WORKER.submit(()->{
+      try {
+        GoBackend instance=backend;
+        if(instance==null||instance.getState(TUNNEL)!=Tunnel.State.UP)
+          throw new IllegalStateException("VPN backend not active");
+        String after=PublicExitIp.probe();
+        observedPublicIp=after;
+        publicIpChanged=PublicExitIp.changed(baselinePublicIp,after);
+        egressVerification=baselinePublicIp.isEmpty()?"baseline_unavailable":
+          publicIpChanged?"public_ip_changed":"public_ip_unchanged";
+        egressCheckedAtMs=System.currentTimeMillis();
+        String info=egressVerification;
+        ControlEventJournal.write(context,"vpn_ip_check","wireguard",
+          "completed",info,0);
+        MAIN.post(()->report.accept(publicIpChanged
+          ?"Public IP differs from the original direct address."
+          :"Public IP change not verified ("+info+")."));
+      }catch(Exception e){
+        egressVerification="exit_probe_failed";
+        egressCheckedAtMs=System.currentTimeMillis();
+        MAIN.post(()->report.accept("Public IP check unavailable: "+
+          e.getClass().getSimpleName()));
       }
     });
   }
