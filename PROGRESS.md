@@ -1,3 +1,14 @@
+# 2026-11-15 — Source implementation AUTHORIZED; isolated Control AI kernel, 71/71 source tests
+
+- **Active implementation branch:** `work/control-ai-core-20261115` (isolated from concurrently modified `work/control-0927-overnight-cycles-20261111`). Source-only phase report: [docs/CONTROL_AI_PHASE1_SOURCE_IMPLEMENTATION_20261115.md](docs/CONTROL_AI_PHASE1_SOURCE_IMPLEMENTATION_20261115.md).
+- **Committed source components:** Android uncertain-send cycle reconciliation (uncompiled); SQLite durable independent development supervisor distinct from Actions/Tasks; local loopback-only model client hardened against redirects; authenticated Windows /api/v1/intelligence/ cycles/local-model routes; owner-approved zero-cost VPN route selection policy (NOT a tunnel); resumable SHA-bound held-out model evaluator (NOT model training); MCP stdio protocol client with SHA-pinned executable for 2025 and July 2026, authenticated optional GitHub MCP tool API (NOT installed official server).
+- **Source defects repaired:** duplicate/corrupt `interaction_sessions.py` module (isolated branch), Pydantic request-ID regex, Model Laboratory SQL placeholder mismatch, asynchronous test cleanup race.
+- **Latest confirmed verification:** persistent Windows worker executed temporary **non-deployed** source test runner `scripts/verify_control_ai_isolated.py`, bridge result `results/ctl-source-20261115-2325-mcpapi-reg-c2.json`; Python source **77 files, zero syntax errors; 71 tests passed, zero failed/errors**. All older failed runs are preserved in bridge results; no assertion that untested components are working.
+- **Critical pending systems:** actually running/trained phone-native all-rounder, tool execution/verifier and full unattended cycle, official GitHub MCP with genuine approved server/token, device-verified Android source and real overnight cycle, actual free VPN/real rotating IP and ≤25% throughput, Tor, fully integrated voice/security/reverse-engineering, cross-app adapters, full UI, extensive 50k/200k model benchmark and real multi-app/device acceptance.
+- **OWNER HOLD still applies to APK builds, signing/release, installation or worker runtime deployment.** The owner's latest "Authorized" applied to implementation after the prior design-only discussion, not an explicit APK build request. No new app signing, pairing, VPN activation or Downloader source work performed.
+
+---
+
 # 2026-11-15 — VPN geography relevance, Rounder reuse, ambitious model evaluation — design-only
 
 - V5 specification committed: [docs/CONTROL_V5_GEO_USAGE_ROUNDER_MODEL_TRAINING_REVIEW_20261115.md](docs/CONTROL_V5_GEO_USAGE_ROUNDER_MODEL_TRAINING_REVIEW_20261115.md), plus updated pointers. No application source, build, device, downloader, Rounder, model weights or runtime modifications authorized/performed.
