@@ -48,6 +48,10 @@ def app_bridges():return request('/app-bridge/apps').json()
 def app_bridge_invoke(data:AppBridgeAction):
     return request('/app-bridge/invoke','POST',data.model_dump(),timeout=11).json()
 
+@router.get('/phone/diagnostics/exit-history')
+def phone_exit_history():
+    return request('/diagnostics/exit-history',timeout=5).json()
+
 @router.get('/phone/logcat')
 def phone_own_logcat():
     return request('/diagnostics/logcat',timeout=5).json()
