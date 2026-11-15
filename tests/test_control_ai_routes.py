@@ -74,6 +74,32 @@ class ControlAiRoutesTests(unittest.TestCase):
         self.assertEqual(self.client.post(base+"/resume",headers=self.owner).json()["state"],"ready")
         self.assertEqual(self.client.post(base+"/stop",headers=self.owner).json()["state"],"stopped")
 
+    def test_model_watch_owner_auth_and_no_automatic_switch(self):
+        path="/api/v1/intelligence/model-watch"
+        status=self.client.get(path+"/status",headers=self.auth)
+        self.assertEqual(status.status_code,200)
+        self.assertFalse(status.json()["automatic_model_replacement"])
+        denied=self.client.post(path+"/refresh",headers=self.auth)
+        self.assertEqual(denied.status_code,403)
+        from asterion_remote import control_ai_routes as routes
+        with patch.object(routes.model_watch_service,"scan_once",
+               return_value={"ok":True,"scanned":1,"new_review_events":0,
+                             "models_replaced":0,"paid_api_used":False}):
+            checked=self.client.post(path+"/refresh",headers=self.owner)
+        self.assertEqual(checked.status_code,200)
+        self.assertEqual(checked.json()["models_replaced"],0)
+
+    def test_model_watch_events_are_authenticated(self):
+        path="/api/v1/intelligence/model-watch/events"
+        self.assertEqual(self.client.get(path).status_code,401)
+        from asterion_remote import control_ai_routes as routes
+        with patch.object(routes.model_watch_service,"events",
+              return_value={"ok":True,"items":[],
+                            "automatic_model_replacements":0}):
+            result=self.client.get(path,headers=self.auth)
+        self.assertEqual(result.status_code,200)
+        self.assertEqual(result.json()["items"],[])
+
     def test_autonomy_route_fails_closed_when_no_owner_runtime(self):
         self.client.post("/api/v1/intelligence/cycles",
                          headers=self.owner,json=self.cycle())
