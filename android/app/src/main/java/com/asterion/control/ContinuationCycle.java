@@ -149,9 +149,59 @@ final class ContinuationCycle {
     return status();
   }
   synchronized JSONObject tick()throws Exception {
-    if(!state.optBoolean("active",false)||"paused".equals(state.optString("state"))||
-       "needs_review".equals(state.optString("state")))return status();
+    if(!state.optBoolean("active",false)||"paused".equals(state.optString("state")))
+      return status();
     if(!ledger.status().optBoolean("enabled",false))return status();
+    if("needs_review".equals(state.optString("state"))) {
+      // Only a genuinely visible, stable assistant reply can recover an
+      // uncertain ChatGPT submission. Never retry the UI Send just because
+      // a previous dispatch or acknowledgment timed out.
+      JSONObject uncertain=ledger.status();
+      String checkpointId=state.optString("checkpoint","");
+      if(!checkpointId.equals(uncertain.optString("last_checkpoint",""))||
+         !"requires_manual_review".equals(uncertain.optString("state","")))
+        return status();
+      ControlAccessibilityService view=ControlAccessibilityService.active;
+      if(view==null)return status();
+      if(!"com.openai.chatgpt".equals(view.currentPackage())) {
+        long now=System.currentTimeMillis();
+        if(now-state.optLong("last_foreground_request_ms",0L)>14000L) {
+          JSONObject foreground=view.requestChatForeground();
+          state.put("last_foreground_request_ms",now)
+            .put("last_foreground_request",
+              foreground.optString("reason","existing ChatGPT task requested"));
+          save();
+        }
+        return status();
+      }
+      JSONObject proof=view.observeCycleResponse(checkpointId);
+      long now=System.currentTimeMillis();
+      boolean stable=proof.optBoolean("visible",false)&&
+          !proof.optBoolean("generating",true)&&
+          proof.optString("voice_question","").isEmpty();
+      long first=state.optLong("recovery_marker_first_seen_ms",0L);
+      boolean finished=proof.optBoolean("finished",false);
+      if(!stable) {
+        if(first>0L) {
+          state.put("recovery_marker_first_seen_ms",0L);
+          save();
+        }
+        return status();
+      }
+      if(first==0L||state.optBoolean("recovery_marker_finished",false)!=finished) {
+        state.put("recovery_marker_first_seen_ms",now)
+          .put("recovery_marker_finished",finished);
+        save();
+        return status();
+      }
+      if(now-first<12000L)return status();
+      JSONObject confirmation=ledger.reconcileObservedReply(checkpointId);
+      state.put("response_completed_work",confirmation.optBoolean("finished",false))
+        .put("state","waiting_ack").put("last_error","")
+        .put("recovery_marker_first_seen_ms",0L);
+      save();
+      return tick();
+    }
     String phase=state.optString("state","ready");
     int index=state.optInt("index",1);
     int maximum=state.optInt("max_cycles",0);
@@ -508,6 +558,11 @@ final class ContinuationCycle {
     // an older timestamp as proof of a completed assistant response.
     if(state.optLong("marker_first_seen_ms",0L)>0) {
       state.put("marker_first_seen_ms",0L);
+      save();
+    }
+    // Prior Accessibility observations are not proof after a process restart.
+    if(state.optLong("recovery_marker_first_seen_ms",0L)>0L) {
+      state.put("recovery_marker_first_seen_ms",0L);
       save();
     }
     if("voice_requesting".equals(state.optString("state"))) {
