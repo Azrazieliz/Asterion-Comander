@@ -145,7 +145,7 @@ class McpStdioClient:
                     # Discovery is an actual RPC with per-request metadata.
                     self._selected_version=_MODERN
                     found=self._rpc("server/discover")
-                    versions=found.get("protocolVersions")
+                    versions=found.get("supportedVersions")
                     if not isinstance(versions,list) or _MODERN not in versions:
                         raise RuntimeError("mcp_modern_server_discovery_failed")
                 self._initialized=True
