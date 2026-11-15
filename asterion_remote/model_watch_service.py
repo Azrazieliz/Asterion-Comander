@@ -106,9 +106,10 @@ def scan_once(client:httpx.Client|None=None, *,
                 if result["repo"]!=item["repo"]:
                     continue
                 verdict=result["verdict"]
+                # Avoid noisy, nonactionable notifications for models that
+                # are slower, thermally unsafe, or no better than installed.
                 if verdict not in {
-                    "benchmark_required","owner_review_recommended",
-                    "reject_resource_regression","no_measured_improvement"
+                    "benchmark_required","owner_review_recommended"
                 }:
                     continue
                 key="\0".join((
