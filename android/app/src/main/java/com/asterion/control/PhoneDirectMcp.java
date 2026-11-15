@@ -138,8 +138,13 @@ final class PhoneDirectMcp {
     out.write(request.getBytes(StandardCharsets.US_ASCII));out.flush();
     InputStream in=sock.getInputStream();
     String line=readLine(in);
-    if(!line.startsWith("HTTP/1.1 101 ")&&!line.startsWith("HTTP/1.0 101 "))
-      throw new java.io.IOException("WSS handshake rejected");
+    if(!line.startsWith("HTTP/1.1 101 ")&&!line.startsWith("HTTP/1.0 101 ")){
+      // Only expose numeric response status. Do not reveal headers, bearer,
+      // endpoint credentials or an HTML error body in exported diagnostics.
+      String[] parts=line.split(" ");
+      String status=parts.length>=2&&parts[1].matches("[0-9]{3}")?parts[1]:"unknown";
+      throw new java.io.IOException("WSS upgrade HTTP "+status);
+    }
     boolean upgraded=false,connection=false,accepted=false;
     for(int i=0;i<64;i++){
       line=readLine(in);
