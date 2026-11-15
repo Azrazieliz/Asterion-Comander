@@ -297,6 +297,15 @@ public final class MainActivity extends Activity {
       icon("shield",DesignSystem.TEAL,23));
     gap(connectivity,11);button(connectivity,"Inspect VPN and network permissions","devices",false,
       ()->showVpnDetails());wide(healthBody,connectivity);
+    gap(healthBody,12);
+    LinearLayout localModels=card();
+    rowTitle(localModels,"Asterion native model vault",
+      "Download verified offline GGUF weights. No paid service or fake inference.",
+      icon("brain",DesignSystem.PURPLE,23));
+    gap(localModels,11);
+    button(localModels,"Inspect local AI model and downloads","activity",false,
+      ()->showLocalModelDetails());
+    wide(healthBody,localModels);
     return scroll(healthBody);
   }
 
@@ -396,6 +405,47 @@ public final class MainActivity extends Activity {
           startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))).show();
     }catch(Exception e){toast("Permission inspection unavailable");}
   }
+  private void showLocalModelDetails(){
+    try{
+      JSONObject details=ControlModelVault.status(this);
+      boolean busy=details.optBoolean("download_active",false);
+      long ready=details.optLong("downloaded_bytes",0);
+      long total=details.optLong("expected_bytes",0);
+      String message="Offline model: Qwen3.5-2B GGUF Q4_K_M"+
+        "\nDownload state: "+details.optString("phase","idle")+
+        "\nTransferred: "+(ready/1_000_000L)+" MB"+
+        "\nExpected: "+(total/1_000_000L)+" MB"+
+        "\nVerified weights: "+details.optBoolean("verified_weight_file_present")+
+        "\nNative inference loaded: "+
+             details.optBoolean("native_inference_engine_loaded")+
+        "\n\nA download requires internet and uses the official Hugging Face "+
+        "repository plus its content-delivery service. Weight bytes are "+
+        "checked against the repository's immutable SHA-256 and size. "+
+        "Downloading a model does not mean inference is operational.";
+      AlertDialog.Builder dialog=new AlertDialog.Builder(this)
+        .setTitle("Offline model vault").setMessage(message)
+        .setNegativeButton("Close",null);
+      if(busy){
+        dialog.setNeutralButton("Pause download",(d,w)->
+          ControlModelVault.cancel(this));
+      }else{
+        dialog.setPositiveButton("Download / resume verified model",(d,w)->
+          new AlertDialog.Builder(this)
+            .setTitle("Confirm offline model transfer")
+            .setMessage("Download about 1.4 GB of free model weights to "+
+              "private device storage? This is not a cloud AI subscription. "+
+              "An independent native inference engine is required to run them.")
+            .setNegativeButton("Cancel",null)
+            .setPositiveButton("Download",(choice,which)->
+               ControlModelVault.requestDefaultModel(this,this::toast))
+            .show());
+      }
+      dialog.show();
+    }catch(Exception e){
+      toast("Model vault unavailable: "+e.getClass().getSimpleName());
+    }
+  }
+
   private void showVpnDetails(){
     try{
       JSONObject android=ControlPermissionMatrix.status(this);
