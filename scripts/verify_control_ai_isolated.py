@@ -32,6 +32,7 @@ TESTS = [
     "test_assistant_routes.py",
     "test_model_admission.py",
     "test_model_capacity_routes.py",
+    "test_development_workbench.py",
 ]
 
 
