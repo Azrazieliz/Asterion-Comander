@@ -74,7 +74,13 @@ def main():
     if not target.is_file() or not new_diag.is_file():
         raise RuntimeError("Production relay or source diagnostics unavailable")
     old_bytes=target.read_bytes()
-    updated=patch(old_bytes.decode("utf-8")).encode("utf-8")
+    raw_text=old_bytes.decode("utf-8")
+    # Keep the deployed file's original Windows CRLF style. Never rewrite
+    # unrelated production lines merely because the staged source is LF.
+    crlf="\r\n" in raw_text
+    normalized=raw_text.replace("\r\n","\n")
+    patched=patch(normalized)
+    updated=(patched.replace("\n","\r\n") if crlf else patched).encode("utf-8")
     diagnostics=new_diag.read_bytes()
     ast.parse(diagnostics.decode("utf-8"))
     result={"mode":"apply" if options.apply else "dry_run",
