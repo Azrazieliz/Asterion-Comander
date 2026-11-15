@@ -19,23 +19,36 @@ from pydantic import BaseModel, Field, model_validator
 from .phone_bridge import PhoneInput, load
 
 class Step(BaseModel):
-    kind: Literal["input","wait","assert_text","capture","health","window","assert_window"]
+    kind: Literal["input","wait","assert_text","capture","health","window","assert_window","assert_package","await_package"]
+    device: Literal["phone","pc"] | None = None
     payload: dict[str,Any] = Field(default_factory=dict)
     wait_ms: int = Field(default=0,ge=0,le=10000)
     text: str | None = Field(default=None,max_length=300)
 
     @model_validator(mode="after")
     def check(self):
-        if self.kind in ("assert_text","assert_window") and not self.text:raise ValueError("Expected text required")
+        if self.kind in ("assert_text","assert_window","assert_package","await_package") and not self.text:raise ValueError("Expected text required")
         if self.kind=="input" and not self.payload:raise ValueError("Input payload required")
         if self.kind=="wait" and not self.wait_ms:raise ValueError("Wait duration required")
         return self
 
 class SessionRequest(BaseModel):
-    device: Literal["phone","pc"]
+    device: Literal["phone","pc","mixed"]
     steps: list[Step] = Field(min_length=1,max_length=80)
     timeout_s: int = Field(default=120,ge=2,le=300)
     stop_on_error: bool = True
+
+    @model_validator(mode="after")
+    def check(self):
+        if self.device=="mixed" and any(step.device is None for step in self.steps):
+            raise ValueError("Mixed sessions require each step to name its device")
+        if self.device!="mixed" and any(step.device not in (None,self.device) for step in self.steps):
+            raise ValueError("Step device conflicts with session device")
+        for step in self.steps:
+            target=step.device or self.device
+            if step.kind in ("assert_package","await_package") and target!="phone":
+                raise ValueError("Android package assertion requires phone target")
+        return self
 
 _guard=threading.RLock()
 _pool=ThreadPoolExecutor(max_workers=3,thread_name_prefix="asterion-interaction")
@@ -71,6 +84,19 @@ def perform(step: Step,device: str,client: httpx.Client | None,headers:dict | No
             value=resp.json()
             return {"ok":bool(value.get("ok")),"accessible":value.get("accessible"),
               "capture":value.get("capture"),"battery":value.get("battery")}
+        if kind in ("assert_package","await_package"):
+            # Foreground package check avoids image screenshots and model
+            # decisions for each navigation or app switch.
+            deadline=time.monotonic()+min(8.0,max(.1,step.wait_ms/1000 if step.wait_ms else 3.0))
+            last=""
+            while True:
+                resp=client.get(base+"/ui",headers=headers);resp.raise_for_status()
+                last=resp.json().get("foreground_package","")
+                if last==step.text:
+                    return {"expected_package":step.text,"observed_package":last,"verified":True}
+                if kind=="assert_package" or time.monotonic()>=deadline:
+                    raise AssertionError("Android package mismatch; expected "+step.text+" got "+str(last)[:100])
+                time.sleep(.08)
         if kind=="assert_text":
             resp=client.get(base+"/ui",headers=headers);resp.raise_for_status()
             contents=[];flatten_ui(resp.json().get("root"),contents)
@@ -114,8 +140,9 @@ def perform(step: Step,device: str,client: httpx.Client | None,headers:dict | No
 def worker(key: str,request: SessionRequest,cancel:threading.Event):
     started=time.monotonic()
     update(key,state="running")
-    pairing=load() if request.device=="phone" else None
-    if request.device=="phone" and pairing is None:
+    needs_phone=request.device=="phone" or any(step.device=="phone" for step in request.steps)
+    pairing=load() if needs_phone else None
+    if needs_phone and pairing is None:
         update(key,state="failed",error="Phone not paired");return
     client=httpx.Client(timeout=httpx.Timeout(8.0,connect=3.0),
                         trust_env=False,follow_redirects=False) if pairing else None
@@ -137,14 +164,14 @@ def worker(key: str,request: SessionRequest,cancel:threading.Event):
                             update(key,state="cancelled",current_step=i);return
                     observation={"wait_ms":step.wait_ms}
                 else:
-                    observation=perform(step,request.device,client,
+                    observation=perform(step,step.device or request.device,client,
                         {"Authorization":"Bearer "+pairing["token"]} if pairing else None,
                         pairing["base_url"] if pairing else None)
-                result={"index":i,"kind":step.kind,"ok":True,
+                result={"index":i,"kind":step.kind,"device":step.device or request.device,"ok":True,
                         "elapsed_ms":round((time.perf_counter()-step_started)*1000,1),
                         "observation":observation}
             except Exception as e:
-                result={"index":i,"kind":step.kind,"ok":False,
+                result={"index":i,"kind":step.kind,"device":step.device or request.device,"ok":False,
                         "elapsed_ms":round((time.perf_counter()-step_started)*1000,1),
                         "error":type(e).__name__+": "+str(e)[:200]}
             results.append(result)
