@@ -449,6 +449,11 @@ public final class AgentService extends Service {
       try { json(out,200,continuation.dispatch()); }
       catch(Exception e){json(out,400,error(e.getMessage()));}return;
     }
+    if(method.equals("GET")&&path.startsWith("/transfer/status/")){
+      try{json(out,200,transfers.status(path.substring("/transfer/status/".length())));}
+      catch(Exception e){json(out,404,error("Transfer not found or expired"));}
+      return;
+    }
     if(method.equals("POST")&&path.equals("/transfer/start")){
       try{json(out,200,transfers.start(body));}catch(Exception e){json(out,400,error(e.getMessage()));}
       return;
