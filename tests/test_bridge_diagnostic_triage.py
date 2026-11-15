@@ -71,6 +71,25 @@ class BridgeDiagnosticTriageTests(unittest.TestCase):
                             "paired-bearer")
                     api.assert_not_called()
 
+    def test_bounded_cross_device_snapshot(self):
+        with patch.object(github_bridge,"pc",return_value={"ok":True}) as api:
+            self.assertTrue(github_bridge.run(
+                {"op":"pc_diagnostic_snapshot","params":{
+                    "app":"asterion.control","limit":120,"phone":True}},
+                "paired-bearer")["ok"])
+        self.assertIn("app=asterion.control",api.call_args.args[0])
+        self.assertIn("phone=True",api.call_args.args[0])
+        self.assertEqual(api.call_args.args[1],"paired-bearer")
+        for params in [{"phone":"true"},{"limit":9999},
+                       {"app":"../secrets"},{"arbitrary_path":"/admin"}]:
+            with self.subTest(params=params):
+                with patch.object(github_bridge,"pc") as forbidden:
+                    with self.assertRaises(ValueError):
+                        github_bridge.run(
+                            {"op":"pc_diagnostic_snapshot","params":params},
+                            "paired-bearer")
+                    forbidden.assert_not_called()
+
     def test_ordinary_get_still_rejects_query_body(self):
         with patch.object(github_bridge, "pc") as api:
             with self.assertRaises(ValueError):
