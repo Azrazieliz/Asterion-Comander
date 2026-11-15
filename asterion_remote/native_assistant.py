@@ -362,7 +362,11 @@ def execute(user_request: str, request_id: str, provider: Callable,
             )
             if len(instruction)>24000:
                 raise ValueError("assistant_context_budget_exceeded")
-            model=provider(instruction,f"{request_id}:model:{index}")
+            # The local HTTP adapter accepts only a conservative ASCII
+            # request identifier. Hash the owner key instead of forwarding
+            # arbitrary punctuation or private prompt content.
+            model_call_id="agent-"+_digest(request_id+":"+str(index))[:32]
+            model=provider(instruction,model_call_id)
             if not isinstance(model,dict) or not isinstance(
                 model.get("content"),str):
                 raise ValueError("model_response_with_receipt_required")
