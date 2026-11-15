@@ -64,12 +64,26 @@ final class TransferStore {
   }
   synchronized JSONObject start(JSONObject request)throws Exception {
     cleanup();
-    if(jobs.size()>=4)throw new IllegalStateException("Too many active transfers");
     String name=filename(request.optString("name",""));
+    // Retry of the SAME original must resume the existing staging file,
+    // not create another download after an uncertain reply.
+    // Do not guess equivalence from filenames alone.
     long size=request.getLong("size");
     String digest=request.getString("sha256").toLowerCase(Locale.ROOT);
     if(size<0||size>FILE_MAX||!digest.matches("^[a-f0-9]{64}$"))
       throw new IllegalArgumentException("Invalid transfer size/checksum");
+    for(Job existing:jobs.values()){
+      if(existing.name.equals(name)&&existing.size==size &&
+         existing.expected.equals(digest)){
+        existing.created=System.currentTimeMillis();
+        return new JSONObject().put("id",existing.id)
+          .put("received",existing.written).put("size",size)
+          .put("sha256",digest).put("resumed",true)
+          .put("chunk_max",CHUNK_MAX)
+          .put("stored_location","Downloads/Asterion Control");
+      }
+    }
+    if(jobs.size()>=4)throw new IllegalStateException("Too many active transfers");
     byte[] bytes=new byte[18];random.nextBytes(bytes);
     String id=Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     File dir=new File(app.getCacheDir(),"incoming-asterion");
@@ -82,7 +96,8 @@ final class TransferStore {
     if(!job.path.createNewFile())throw new IllegalStateException("Transfer path already exists");
     jobs.put(id,job);
     return new JSONObject().put("id",id).put("chunk_max",CHUNK_MAX)
-      .put("stored_location","Downloads/Asterion Control");
+      .put("received",0).put("size",size).put("sha256",digest)
+      .put("resumed",false).put("stored_location","Downloads/Asterion Control");
   }
 
   synchronized JSONObject append(String id,long offset,InputStream in,int length)throws Exception {
@@ -99,7 +114,16 @@ final class TransferStore {
         remaining-=n;
       }
     }
+    job.created=System.currentTimeMillis();
     return new JSONObject().put("id",id).put("received",job.written).put("total",job.size);
+  }
+
+  synchronized JSONObject status(String id)throws Exception {
+    Job job=get(id);
+    return new JSONObject().put("id",job.id).put("received",job.written)
+      .put("size",job.size).put("sha256",job.expected)
+      .put("name",job.name).put("phase","receiving")
+      .put("last_progress_ms",job.created).put("chunk_max",CHUNK_MAX);
   }
 
   synchronized JSONObject finish(String id)throws Exception {
