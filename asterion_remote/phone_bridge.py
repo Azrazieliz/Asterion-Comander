@@ -12,10 +12,17 @@ from urllib.parse import urlparse
 import httpx
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
+from .diagnostic_core import try_record
+import time
 
 _DEFAULT_STATE=(Path(os.getenv('LOCALAPPDATA',str(Path.home()))) / 'AsterionControl' if os.name=='nt' else Path.home()/'.asterion-control')
 STATE = Path(os.getenv('ASTERION_CONTROL_STATE', str(_DEFAULT_STATE))).expanduser() / 'phone-pairing.json'
 _lock = threading.RLock()
+# A single long-lived synchronous pool; httpx.Client supports concurrent requests.
+# Avoid a TLS/TCP setup and teardown on every phone status/input command.
+_phone_http = httpx.Client(timeout=5.0, trust_env=False, follow_redirects=False,
+                           limits=httpx.Limits(max_connections=16, max_keepalive_connections=8,
+                                               keepalive_expiry=20.0))
 
 class PairPhone(BaseModel):
     base_url: str = Field(max_length=180, min_length=12)
@@ -58,18 +65,47 @@ def load() -> dict | None:
 def request(path: str, method: str='GET', payload: dict | None=None, timeout: float=5.0) -> httpx.Response:
     if path not in {'/health', '/ui', '/input', '/screen', '/continuation/status', '/continuation/queue', '/continuation/dispatch', '/observation/status', '/observation/events', '/observation/frame', '/voice/status', '/voice/question', '/voice/ack', '/voice/enable', '/voice/stop', '/voice/settings', '/cycles/status', '/cycles/start', '/cycles/pause', '/cycles/resume', '/cycles/stop', '/cycles/confirm-new-chat', '/network/status', '/github-bridge/status', '/performance/status', '/performance/mode', '/performance/optimize', '/diagnostics/logcat', '/apps', '/apps/launch', '/app-bridge/apps', '/app-bridge/invoke', '/app-bridge/operation', '/continuation/ack', '/continuation/cancel', '/chat/new' } and not re.fullmatch(r'/observation/frame/frame-[0-9]{10,15}\.jpg',path):
         raise HTTPException(400, 'Unsupported phone API call')
+    if method not in ('GET','POST'):
+        raise HTTPException(400, 'Unsupported method')
     p=load()
     if not p: raise HTTPException(503, 'Phone agent not registered')
+    started=time.perf_counter()
+    headers={'Authorization':'Bearer '+p['token']}
+    # Retrying a GET is safe; POST may already have executed on the phone.
+    # A transport-level failure of a POST is an UNKNOWN OUTCOME, not permission
+    # to repeat a tap, install, delete, or ChatGPT Send.
     try:
-        with httpx.Client(timeout=timeout, trust_env=False, follow_redirects=False) as client:
-            r=client.request(method,p['base_url']+path,json=payload,
-                headers={'Authorization':'Bearer '+p['token']})
-        if r.status_code in (401,403): raise HTTPException(502, 'Phone rejected pairing token')
-        if r.status_code >= 400:
-            raise HTTPException(503, f'Phone returned {r.status_code}: '+r.text[:300])
-        return r
-    except httpx.HTTPError as exc:
-        raise HTTPException(503, f'Phone unreachable: {type(exc).__name__}') from exc
+        r=_phone_http.request(method,p['base_url']+path,json=payload,
+                              headers=headers,timeout=timeout)
+    except httpx.TransportError as exc:
+        try_record("transport_error",component="native_phone_http",severity="error",
+                   state="failed",attributes={"stage":"first_attempt",
+                       "error_class":type(exc).__name__,
+                       "endpoint_kind":path.split('/')[1] if '/' in path[1:] else "phone"})
+        if method!="GET":
+            raise HTTPException(503, "Phone command outcome unknown: "+type(exc).__name__) from exc
+        try:
+            # Fresh socket rather than replaying over a stale pooled connection.
+            with httpx.Client(timeout=timeout,trust_env=False,follow_redirects=False) as retry:
+                r=retry.get(p['base_url']+path,headers=headers)
+        except httpx.HTTPError as retry_exc:
+            try_record("transport_error",component="native_phone_http",severity="error",
+                       state="failed",attributes={"stage":"fresh_connection",
+                           "error_class":type(retry_exc).__name__})
+            raise HTTPException(503, 'Phone unreachable: '+type(retry_exc).__name__) from retry_exc
+    if r.status_code in (401,403):
+        try_record("security_failure",component="native_phone_http",severity="error",
+                   state="failed",attributes={"status_code":r.status_code,"reason":"pairing_rejected"})
+        raise HTTPException(502, 'Phone rejected pairing token')
+    if r.status_code>=400:
+        try_record("transport_error",component="native_phone_http",severity="error",
+                   state="failed",attributes={"status_code":r.status_code,"reason":"phone_http_error"})
+        raise HTTPException(503, f'Phone returned {r.status_code}: '+r.text[:300])
+    elapsed=round((time.perf_counter()-started)*1000,1)
+    if elapsed>1000:
+        try_record("slow_request",component="native_phone_http",severity="warning",
+                   state="observed",attributes={"duration_ms":elapsed})
+    return r
 
 def register(p: PairPhone) -> dict:
     base = validate_base(p.base_url)
