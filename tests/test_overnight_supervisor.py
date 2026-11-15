@@ -190,6 +190,40 @@ class SupervisorTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             engine.claim(self.cycle_id)
 
+    def test_pause_requested_during_pending_turn_applies_after_verification(self):
+        self.create()
+        claimed=engine.claim(self.cycle_id)
+        parked=engine.pause(self.cycle_id)
+        self.assertTrue(parked["pause_requested"])
+        self.assertEqual(parked["state"],"dispatch_uncertain")
+        engine.response(self.cycle_id,claimed["request_id"],
+                        provider_receipt="actual-provider-message-1",
+                        content="A confirmed response")
+        parked=engine.verify(self.cycle_id,claimed["request_id"],
+                             **self.verified())
+        self.assertEqual(parked["state"],"paused")
+        with self.assertRaises(RuntimeError):
+            engine.claim(self.cycle_id)
+        self.assertEqual(engine.resume(self.cycle_id)["state"],"ready")
+        self.assertEqual(engine.claim(self.cycle_id)["turn_index"],2)
+
+    def test_stop_requested_during_pending_turn_preserves_receipts(self):
+        self.create()
+        claimed=engine.claim(self.cycle_id)
+        state=engine.stop(self.cycle_id)
+        self.assertTrue(state["stop_requested"])
+        self.assertEqual(state["state"],"dispatch_uncertain")
+        engine.response(self.cycle_id,claimed["request_id"],
+                        provider_receipt="actual-provider-message-2",
+                        content="A confirmed response")
+        state=engine.verify(self.cycle_id,claimed["request_id"],
+                            **self.verified())
+        self.assertEqual(state["state"],"stopped")
+        self.assertFalse(state["scope_completed"])
+        self.assertEqual(state["verified_turns"],1)
+        with self.assertRaises(RuntimeError):
+            engine.claim(self.cycle_id)
+
     def test_multiple_threads_cannot_claim_same_turn(self):
         self.create()
         with ThreadPoolExecutor(max_workers=8) as pool:
