@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from .security import require_token
 from .control_v2_routes import _owner_approval
-from . import overnight_supervisor
+from . import overnight_supervisor, development_cycle_driver
 from .local_model_provider import LocalModelConfig, LocalModelProvider
 
 router = APIRouter(prefix="/api/v1/intelligence",
@@ -29,6 +29,31 @@ class CycleRequest(BaseModel):
     objective: str = Field(min_length=12,max_length=3000)
     provider: str = Field(default="pc_local",pattern=r"^(pc_local|phone_local|chatgpt)$")
     max_turns: int = Field(default=0,ge=0,le=100000)
+
+
+@router.get("/autonomy/status")
+def autonomous_cycle_worker_status():
+    return {"ok":True,**development_cycle_driver.worker_status()}
+
+
+@router.post("/cycles/{cycle_id}/advance")
+def advance_development_cycle(cycle_id:str,
+                              x_owner_approval:str|None=Header(default=None)):
+    """Queue a REAL Git development turn, never claim it completed on ACK."""
+    _owner_approval(x_owner_approval)
+    try:
+        prepared=development_cycle_driver.start()
+        if not prepared.get("configured",False):
+            raise HTTPException(503,"Owner-local model or Git workbench not configured")
+        return development_cycle_driver.queue_turn(cycle_id)
+    except HTTPException:
+        raise
+    except KeyError as exc:
+        raise HTTPException(404,"Development cycle not found") from exc
+    except PermissionError as exc:
+        raise HTTPException(403,type(exc).__name__) from exc
+    except (ValueError,RuntimeError) as exc:
+        raise HTTPException(409,type(exc).__name__) from exc
 
 
 @router.get("/cycles")
@@ -52,17 +77,25 @@ def create_cycle(body: CycleRequest,
         if type(exc).__name__=="IntegrityError":
             raise HTTPException(409,"Cycle ID already exists") from exc
         raise
+    driver=development_cycle_driver.readiness()
+    bound=driver.get("configured",False) and item["project"] in driver.get(
+        "registered_projects",[])
     return {"ok":True,**item,
-            "provider_executor_bound":False,
+            "provider_executor_bound":bound,
             "automatic_turns_running":False,
-            "next_step":"Attach tested local AI provider and approved project work executor"}
+            "next_step":"Owner-approved development cycle worker can execute source drafts"
+                if bound else "Configure owner-local AI model and registered Git project"}
 
 
 @router.get("/cycles/{cycle_id}")
 def cycle_status(cycle_id: str):
     try:
-        return {"ok":True,**overnight_supervisor.status(cycle_id),
-                "automatic_turns_running":False}
+        item=overnight_supervisor.status(cycle_id)
+        recent=development_cycle_driver.worker_status()["recent_turns"]
+        running=any(entry.get("cycle_id")==cycle_id and
+                    entry.get("state")=="running" for entry in recent)
+        return {"ok":True,**item,
+                "automatic_turns_running":running}
     except KeyError as exc:
         raise HTTPException(404,"Cycle not found") from exc
     except ValueError as exc:
