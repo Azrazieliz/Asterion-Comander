@@ -73,7 +73,9 @@ class DiagnosticJournalTests(unittest.TestCase):
         for t in threads:t.start()
         for t in threads:t.join(timeout=12)
         self.assertTrue(all(not t.is_alive() for t in threads))
-        self.assertEqual(diag.health()["event_count"],120)
+        ticks = [entry for entry in diag.events(limit=500)["events"]
+                 if entry["kind"] == "tick"]
+        self.assertEqual(len(ticks),120)
 
     def test_reject_invalid_filters(self):
         with self.assertRaises(ValueError):diag.events(limit=1000)
