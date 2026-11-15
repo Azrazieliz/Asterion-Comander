@@ -67,7 +67,8 @@ async def phone_live(ws: WebSocket):
     # Record exact server-side rejection stage, NEVER the bearer or source IP.
     if not header.startswith("Bearer ") or not _authorized(header[7:]):
         try_record("security_failure",component="phone_wss_relay",severity="warning",
-                   state="failed",attributes={"stage":"authorization","reason":"unapproved_phone_key"})
+                   state="failed",attributes={"stage":"authorization",
+                       "reason":"missing_bearer_header" if not header.startswith("Bearer ") else "unapproved_phone_key"})
         await ws.close(code=1008)
         return
     if _active is not None:
