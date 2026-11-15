@@ -38,6 +38,8 @@ TESTS = [
     "test_shared_browser.py",
     "test_reverse_lab.py",
     "test_external_tools_routes.py",
+    "test_security_guardian.py",
+    "test_security_guardian_routes.py",
 ]
 
 
