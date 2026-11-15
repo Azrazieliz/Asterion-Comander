@@ -27,7 +27,7 @@ _ALLOWED = frozenset({
     "host.health", "sessions.recent", "sessions.status",
     "cycles.status", "skills.list", "models.list",
     "files.hash", "files.read_text", "native.session", "skills.execute",
-    "github.mcp",
+    "github.mcp", "browser.read", "reverse.inspect",
 })
 _DEFAULT_READ = frozenset({
     "host.health", "sessions.recent", "sessions.status",
@@ -285,6 +285,25 @@ def _read_tool(name: str, args: dict, request_id: str) -> dict:
                 "next_line":next_line,
                 "truncated":next_line is not None,
                 "private_file_content_stored_in_journal":False}
+    if name == "browser.read":
+        from .shared_browser import fetch
+        url=args.get("url")
+        use_tor=args.get("tor",False)
+        if not isinstance(url,str) or type(use_tor) is not bool:
+            raise ValueError("invalid_browser_tool_request")
+        observation=fetch(url,tor=use_tor,timeout_s=9)
+        return {"ok":observation["ok"],"observed":True,
+                "remote_source_is_untrusted":True,
+                "page":observation}
+    if name == "reverse.inspect":
+        from .reverse_lab import inspect
+        from .app import safe_path
+        raw=args.get("path")
+        if not isinstance(raw,str) or not 1<=len(raw)<=2048:
+            raise ValueError("invalid_reverse_tool_path")
+        result=inspect(safe_path(raw))
+        return {"ok":True,"observed":True,"binary_report":result,
+                "full_source_decompiled":False}
     if name == "files.hash":
         from .app import safe_path
         raw = args.get("path")
