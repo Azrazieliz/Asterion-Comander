@@ -85,10 +85,10 @@ public final class MainActivity extends Activity {
   private SharedPreferences prefs;
   private LinearLayout root,navbar,content,homeBody,healthBody,devicesBody;
   private FrameLayout stage;
-  private final View[] pages=new View[4];
-  private final LinearLayout[] tabButtons=new LinearLayout[4];
-  private final DesignSystem.Icon[] tabIcons=new DesignSystem.Icon[4];
-  private final TextView[] tabLabels=new TextView[4];
+  private final View[] pages=new View[5];
+  private final LinearLayout[] tabButtons=new LinearLayout[5];
+  private final DesignSystem.Icon[] tabIcons=new DesignSystem.Icon[5];
+  private final TextView[] tabLabels=new TextView[5];
   private TextView headerStatus,pcConnection,homeAgent,homeBattery,homeMemory,homeThermal,homeConnectionIssue,connectionIssue;
   private TextView healthBattery,healthTemp,healthMemory,healthStorage,healthThermal,healthWifi,healthActionStatus,pcPerformanceActionStatus;
   private TextView remoteConnection,remotePlaceholder,agentConnection,captureConnection,accessConnection,phoneAddress,hostHealth,pairingFeedback,transferFeedback,updateFeedback,phoneBridgeFeedback;
@@ -111,6 +111,9 @@ public final class MainActivity extends Activity {
   private boolean destroyed=false;
   private boolean runVoiceTestAfterPermission=false;
   private TextView voiceTestStatus;
+  private EditText intelligencePrompt;
+  private LinearLayout intelligenceTranscript;
+  private TextView intelligenceRuntimeStatus;
   private final Runnable ticker=new Runnable(){@Override public void run(){if(destroyed)return;updateHealth();handler.postDelayed(this,3500);}};
 
   private int dp(float x){return DesignSystem.dp(this,x);}
@@ -160,7 +163,8 @@ public final class MainActivity extends Activity {
     }
     root=v();root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,new int[]{0xFF10162A,0xFF090D1C,0xFF070A14}));setContentView(root);
     buildHeader();stage=new FrameLayout(this);root.addView(stage,new LinearLayout.LayoutParams(-1,0,1));
-    pages[0]=scrollHome();pages[1]=remotePage();pages[2]=scrollHealth();pages[3]=scrollDevices();
+    pages[0]=scrollHome();pages[1]=remotePage();pages[2]=scrollHealth();
+    pages[3]=scrollDevices();pages[4]=scrollIntelligence();
     for(View page:pages){page.setVisibility(View.GONE);stage.addView(page,new FrameLayout.LayoutParams(-1,-1));}
     buildNav();show(0);updateHealth();handler.postDelayed(ticker,3500);
     // Owner-authorized continuation is persistent and controlled by the internal
@@ -190,8 +194,9 @@ public final class MainActivity extends Activity {
   private void buildNav(){
     View separator=line();root.addView(separator,new LinearLayout.LayoutParams(-1,dp(1)));
     navbar=h();navbar.setBackgroundColor(0xFF101526);navbar.setPadding(dp(9),dp(7),dp(9),dp(9));
-    String[] names={"Home","Screen","Health","Connect"};String[] images={"home","monitor","pulse","devices"};
-    for(int i=0;i<4;i++){final int index=i;LinearLayout slot=v();slot.setGravity(Gravity.CENTER);slot.setPadding(dp(1),dp(7),dp(1),dp(6));
+    String[] names={"Home","Screen","Health","Connect","AI"};
+    String[] images={"home","monitor","pulse","devices","brain"};
+    for(int i=0;i<names.length;i++){final int index=i;LinearLayout slot=v();slot.setGravity(Gravity.CENTER);slot.setPadding(dp(1),dp(7),dp(1),dp(6));
       DesignSystem.Icon ic=icon(images[i],DesignSystem.MUTED,22);slot.addView(ic);
       TextView label=t(names[i],10.6f,DesignSystem.MUTED,false);label.setGravity(Gravity.CENTER);margin(slot,label,5);
       slot.setOnClickListener(w->show(index));slot.setContentDescription("Open "+names[i]);
@@ -256,6 +261,180 @@ public final class MainActivity extends Activity {
     gap(emptyRemote,22);button(emptyRemote,"Set up Windows link","devices",true,()->show(3));frame.addView(emptyRemote,new FrameLayout.LayoutParams(-1,-1));
     layout.addView(frame,new LinearLayout.LayoutParams(-1,0,1));return layout;
   }
+  /**
+   * Dedicated Intelligence workspace added without replacing the four
+   * original Control tabs, identity, signed integrations or remote screen.
+   * Every control is linked to a real existing local action or authenticated
+   * worker status. Unknown/unconfigured services are shown as such.
+   */
+  private View scrollIntelligence(){
+    LinearLayout body=v();
+    wide(body,eyebrow("ASTERION · LOCAL INTELLIGENCE"));
+    sectionTitle(body,"Intelligence.","Native assistant, verified work and system capabilities.");
+    gap(body,16);
+    LinearLayout model=card();
+    rowTitle(model,"On-device general assistant",
+      "Real GGUF inference. No paid cloud or simulated replies.",
+      icon("brain",DesignSystem.PURPLE,23));
+    gap(model,8);
+    intelligenceRuntimeStatus=t("Reading native model state…",12,DesignSystem.MUTED,false);
+    wide(model,intelligenceRuntimeStatus);
+    gap(model,11);
+    intelligenceTranscript=v();
+    intelligenceTranscript.setPadding(dp(10),dp(10),dp(10),dp(10));
+    intelligenceTranscript.addView(t(
+      "Responses appear here only after the offline model actually generates them.",
+      12,DesignSystem.MUTED,false));
+    ScrollView history=new ScrollView(this);
+    history.setFillViewport(false);
+    history.setBackground(DesignSystem.shape(this,DesignSystem.SURFACE2,
+      DesignSystem.EDGE,15));
+    history.addView(intelligenceTranscript);
+    model.addView(history,new LinearLayout.LayoutParams(-1,dp(168)));
+    gap(model,10);
+    intelligencePrompt=new EditText(this);
+    intelligencePrompt.setHint("Ask, reason, write or describe a task…");
+    intelligencePrompt.setSingleLine(false);
+    intelligencePrompt.setMinLines(2);
+    intelligencePrompt.setMaxLines(5);
+    intelligencePrompt.setTextColor(DesignSystem.TEXT);
+    intelligencePrompt.setHintTextColor(DesignSystem.MUTED);
+    intelligencePrompt.setTextSize(14);
+    intelligencePrompt.setPadding(dp(12),dp(12),dp(12),dp(12));
+    intelligencePrompt.setBackground(DesignSystem.shape(this,
+      DesignSystem.SURFACE2,DesignSystem.EDGE,14));
+    wide(model,intelligencePrompt);
+    gap(model,7);
+    button(model,"Generate locally","brain",true,this::sendIntelligenceRequest);
+    gap(model,7);
+    twoActions(model,"Load model","activity",()->showNativeAiDetails(),
+      "Stop response","stop",()->ControlNativeInference.cancel(this));
+    wide(body,model);
+    gap(body,12);
+
+    LinearLayout work=card();
+    rowTitle(work,"Autonomous development",
+      "Verified Git changes, cycle checkpoints and worker status.",
+      icon("activity",DesignSystem.TEAL,22));
+    gap(work,9);
+    button(work,"Inspect live development cycles","activity",false,
+      ()->showWorkerSubsystem("Development cycles",
+        "/api/v1/intelligence/autonomy/status"));
+    gap(work,7);
+    button(work,"Model Laboratory and release watch","brain",false,
+      ()->showWorkerSubsystem("Model Laboratory",
+        "/api/v1/intelligence/model-watch/status"));
+    wide(body,work);
+    gap(body,12);
+
+    LinearLayout tools=card();
+    rowTitle(tools,"Tools and research",
+      "Shared systems. Specialist apps retain their own workflows.",
+      icon("devices",DesignSystem.PURPLE,22));
+    gap(tools,9);
+    button(tools,"Shared browser and Tor","monitor",false,
+      ()->showWorkerSubsystem("Shared browser / Tor",
+        "/api/v1/intelligence/browser/status"));
+    gap(tools,7);
+    button(tools,"External software analysis","activity",false,
+      ()->showWorkerSubsystem("Reverse Engineering",
+        "/api/v1/intelligence/reverse/status"));
+    gap(tools,7);
+    button(tools,"Skill Studio","activity",false,
+      ()->showWorkerSubsystem("Skill Studio","/api/v1/v2/skills"));
+    gap(tools,7);
+    button(tools,"GitHub MCP","devices",false,
+      ()->showWorkerSubsystem("GitHub MCP",
+        "/api/v1/intelligence/mcp/status"));
+    wide(body,tools);
+    gap(body,12);
+
+    LinearLayout privacy=card();
+    rowTitle(privacy,"Privacy, voice and security",
+      "Actual connection state and existing phone permissions.",
+      icon("devices",DesignSystem.TEAL,22));
+    gap(privacy,9);
+    button(privacy,"Inspect private IP / VPN","devices",false,
+      this::showVpnDetails);
+    gap(privacy,7);
+    button(privacy,"Security and quarantine","activity",false,
+      ()->showWorkerSubsystem("Security quarantine",
+        "/api/v1/v2/security/quarantine"));
+    gap(privacy,7);
+    button(privacy,"Voice and device connections","devices",false,
+      ()->show(3));
+    wide(body,privacy);
+    return scroll(body);
+  }
+
+  private void refreshIntelligenceRuntimeStatus(){
+    if(intelligenceRuntimeStatus==null)return;
+    try{
+      JSONObject report=ControlNativeInference.status();
+      intelligenceRuntimeStatus.setText(
+        "JNI available: "+report.optBoolean("native_runtime_packaged",false)+
+        " · Model loaded: "+report.optBoolean("actual_model_loaded",false)+
+        " · "+report.optString("state","not_loaded"));
+    }catch(Exception e){
+      intelligenceRuntimeStatus.setText("Native AI state unavailable: "+
+        e.getClass().getSimpleName());
+    }
+  }
+
+  private void addIntelligenceTranscript(String prefix,String message){
+    if(intelligenceTranscript==null)return;
+    if(intelligenceTranscript.getChildCount()>25)
+      intelligenceTranscript.removeViewAt(0);
+    TextView item=t(prefix+"\n"+message,13,DesignSystem.TEXT,false);
+    item.setPadding(dp(6),dp(7),dp(6),dp(7));
+    wide(intelligenceTranscript,item);
+  }
+
+  private void sendIntelligenceRequest(){
+    if(intelligencePrompt==null)return;
+    String prompt=intelligencePrompt.getText().toString().trim();
+    if(prompt.length()<1||prompt.length()>5000){
+      toast("Enter a request of up to 5,000 characters");return;
+    }
+    if(!ControlNativeInference.statusSafeLoaded()){
+      showNativeAiDetails();return;
+    }
+    intelligencePrompt.setText("");
+    addIntelligenceTranscript("YOU",prompt);
+    refreshIntelligenceRuntimeStatus();
+    ControlNativeInference.generate(this,prompt,response->{
+      if(destroyed||foregroundActivity()!=this)return;
+      addIntelligenceTranscript("ASTERION · ACTUAL LOCAL RESPONSE",response);
+      refreshIntelligenceRuntimeStatus();
+    });
+  }
+
+  private void showWorkerSubsystem(String title,String endpoint){
+    if(prefs.getString("url","").isEmpty()||
+       prefs.getString("token","").isEmpty()){
+      toast("Pair the existing Windows worker first");return;
+    }
+    io.execute(()->{
+      try{
+        JSONObject status=pcTransferRequest(endpoint,"GET",null);
+        final String shown=status.toString(2);
+        runOnUiThread(()->{
+          if(!destroyed)
+            new AlertDialog.Builder(this).setTitle(title)
+              .setMessage(shown.length()>3000?
+                  shown.substring(0,3000)+"\n(Full result is available through the API)":
+                  shown)
+              .setPositiveButton("Close",null).show();
+        });
+      }catch(Exception e){
+        runOnUiThread(()->{
+          if(!destroyed)toast(title+" unavailable: "+
+            e.getClass().getSimpleName());
+        });
+      }
+    });
+  }
+
   private View scrollHealth(){healthBody=v();wide(healthBody,eyebrow("LIVE DEVICE DIAGNOSTICS"));sectionTitle(healthBody,"Health & performance.","What your phone actually reports, in real time.");gap(healthBody,21);
     LinearLayout therm=card();therm.setBackground(DesignSystem.gradient(this,0xFF272844,0xFF17363A,23));
     rowTitle(therm,"Thermal pressure","Android operating-system status",icon("pulse",DesignSystem.TEAL,25));
@@ -1216,7 +1395,9 @@ public final class MainActivity extends Activity {
       tabLabels[i].setTextColor(selected?DesignSystem.TEXT:DesignSystem.MUTED);tabIcons[i].tint(selected?DesignSystem.PURPLE:DesignSystem.MUTED);
       if(selected)tabButtons[i].setBackground(DesignSystem.shape(this,0xFF292743,0,15));else tabButtons[i].setBackgroundColor(Color.TRANSPARENT);
     }
-    if(page==1){connectRemote(false);if(!hostRefreshing)checkHost();}if(page==0||page==2||page==3)updateHealth();
+    if(page==1){connectRemote(false);if(!hostRefreshing)checkHost();}
+    if(page==4)refreshIntelligenceRuntimeStatus();
+    if(page==0||page==2||page==3)updateHealth();
   }
   private void save(){prefs.edit().putString("url",serverUrl.getText().toString().trim())
     .putString("phoneip",localAddress.getText().toString().trim()).apply();updateHealth();}
