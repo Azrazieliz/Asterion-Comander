@@ -403,18 +403,24 @@ public final class MainActivity extends Activity {
       boolean active=tunnel.optBoolean("active",false);
       boolean configured=tunnel.optBoolean("configuration_present",false);
       String message="Asterion WireGuard: "+tunnel.optString("state","off")+
-        "\nConfiguration safely stored: "+configured+
+        "\nConfiguration encrypted: "+configured+
         "\nAndroid VPN route active: "+android.optBoolean("other_vpn_or_active_vpn")+
-        "\nFull-tunnel owner approved: "+tunnel.optBoolean("full_tunnel_owner_approved")+
-        "\n\nThe current Control secure connection does not require a VPN. " +
-        "A VPN can run only with a valid owner-managed peer and Android system consent. " +
-        "Tunnel UP does not prove remote peer reachability or improved speed.";
+        "\nFull-device route approved: "+tunnel.optBoolean("full_tunnel_owner_approved")+
+        "\nPublic exit address: "+tunnel.optString("public_exit_ip","")+
+        "\nIP actually changed: "+tunnel.optBoolean("public_ip_changed_from_direct_baseline")+
+        "\nPublic IP check: "+tunnel.optString("public_ip_check_state","not_checked")+
+        "\n\nChecking the exit contacts a third-party HTTPS IP observer. " +
+        "An IP change does NOT prove that every app or IPv6/DNS traffic is protected. " +
+        "No country selection is required; Japan is optional where a free provider permits it. " +
+        "No VPN is activated without Android consent and a valid profile.";
       AlertDialog.Builder dialog=new AlertDialog.Builder(this)
         .setTitle("Private VPN — WireGuard").setMessage(message)
         .setNegativeButton("Close",null);
       if(active){
         dialog.setPositiveButton("Disconnect",(d,w)->
           ControlPrivateVpn.disconnect(this,this::toast));
+        dialog.setNeutralButton("Check exit IP",(d,w)->
+          ControlPrivateVpn.verifyCurrentEgress(this,this::toast));
       }else{
         if(configured)
           dialog.setPositiveButton("Connect",(d,w)->requestVpnConsentAndConnect());
