@@ -371,7 +371,8 @@ final class ControlModelVault {
       .put("model_sha256",artifactSha)
       .put("revision",artifactRevision)
       .put("download_requires_foreground_owner_approval",true)
-      .put("native_inference_engine_loaded",false)
+      .put("native_inference_engine_loaded",
+           ControlNativeInference.statusSafeLoaded())
       .put("model_benchmarked",false)
       .put("model_trained",false)
       .put("error_code",lastError);
