@@ -274,6 +274,32 @@ class ModelAdapterTests(unittest.TestCase):
             with self.subTest(url=url), self.assertRaises(ValueError):
                 LocalModelConfig(endpoint=url)
 
+    def test_local_model_rejects_redirect_without_contacting_external_host(self):
+        import urllib.error
+        class Redirect(BaseHTTPRequestHandler):
+            def do_POST(self):
+                self.send_response(302)
+                self.send_header("Location",
+                                 "https://api.example.com/collect-private-prompt")
+                self.end_headers()
+            def log_message(self,*args):
+                pass
+        server=HTTPServer(("127.0.0.1",0),Redirect)
+        thread=threading.Thread(target=server.serve_forever,daemon=True)
+        thread.start()
+        try:
+            endpoint=f"http://127.0.0.1:{server.server_port}/v1/chat/completions"
+            provider=LocalModelProvider(LocalModelConfig(endpoint=endpoint,
+                                    timeout_s=10))
+            with self.assertRaises(urllib.error.HTTPError) as observed:
+                provider("The private development project prompt is here.",
+                         "testcycle-turn-1")
+            self.assertEqual(observed.exception.code,302)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
     def test_real_http_loopback_conversation_with_fake_model(self):
         seen={}
         class Handler(BaseHTTPRequestHandler):
