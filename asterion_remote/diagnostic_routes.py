@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, ConfigDict
 from .security import require_token
 from . import diagnostic_core as core
 from . import diagnostic_analysis
+from . import diagnostic_snapshot
 
 router = APIRouter(prefix="/api/v1/diagnostics",dependencies=[Depends(require_token)])
 
@@ -38,6 +39,17 @@ def events(since: int = 0, limit: int = 100, app: str = "", trace_id: str = ""):
         return core.events(since=since,limit=limit,app=app,trace_id=trace_id)
     except ValueError as exc:
         raise HTTPException(422,str(exc)) from exc
+
+
+@router.get("/snapshot")
+def snapshot(app: str = "", limit: int = 600, lookback_minutes: int = 1440,
+             phone: bool = True):
+    """One bounded read-only PC and paired Android diagnostic observation."""
+    try:
+        return diagnostic_snapshot.collect(
+            app=app, limit=limit, lookback_minutes=lookback_minutes, phone=phone)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @router.get("/triage")
