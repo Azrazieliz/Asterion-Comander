@@ -172,7 +172,7 @@ def benchmark(app:str,repo:str,sha:str,task_score:float,latency_ms:float,
         raise ValueError("invalid_benchmark_metrics")
     with _LOCK:
         db=_db()
-        try:db.execute("""INSERT INTO benchmarks VALUES(?,?,?,?,?,?,?,?,?)
+        try:db.execute("""INSERT INTO benchmarks(app,repo,sha,task_score,latency_ms,ram_mb,thermal_ok,verified,evidence_sha256,recorded_at_ms) VALUES(?,?,?,?,?,?,?,?,?,?)
           ON CONFLICT(app,repo,sha) DO UPDATE SET task_score=excluded.task_score,
           latency_ms=excluded.latency_ms,ram_mb=excluded.ram_mb,
           thermal_ok=excluded.thermal_ok,verified=excluded.verified,
