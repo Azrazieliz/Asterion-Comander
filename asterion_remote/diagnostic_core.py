@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 _LOCK = threading.RLock()
+_EVENT_CHANGED = threading.Condition()
 _SAFE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.:/-]{0,95}$")
 _ALLOWED_FIELDS = {
     "stage", "state", "device", "device_role", "transport", "network_type",
@@ -188,6 +189,10 @@ def record(
             raise
         finally:
             con.close()
+    # Notify after SQLite COMMIT, never wake a subscriber on uncommitted data.
+    # Subscribers always requery SQLite, so a missed notification cannot lose data.
+    with _EVENT_CHANGED:
+        _EVENT_CHANGED.notify_all()
     return {"ok":True,"event_id":event_id,"sequence":seq,"incident":should_incident}
 
 
@@ -242,6 +247,33 @@ def health() -> dict:
             "global_logcat":False,"arbitrary_app_private_memory":False,
             "vpn_enabled":False,"security_level":"existing_pairing"}
 
+
+
+
+def bounds() -> dict:
+    """Durable cursor range and retention state for streaming subscribers."""
+    rows = _query("SELECT COALESCE(MIN(seq),0) AS oldest, COALESCE(MAX(seq),0) AS latest, COUNT(*) AS total FROM events")
+    return {"oldest_sequence":rows[0]["oldest"],"latest_sequence":rows[0]["latest"],
+            "retained_events":rows[0]["total"]}
+
+
+def wait_for_change(since: int, timeout: float = 10.0) -> bool:
+    """Wait for new committed events without periodically opening a database."""
+    if not isinstance(since,int) or since<0 or not 0<timeout<=20:
+        raise ValueError("Invalid wait cursor or deadline")
+    if bounds()["latest_sequence"]>since:
+        return True
+    until=time.monotonic()+timeout
+    # Lock/condition order never conflicts with record(): record acquires
+    # _EVENT_CHANGED only after closing _db and releasing _LOCK.
+    with _EVENT_CHANGED:
+        while True:
+            remaining=until-time.monotonic()
+            if remaining<=0:
+                return bounds()["latest_sequence"]>since
+            _EVENT_CHANGED.wait(timeout=remaining)
+            if bounds()["latest_sequence"]>since:
+                return True
 
 def try_record(kind: str, **kwargs):
     """Best-effort observability NEVER prevents remote control from functioning."""
