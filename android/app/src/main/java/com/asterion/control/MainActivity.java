@@ -305,6 +305,9 @@ public final class MainActivity extends Activity {
     gap(localModels,11);
     button(localModels,"Inspect local AI model and downloads","activity",false,
       ()->showLocalModelDetails());
+    gap(localModels,7);
+    button(localModels,"Offline Asterion Intelligence","brain",false,
+      ()->showNativeAiDetails());
     wide(healthBody,localModels);
     return scroll(healthBody);
   }
@@ -405,6 +408,84 @@ public final class MainActivity extends Activity {
           startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))).show();
     }catch(Exception e){toast("Permission inspection unavailable");}
   }
+  /**
+   * Native GGUF inference is opt-in; the default compatible app can still
+   * run Control with this dialog reporting runtime NOT PACKAGED. A genuine
+   * native model must be loaded before requests become available.
+   */
+  private void showNativeAiDetails(){
+    try{
+      JSONObject status=ControlNativeInference.status();
+      boolean loaded=status.optBoolean("actual_model_loaded",false);
+      boolean runtime=status.optBoolean("native_runtime_packaged",false);
+      String message="Inference engine bundled: "+runtime+
+        "\nModel actually loaded: "+loaded+
+        "\nCurrent state: "+status.optString("state","not_loaded")+
+        "\nLast generation: "+status.optLong("last_generation_ms",0)+" ms"+
+        "\nNative device benchmark passed: "+
+           status.optBoolean("actual_device_benchmark_passed",false)+
+        "\nLast error: "+status.optString("last_error_code","")+
+        "\n\nA genuine free GGUF model is required. The engine runs "+
+        "on the phone, not through a paid AI service. "+
+        "Unverified model responses are never treated as completed device actions.";
+      AlertDialog.Builder dialog=new AlertDialog.Builder(this)
+        .setTitle("Asterion Intelligence — native offline")
+        .setMessage(message).setNegativeButton("Close",null);
+      if(loaded){
+        dialog.setPositiveButton("Ask offline AI",(d,w)->askNativeAi());
+        dialog.setNeutralButton("Unload model",(d,w)->
+          ControlNativeInference.unload(this,this::toast));
+      }else if(runtime){
+        dialog.setPositiveButton("Load verified GGUF",(d,w)->
+          new AlertDialog.Builder(this)
+            .setTitle("Owner approval — native model")
+            .setMessage("Verify the full model SHA-256 and attempt to "+
+              "load approximately 1.4 GB of offline weights? Native "+
+              "inference can use additional RAM and warm the phone. "+
+              "Loading will be rejected under severe thermal or RAM pressure.")
+            .setNegativeButton("Cancel",null)
+            .setPositiveButton("Load",(confirm,which)->
+              ControlNativeInference.load(this,this::toast))
+            .show());
+      }else{
+        dialog.setPositiveButton("Inspect model vault",(d,w)->
+          showLocalModelDetails());
+      }
+      dialog.show();
+    }catch(Exception e){
+      toast("Offline AI status unavailable: "+e.getClass().getSimpleName());
+    }
+  }
+
+  private void askNativeAi(){
+    if(!ControlNativeInference.statusSafeLoaded()){
+      toast("Load actual offline model weights first");return;
+    }
+    EditText question=new EditText(this);
+    question.setSingleLine(false);
+    question.setMinLines(3);
+    question.setMaxLines(7);
+    question.setHint("Write an actual question or creative prompt");
+    question.setPadding(dp(12),dp(12),dp(12),dp(12));
+    new AlertDialog.Builder(this)
+      .setTitle("Ask Asterion offline")
+      .setView(question)
+      .setNegativeButton("Cancel",null)
+      .setPositiveButton("Generate",(dialog,index)->{
+        String prompt=question.getText().toString().trim();
+        question.setText("");
+        if(prompt.isEmpty()){toast("Enter a question");return;}
+        ControlNativeInference.generate(this,prompt,response->{
+          if(foregroundActivity()==this&&!isFinishing()){
+            new AlertDialog.Builder(this)
+              .setTitle("Offline Asterion response")
+              .setMessage(response)
+              .setPositiveButton("Close",null).show();
+          }
+        });
+      }).show();
+  }
+
   private void showLocalModelDetails(){
     try{
       JSONObject details=ControlModelVault.status(this);
