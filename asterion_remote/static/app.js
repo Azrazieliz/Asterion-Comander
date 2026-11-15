@@ -99,10 +99,50 @@ function diagnosticRecord(parent,title,detail,severity='neutral'){
  const body=document.createElement('p');body.textContent=detail;
  item.append(heading,body);parent.append(item);
 }
+async function loadPhoneDiagnosticEvidence(){
+ const panel=$('#diagnostic-phone');
+ if(!panel)return;
+ panel.replaceChildren();
+ if(!state.token){
+  diagnosticRecord(panel,'Not linked','Connect to Windows to read the paired Android Control journal.');
+  return;
+ }
+ diagnosticRecord(panel,'Reading Android journal','Checking the paired native phone listener…');
+ try{
+  const head=await request('/phone/diagnostics/events'+qp({since:0,limit:1}));
+  if(head.scope!=='asterion_control_process_only')throw new Error('Unexpected journal scope');
+  const latest=Number(head.latest_sequence||0);
+  const start=Math.max(0,latest-30);
+  const page=await request('/phone/diagnostics/events'+qp({since:start,limit:30}));
+  if(page.scope!=='asterion_control_process_only')throw new Error('Unexpected journal scope');
+  panel.replaceChildren();
+  const data=page.events||[];
+  if(!data.length){
+   diagnosticRecord(panel,'No recent Control journal entries',
+    'The paired Android listener returned no records in the selected recent window.');
+   return;
+  }
+  diagnosticRecord(panel,'Android Control · own-process telemetry',
+   data.length+' of the newest retained events · last recorded sequence '+latest+
+    ' · This does not include private logs belonging to other apps.');
+  for(const event of data.slice().reverse().slice(0,30)){
+   const title=String(event.kind||'event')+' · '+String(event.state||'unknown');
+   const detail='Stage: '+String(event.stage||'unspecified')+
+     ' · Reason code: '+String(event.reason_code||'unspecified')+
+     ' · Sequence '+String(event.seq||'?');
+   diagnosticRecord(panel,title,detail);
+  }
+ }catch(err){
+  panel.replaceChildren();
+  diagnosticRecord(panel,'Android journal unavailable',
+   friendlyError(err)+' · This does not imply that the phone is offline or healthy.');
+ }
+}
 async function loadDiagnostics(){
  if(!state.token){$('#diagnostic-state').textContent='Connect to load diagnostics.';return;}
  const status=$('#diagnostic-state');
  status.textContent='Loading recorded diagnostic evidence…';
+ loadPhoneDiagnosticEvidence().catch(e=>toast(e.message));
  const filter=$('#diagnostic-app').value.trim();
  const minutes=Number($('#diagnostic-window').value);
  try{
