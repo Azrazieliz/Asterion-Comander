@@ -41,7 +41,7 @@ class SessionRequest(BaseModel):
     stop_on_error: bool = True
     # Exact repeated requests return the original receipt, never repeat taps.
     request_id: str | None = Field(default=None,min_length=8,max_length=100,
-        pattern=r'^[A-Za-z0-9][A-Za-z0-9_.:-]{7,99}\\Z')
+        pattern=r'^[A-Za-z0-9][A-Za-z0-9_.:-]{7,99}\Z')
 
     @model_validator(mode="after")
     def check(self):
