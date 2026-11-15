@@ -415,7 +415,10 @@ public final class MainActivity extends Activity {
         "\nDownload state: "+details.optString("phase","idle")+
         "\nTransferred: "+(ready/1_000_000L)+" MB"+
         "\nExpected: "+(total/1_000_000L)+" MB"+
-        "\nVerified weights: "+details.optBoolean("verified_weight_file_present")+
+        "\nModel previously verified: "+
+             details.optBoolean("previously_verified_weight_file_present")+
+        "\nSHA-256 checked this session: "+
+             details.optBoolean("hash_rechecked_this_process")+
         "\nNative inference loaded: "+
              details.optBoolean("native_inference_engine_loaded")+
         "\n\nA download requires internet and uses the official Hugging Face "+
@@ -429,6 +432,9 @@ public final class MainActivity extends Activity {
         dialog.setNeutralButton("Pause download",(d,w)->
           ControlModelVault.cancel(this));
       }else{
+        if(details.optBoolean("previously_verified_weight_file_present"))
+          dialog.setNeutralButton("Reverify SHA-256",(d,w)->
+            ControlModelVault.verifyInstalled(this,this::toast));
         dialog.setPositiveButton("Download / resume verified model",(d,w)->
           new AlertDialog.Builder(this)
             .setTitle("Confirm offline model transfer")
