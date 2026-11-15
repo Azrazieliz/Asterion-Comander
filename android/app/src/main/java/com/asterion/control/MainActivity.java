@@ -101,6 +101,7 @@ public final class MainActivity extends Activity {
   private boolean advancedSetupVisible=false;
   private LinearLayout advancedSetup;
   private TextView privacyStatus;
+  private TextView securitySummary;
   private int currentTab=0;
   private boolean webStarted=false,hostRefreshing=false;
   private boolean fullRepairInProgress=false;
@@ -279,8 +280,139 @@ public final class MainActivity extends Activity {
     gap(healthBody,24);wide(healthBody,eyebrow("WINDOWS HEALTH"));gap(healthBody,10);
     LinearLayout windows=card();hostHealth=t("Connect your Windows agent to see its CPU, memory, storage and temperature sensors.",12,DesignSystem.MUTED,false);wide(windows,hostHealth);
     wide(healthBody,windows);
+    gap(healthBody,24);wide(healthBody,eyebrow("CONTROL DIAGNOSTICS & SECURITY"));gap(healthBody,10);
+    LinearLayout diagnostics=card();rowTitle(diagnostics,"Incident diagnostics",
+      "Durable Control events and actual Android process exit history",icon("activity",DesignSystem.PURPLE,23));
+    gap(diagnostics,10);button(diagnostics,"Inspect recent Control incidents","activity",false,
+      ()->showLocalDiagnostics());wide(healthBody,diagnostics);
+    gap(healthBody,12);LinearLayout security=card();rowTitle(security,"Security level",
+      "Enforced locally on both network and direct Control commands",icon("shield",DesignSystem.TEAL,23));
+    securitySummary=t("Current: "+ControlSecurityPolicy.level(this),13,DesignSystem.TEXT,true);
+    margin(security,securitySummary,12);gap(security,12);
+    button(security,"Choose security level","shield",true,()->showSecurityChoices());
+    gap(security,9);button(security,"Permissions and developer access","activity",false,
+      ()->showPermissionDetails());wide(healthBody,security);
+    gap(healthBody,12);LinearLayout connectivity=card();rowTitle(connectivity,"Private connectivity",
+      "Existing encrypted link is preserved; optional Asterion VPN is not active",
+      icon("shield",DesignSystem.TEAL,23));
+    gap(connectivity,11);button(connectivity,"Inspect VPN and network permissions","devices",false,
+      ()->showVpnDetails());wide(healthBody,connectivity);
     return scroll(healthBody);
   }
+
+  private void setSecurityModeLocally(String mode,boolean[] flags){
+    try{
+      if(!ControlSecurityPolicy.configureLocally(this,mode,flags,3600000L))
+        throw new IllegalStateException("Security settings not persisted");
+      if(securitySummary!=null)securitySummary.setText("Current: "+ControlSecurityPolicy.level(this));
+      toast("Security level updated: "+ControlSecurityPolicy.level(this));
+    }catch(Exception e){toast("Security change rejected: "+e.getClass().getSimpleName());}
+  }
+  private void showSecurityChoices(){
+    final String[] choices={"Normal — existing encrypted paired control",
+      "Developer — 60 minutes, owner-approved diagnostics",
+      "Lockdown — block remote operations, allow only status",
+      "Custom — choose permitted remote capabilities"};
+    new AlertDialog.Builder(this).setTitle("Asterion security level")
+      .setSingleChoiceItems(choices,-1,(dialog,which)->{
+        dialog.dismiss();
+        if(which==0)setSecurityModeLocally(ControlSecurityPolicy.NORMAL,null);
+        else if(which==1)
+          new AlertDialog.Builder(this).setTitle("Temporary Developer access")
+            .setMessage("Developer mode expires after 60 minutes. Android system permissions remain required and are never granted automatically.")
+            .setNegativeButton("Cancel",null)
+            .setPositiveButton("Enable", (d,w)->setSecurityModeLocally(
+              ControlSecurityPolicy.DEVELOPER,null)).show();
+        else if(which==2)
+          new AlertDialog.Builder(this).setTitle("Enable Lockdown?")
+            .setMessage("Remote input, app launches, file writes and automated commands will be denied. You can restore Normal here on this phone.")
+            .setNegativeButton("Cancel",null)
+            .setPositiveButton("Enable Lockdown",(d,w)->setSecurityModeLocally(
+              ControlSecurityPolicy.LOCKDOWN,null)).show();
+        else{
+          final String[] names={"Remote touch and text","Launch applications",
+            "Authorized app engine actions","Remote file transfers",
+            "ChatGPT continuation and cycles","Developer diagnostics"};
+          final boolean[] selected={true,true,true,true,true,false};
+          new AlertDialog.Builder(this).setTitle("Custom remote permissions")
+            .setMultiChoiceItems(names,selected,(d,index,checked)->selected[index]=checked)
+            .setNegativeButton("Cancel",null)
+            .setPositiveButton("Apply custom policy",(d,w)->setSecurityModeLocally(
+              ControlSecurityPolicy.CUSTOM,selected)).show();
+        }
+      }).setNegativeButton("Cancel",null).show();
+  }
+  private void showLocalDiagnostics(){
+    try{
+      JSONObject first=ControlEventJournal.recent(this,0,1);
+      long latest=first.optLong("latest_sequence",0);
+      JSONObject log=ControlEventJournal.recent(this,Math.max(0,latest-14),15);
+      JSONObject exits=ControlCrashDiagnostics.recentExitHistory(this);
+      org.json.JSONArray events=log.getJSONArray("events");
+      org.json.JSONArray history=exits.optJSONArray("exits");
+      StringBuilder s=new StringBuilder("Own-process events: ").append(latest)
+        .append("\nRecent events:\n");
+      for(int i=0;i<events.length();i++){
+        JSONObject event=events.getJSONObject(i);
+        s.append(event.optLong("seq")).append(" · ")
+          .append(event.optString("kind")).append(" / ")
+          .append(event.optString("stage")).append(" / ")
+          .append(event.optString("state")).append("\n");
+      }
+      if(history!=null){
+        s.append("\nAndroid historical process exits: ").append(history.length()).append("\n");
+        for(int i=0;i<Math.min(5,history.length());i++){
+          JSONObject item=history.getJSONObject(i);
+          s.append("Reason ").append(item.optInt("reason_code"))
+            .append(" · ").append(item.optLong("timestamp_ms")).append("\n");
+        }
+      }
+      new AlertDialog.Builder(this).setTitle("Control diagnostic evidence")
+        .setMessage(s.toString()).setPositiveButton("Close",null).show();
+    }catch(Exception e){
+      new AlertDialog.Builder(this).setTitle("Diagnostics unavailable")
+        .setMessage(e.getClass().getSimpleName()).setPositiveButton("Close",null).show();
+    }
+  }
+  private void showPermissionDetails(){
+    try{
+      JSONObject state=ControlPermissionMatrix.status(this);
+      String message="Developer Options: "+state.optBoolean("developer_options_enabled")+
+        "\nAccessibility: "+state.optBoolean("accessibility_enabled")+
+        "\nScreen capture active: "+state.optBoolean("media_projection_active")+
+        "\nNotifications: "+state.optBoolean("notifications_granted")+
+        "\nUsage access: "+state.optBoolean("usage_stats_granted")+
+        "\nOwn-app crash history: "+state.optBoolean("own_app_exit_history_available")+
+        "\n\nOther apps' private logs require their own approved diagnostic adapters. Developer Options alone do not unlock them.";
+      new AlertDialog.Builder(this).setTitle("Actual Android permissions")
+        .setMessage(message)
+        .setNegativeButton("Close",null)
+        .setNeutralButton("App permissions",(d,w)->{
+          Intent intent=new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            Uri.parse("package:"+getPackageName()));
+          startActivity(intent);
+        })
+        .setPositiveButton("Accessibility settings",(d,w)->
+          startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))).show();
+    }catch(Exception e){toast("Permission inspection unavailable");}
+  }
+  private void showVpnDetails(){
+    try{
+      JSONObject state=ControlPermissionMatrix.status(this);
+      String message="Current Android VPN route detected: "+
+        state.optBoolean("other_vpn_or_active_vpn")+
+        "\nAsterion private VPN: not installed or activated"+
+        "\nExisting paired secure connection remains the default."+
+        "\n\nAsterion VPN requires an audited tunnel backend, device keys and explicit Android system approval. It will not be enabled by opening these settings.";
+      new AlertDialog.Builder(this).setTitle("VPN and secure networking")
+        .setMessage(message).setNegativeButton("Close",null)
+        .setPositiveButton("Android VPN settings",(d,w)->{
+          try{startActivity(new Intent("android.settings.VPN_SETTINGS"));}
+          catch(Exception e){toast("VPN settings unavailable on this device");}
+        }).show();
+    }catch(Exception e){toast("VPN information unavailable");}
+  }
+
   private TextView serviceLine(LinearLayout card,String title,String iconName){LinearLayout row=h();row.setPadding(0,dp(11),0,dp(11));row.addView(icon(iconName,DesignSystem.PURPLE,20));TextView titleText=t(title,13,DesignSystem.TEXT,true);titleText.setPadding(dp(14),0,0,0);row.addView(titleText,new LinearLayout.LayoutParams(0,-2,1));TextView value=t("Checking",12,DesignSystem.MUTED,false);row.addView(value);wide(card,row);return value;}
   /** Explicit owner action: re-arm existing agent and re-register with the same Windows worker.
       Android must still grant Accessibility and MediaProjection when unavailable. */
