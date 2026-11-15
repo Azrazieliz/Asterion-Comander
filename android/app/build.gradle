@@ -1,10 +1,18 @@
 plugins { id 'com.android.application' }
+
+// The original Android 29 / compileSdk35 release configuration is preserved.
+// The optional native GGUF engine is selected explicitly, never silently:
+//   -PasterionNativeAi=true
+// The published AiKit 1.0 AAR declares minSdk30/minCompileSdk37. Enabling it
+// requires a separately authorized Android SDK/Gradle compatibility build.
+def asterionNativeAi = (findProperty('asterionNativeAi') ?: 'false').toString() == 'true'
+
 android {
   namespace 'com.asterion.control'
-  compileSdk 35
+  compileSdk asterionNativeAi ? 37 : 35
   defaultConfig {
     applicationId 'com.asterion.control'
-    minSdk 29
+    minSdk asterionNativeAi ? 30 : 29
     targetSdk 35
     versionCode 931
     versionName '0.9.31'
@@ -38,6 +46,13 @@ android {
     }
   }
   compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17; coreLibraryDesugaringEnabled true }
+  if (asterionNativeAi) {
+    packaging {
+      // AiKit JNI bundles multiple native backends and depends on actual
+      // extracted shared library paths; do not alter default APK packaging.
+      jniLibs { useLegacyPackaging true }
+    }
+  }
 }
 
 // Official audited WireGuard GoBackend. VPN remains OFF until owner approval
@@ -45,4 +60,9 @@ android {
 dependencies {
   implementation 'com.wireguard.android:tunnel:1.0.20260102'
   coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.3'
+  if (asterionNativeAi) {
+    // MIT-licensed real JNI llama.cpp engine. Checked Maven Central 1.0.0
+    // AAR and upstream Java-visible Kotlin API. Not required in default app.
+    implementation 'io.github.its-hazratbilal:android-ai-kit-chat:1.0.0'
+  }
 }
