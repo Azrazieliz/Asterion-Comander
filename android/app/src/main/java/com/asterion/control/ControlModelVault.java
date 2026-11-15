@@ -57,6 +57,7 @@ final class ControlModelVault {
   private static final long PINNED_BYTES=1396198496L;
   private static final String VERIFIED_RECORD="verified-current-model.json";
   private ControlModelVault(){}
+  static String modelSha(){return PINNED_SHA256;}
 
   private static void requireOwner(Activity a){
     if(a==null||a!=MainActivity.foregroundActivity()||a.isFinishing())
