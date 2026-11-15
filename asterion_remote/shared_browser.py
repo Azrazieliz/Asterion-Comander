@@ -72,6 +72,7 @@ def _url(value:str, *, onion_mode:bool)->tuple[str,str,int,str]:
     # Never pass raw non-ASCII to HTTP/1.1 request-line encoding.
     from urllib.parse import quote
     path=quote(path,safe="/:@!$&'()*+,;=?%[]~")
+    if len(path)>1800:
         raise ValueError("browser_request_path_too_long")
     url=urlunsplit((parts.scheme,hostname+(
         ":"+str(port) if port not in {80 if parts.scheme=="http" else 443}
