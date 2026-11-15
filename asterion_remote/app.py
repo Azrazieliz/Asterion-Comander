@@ -27,6 +27,7 @@ from .security import configured_token, require_token
 from .native_routes import router as phone_router
 from .diagnostic_routes import router as diagnostic_router
 from .control_v2_routes import router as control_v2_router
+from .control_ai_routes import router as control_ai_router
 from .recovery import router as recovery_router
 from .pairing import router as pairing_router, start_discovery, stop_discovery, create_code
 from .live_stream import install_stream
@@ -49,6 +50,7 @@ app.mount('/static', StaticFiles(directory=STATIC), name='static')
 app.include_router(phone_router)
 app.include_router(diagnostic_router)
 app.include_router(control_v2_router)
+app.include_router(control_ai_router)
 app.include_router(recovery_router)
 app.include_router(pairing_router)
 
