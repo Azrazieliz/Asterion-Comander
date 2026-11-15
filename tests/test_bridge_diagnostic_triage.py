@@ -44,6 +44,33 @@ class BridgeDiagnosticTriageTests(unittest.TestCase):
                             "paired-bearer")
                     api.assert_not_called()
 
+    def test_bounded_native_android_journal(self):
+        with patch.object(github_bridge, "pc", return_value={
+            "ok": True, "scope": "asterion_control_process_only",
+            "events": []}) as api:
+            result=github_bridge.run(
+                {"op": "phone_diagnostic_events",
+                 "params": {"since": 37, "limit": 40}}, "paired-bearer")
+        self.assertEqual(result["scope"], "asterion_control_process_only")
+        self.assertEqual(api.call_args.args[0],
+                         "/api/v1/phone/diagnostics/events?since=37&limit=40")
+        self.assertEqual(api.call_args.args[1], "paired-bearer")
+
+    def test_native_journal_rejects_privileged_or_unbounded_requests(self):
+        rejected=[
+            {"since": -1}, {"since": 2**62}, {"since": True},
+            {"limit": 0}, {"limit": 81}, {"limit": "40"},
+            {"path": "/other/app"}, {"app": "com.other.app"}
+        ]
+        for params in rejected:
+            with self.subTest(params=params):
+                with patch.object(github_bridge,"pc") as api:
+                    with self.assertRaises(ValueError):
+                        github_bridge.run(
+                            {"op": "phone_diagnostic_events", "params": params},
+                            "paired-bearer")
+                    api.assert_not_called()
+
     def test_ordinary_get_still_rejects_query_body(self):
         with patch.object(github_bridge, "pc") as api:
             with self.assertRaises(ValueError):
