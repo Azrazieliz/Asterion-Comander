@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, Field, ConfigDict
 from .security import require_token
 from . import diagnostic_core as core
@@ -114,3 +114,43 @@ async def live_events(request: Request, since: int | None = None,
                  "X-Accel-Buffering":"no",
                  "X-Content-Type-Options":"nosniff",
                  "Connection":"keep-alive"})
+
+
+@router.get("/incidents/{incident_id}/bundle")
+def get_incident_bundle(incident_id: str):
+    try:
+        data=core.incident_bundle(incident_id)
+    except ValueError as exc:
+        raise HTTPException(422,str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(500,"Incident evidence integrity failure") from exc
+    if data is None:
+        raise HTTPException(404,"Incident not found")
+    return data
+
+
+@router.get("/incidents/{incident_id}/export")
+def export_incident_bundle(incident_id: str):
+    # Download only immutable, redacted evidence from the authenticated API.
+    # Export digest is the content hash (not an unverified summary claim).
+    result=get_incident_bundle(incident_id)
+    body=json.dumps(result["evidence"],sort_keys=True,
+                    separators=(",",":"),ensure_ascii=True).encode("utf8")
+    from hashlib import sha256
+    digest=sha256(body).hexdigest()
+    if digest!=result["evidence_sha256"]:
+        raise HTTPException(500,"Incident export checksum mismatch")
+    return Response(content=body,media_type="application/json",headers={
+        "Cache-Control":"no-store",
+        "Content-Disposition":f'attachment; filename="asterion-incident-{incident_id}.json"',
+        "X-Content-SHA256":digest,
+        "X-Content-Type-Options":"nosniff",
+    })
+
+
+@router.get("/traces/{trace_id}")
+def read_trace(trace_id: str, limit: int = 200):
+    try:
+        return core.trace_events(trace_id,limit)
+    except ValueError as exc:
+        raise HTTPException(422,str(exc)) from exc
