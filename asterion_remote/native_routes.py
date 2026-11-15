@@ -102,6 +102,14 @@ def phone_transfer_cancel(key: str):
 
 # A session executes explicitly authorized UI steps locally without a ChatGPT turn per gesture.
 from .interaction_sessions import SessionRequest, start as start_session, status as session_status, cancel as cancel_session
+from . import session_journal
+
+@router.get('/sessions/recent')
+def recent_control_sessions(limit:int=30):
+    if not 1<=limit<=100:
+        raise HTTPException(422,'Invalid session history limit')
+    return {'ok':True,'items':session_journal.recent(limit),
+            'durable':True,'replay_prevented':True}
 
 @router.post('/sessions')
 def submit_control_session(data: SessionRequest):
