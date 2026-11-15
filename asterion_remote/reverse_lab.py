@@ -145,9 +145,10 @@ def inspect(path:str|Path)->dict:
     with file.open("rb") as h:head=h.read(128)
     if head.startswith(b"MZ"):meta=_pe(file)
     elif head.startswith(b"\x7fELF"):meta=_elf(file)
-    elif head.startswith(b"dex\n"):meta=_dex_bytes(file.read_bytes()
-                                                 if size<=_MAX_MEM else
-                                                 head)
+    elif head.startswith(b"dex\n"):
+        meta=(_dex_bytes(file.read_bytes()) if size<=_MAX_MEM else
+              {"type":"android_dex","status":"large_dex_needs_jadx",
+               "declared_bytes":size,"source_recovered":False})
     elif head.startswith(b"PK\x03\x04"):
         meta=_archive(file,apk=file.suffix.lower()==".apk")
     else:
