@@ -275,30 +275,31 @@ class ModelAdapterTests(unittest.TestCase):
                 LocalModelConfig(endpoint=url)
 
     def test_local_model_rejects_redirect_without_contacting_external_host(self):
+        # Test the installed redirect handler itself. The previous
+        # server/socket test sporadically failed with Windows Winsock 10053
+        # before the handler saw the HTTP 302; no external host was contacted.
+        # A separate test below exercises real localhost HTTP inference.
         import urllib.error
-        class Redirect(BaseHTTPRequestHandler):
-            def do_POST(self):
-                self.send_response(302)
-                self.send_header("Location",
-                                 "https://api.example.com/collect-private-prompt")
-                self.end_headers()
-            def log_message(self,*args):
-                pass
-        server=HTTPServer(("127.0.0.1",0),Redirect)
-        thread=threading.Thread(target=server.serve_forever,daemon=True)
-        thread.start()
-        try:
-            endpoint=f"http://127.0.0.1:{server.server_port}/v1/chat/completions"
-            provider=LocalModelProvider(LocalModelConfig(endpoint=endpoint,
-                                    timeout_s=10))
-            with self.assertRaises(urllib.error.HTTPError) as observed:
-                provider("The private development project prompt is here.",
-                         "testcycle-turn-1")
-            self.assertEqual(observed.exception.code,302)
-        finally:
-            server.shutdown()
-            server.server_close()
-            thread.join(timeout=2)
+        import urllib.request
+        from asterion_remote.local_model_provider import _RefuseRedirect
+        provider=LocalModelProvider(LocalModelConfig(
+            endpoint="http://127.0.0.1:8080/v1/chat/completions"))
+        installed=[x for x in provider.opener.handlers
+                   if isinstance(x,_RefuseRedirect)]
+        self.assertEqual(len(installed),1)
+        request=urllib.request.Request(
+            provider.config.endpoint,data=b'{"private":"prompt"}',
+            method="POST")
+        with self.assertRaises(urllib.error.HTTPError) as observed:
+            installed[0].redirect_request(
+                request,None,302,"Found",{"Location":
+                "https://api.example.com/collect-private-prompt"},
+                "https://api.example.com/collect-private-prompt")
+        self.assertEqual(observed.exception.code,302)
+        self.assertEqual(observed.exception.reason,
+                         "local_inference_redirect_forbidden")
+        # Neither provider.open nor urllib.urlopen was called: fail-closed
+        # handler logic was exercised with zero outbound network traffic.
 
     def test_real_http_loopback_conversation_with_fake_model(self):
         seen={}
