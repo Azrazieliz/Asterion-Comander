@@ -67,21 +67,68 @@ def _copy(key: str, path: Path, name: str, paired: dict, cancel: threading.Event
             init=_post(client,base,paired["token"],"/transfer/start",
                 {"name":name,"size":size,"sha256":checksum})
             transfer_id=init["id"]
+            if not isinstance(transfer_id,str) or not transfer_id or len(transfer_id)>64 or not all(
+                character.isalnum() or character in "_-" for character in transfer_id):
+                raise RuntimeError("Phone returned invalid transfer identifier")
             chunk_size=min(CHUNK,int(init.get("chunk_max",CHUNK)))
-            _update(key,state="transferring",size=size,bytes_sent=0)
+            if not (4096 <= chunk_size <= CHUNK):
+                raise RuntimeError("Phone refused safe transfer chunk size")
+            if init.get("sha256") != checksum or int(init.get("size",-1))!=size:
+                raise RuntimeError("Phone resumed a different file; refusing transmission")
+            offset=int(init.get("received",0))
+            if not 0<=offset<=size:
+                raise RuntimeError("Phone returned invalid transfer offset")
+            _update(key,state="transferring",size=size,bytes_sent=offset,
+                    recovered_bytes=offset)
             with path.open("rb") as file:
-                offset=0
-                while payload:=file.read(chunk_size):
+                while offset<size:
                     if cancel.is_set():raise InterruptedError("Cancelled by user")
-                    response=client.put(base+"/transfer/chunk/"+transfer_id,
-                      content=payload,headers={**headers,
-                        "Content-Type":"application/octet-stream",
-                        "X-Transfer-Offset":str(offset)})
-                    response.raise_for_status()
-                    next_pos=response.json().get("received",0)
-                    if next_pos!=offset+len(payload):
-                        raise RuntimeError("Phone did not acknowledge the complete chunk")
-                    offset=next_pos
+                    file.seek(offset)
+                    payload=file.read(min(chunk_size,size-offset))
+                    if not payload:
+                        raise RuntimeError("Source changed during transfer")
+                    attempts=0
+                    while True:
+                        if cancel.is_set():raise InterruptedError("Cancelled by user")
+                        try:
+                            response=client.put(base+"/transfer/chunk/"+transfer_id,
+                              content=payload,headers={**headers,
+                                "Content-Type":"application/octet-stream",
+                                "X-Transfer-Offset":str(offset)})
+                            response.raise_for_status()
+                            next_pos=int(response.json().get("received",-1))
+                            if next_pos!=offset+len(payload):
+                                raise RuntimeError("Phone acknowledged unexpected chunk length")
+                            offset=next_pos
+                            break
+                        except (httpx.HTTPError,ValueError,RuntimeError) as exc:
+                            # A network interruption can occur AFTER Android
+                            # appended bytes. Never replay that same offset
+                            # without asking the phone what was committed.
+                            attempts+=1
+                            if attempts>5:
+                                raise RuntimeError("Transfer offset outcome uncertain") from exc
+                            time.sleep(min(1.5,0.15*attempts))
+                            try:
+                                probe=client.get(base+"/transfer/status/"+transfer_id,
+                                                 headers=headers)
+                                probe.raise_for_status()
+                                state=probe.json()
+                                current=int(state["received"])
+                                if state.get("sha256")!=checksum or int(state.get("size",-1))!=size:
+                                    raise RuntimeError("Transfer identity changed during recovery")
+                                if not offset<=current<=offset+len(payload):
+                                    raise RuntimeError("Transfer advanced outside expected chunk")
+                                if current>offset:
+                                    offset=current
+                                    # Retry only the uncommitted suffix.
+                                    file.seek(offset)
+                                    payload=file.read(min(chunk_size,size-offset))
+                                    if not payload:
+                                        break
+                            except httpx.TransportError:
+                                # Retry the READ probe, never blind-write old bytes.
+                                continue
                     _update(key,bytes_sent=offset)
             _update(key,state="verifying")
             done=_post(client,base,paired["token"],"/transfer/finish/"+transfer_id,{})
