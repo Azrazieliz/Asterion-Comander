@@ -52,7 +52,14 @@ def main():
                           "asterion_remote/interaction_sessions.py"],
                          capture_output=True,text=True,check=True,timeout=10)
     if dirty.stdout.strip():
-        raise RuntimeError("Production interaction sessions have local modifications; abort")
+        # The previous approved deploy intentionally modified this tracked
+        # production file without switching the original release branch.
+        # Permit subsequent upgrades only if deployed bytes EXACTLY match
+        # the audited stage. Otherwise preserve owner's unrelated edits.
+        existing=prod/"asterion_remote/interaction_sessions.py"
+        staged=stage/"asterion_remote/interaction_sessions.py"
+        if not existing.exists() or existing.read_bytes()!=staged.read_bytes():
+            raise RuntimeError("Production sessions changed outside our staged revision; abort")
     updates={}
     old={}
     for name in FILES:
