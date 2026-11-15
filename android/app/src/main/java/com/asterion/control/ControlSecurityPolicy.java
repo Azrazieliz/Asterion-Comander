@@ -32,6 +32,7 @@ final class ControlSecurityPolicy {
     return current;
   }
   static boolean canRemote(Context c,String method,String path){
+    if(path.equals("/diagnostics/logcat")&&!developerAuthorized(c))return false;
     String lvl=level(c);
     if(NORMAL.equals(lvl)||DEVELOPER.equals(lvl))return true;
     if(LOCKDOWN.equals(lvl))
@@ -50,6 +51,7 @@ final class ControlSecurityPolicy {
     return storage(c).getBoolean("allow:"+cap,false);
   }
   static boolean canTool(Context c,String name){
+    if(name.equals("control_phone_own_logcat"))return developerAuthorized(c);
     if(NORMAL.equals(level(c))||DEVELOPER.equals(level(c)))return true;
     String path;
     if(name.equals("control_phone_input"))path="/input";
@@ -59,7 +61,7 @@ final class ControlSecurityPolicy {
     else if(name.contains("transfer"))path="/transfer/chunk";
     else if(name.contains("cycle")||name.contains("continuation")||
             name.contains("chat_"))path="/cycles/start";
-    else if(name.matches("control_phone_(status|health|ui|screen|stream_status|apps|app_bridges|bridge_status|direct_status|network_status|own_logcat|diagnostic_events|exit_history|performance_status|observation_status|observation_events|observation_timeline)"))
+    else if(name.matches("control_phone_(status|health|ui|screen|stream_status|apps|app_bridges|bridge_status|direct_status|network_status|own_logcat|diagnostic_events|exit_history|performance_status|security_status|permission_matrix|observation_status|observation_events|observation_timeline)"))
       path="/health";
     else path="/restricted-operation";
     return canRemote(c,path.equals("/health")?"GET":"POST",path);
