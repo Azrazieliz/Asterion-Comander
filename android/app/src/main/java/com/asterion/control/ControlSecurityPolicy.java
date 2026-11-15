@@ -107,6 +107,6 @@ final class ControlSecurityPolicy {
       .put("expires_at_ms",DEVELOPER.equals(lvl)?p.getLong("expires_at",0):0)
       .put("android_permission_bypass",false)
       .put("external_access_granted",false)
-      .put("vpn_enabled",false);
+      .put("vpn_enabled",ControlPrivateVpn.status(c).optBoolean("active",false));
   }
 }
