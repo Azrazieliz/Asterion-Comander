@@ -27,7 +27,7 @@ from .security import configured_token, require_token
 from .native_routes import router as phone_router
 from .diagnostic_routes import router as diagnostic_router
 from .control_v2_routes import router as control_v2_router
-from . import development_cycle_driver
+from . import development_cycle_driver, model_watch_service
 from .control_ai_routes import router as control_ai_router
 from .assistant_routes import router as assistant_router
 from .model_capacity_routes import router as model_capacity_router
@@ -72,6 +72,8 @@ def check_config():
         raise RuntimeError(f'ASTERION_REMOTE_ROOT not a directory: {ROOT}')
     # Inert by default. Only an explicitly enabled and configured local
     # development-cycle worker is started, without paid cloud or new pairing.
+    if os.getenv('ASTERION_MODEL_WATCH_ENABLED','0') == '1':
+        model_watch_service.start()
     if os.getenv('ASTERION_DEV_CYCLE_ENABLED','0') == '1':
         state=development_cycle_driver.start()
         if not state.get('configured',False):
@@ -827,5 +829,6 @@ install_stream(app, _desktop_jpeg, _desktop_ws_input)
 @app.on_event('shutdown')
 def stop_lan_discovery():
     development_cycle_driver.stop()
+    model_watch_service.stop()
     shutdown_mcp()
     stop_discovery()
