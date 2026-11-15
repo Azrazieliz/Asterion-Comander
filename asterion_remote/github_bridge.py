@@ -22,6 +22,8 @@ ALLOWED={
  'pc_script_parallel':('POST','/api/v1/internal/scripts/batch'),
  'phone_status':('GET','/api/v1/phone'),
  'phone_exit_history':('GET','/api/v1/phone/diagnostics/exit-history'),
+ 'phone_security_status':('GET','/api/v1/phone/diagnostics/security'),
+ 'phone_permission_matrix':('GET','/api/v1/phone/diagnostics/permissions'),
  'phone_bridge_status':('GET','/api/v1/phone/bridge/status'),
  'phone_health':('GET','/api/v1/phone/health'),
  'phone_screen':('GET','/api/v1/phone/screen'),
