@@ -33,6 +33,8 @@ from .assistant_routes import router as assistant_router
 from .model_capacity_routes import router as model_capacity_router
 from .browser_routes import router as browser_router
 from .reverse_routes import router as reverse_router
+from .security_guardian_routes import router as security_guardian_router
+from . import security_guardian
 from .mcp_tool_routes import router as mcp_tools_router, shutdown_mcp
 from .recovery import router as recovery_router
 from .pairing import router as pairing_router, start_discovery, stop_discovery, create_code
@@ -61,6 +63,7 @@ app.include_router(assistant_router)
 app.include_router(model_capacity_router)
 app.include_router(browser_router)
 app.include_router(reverse_router)
+app.include_router(security_guardian_router)
 app.include_router(mcp_tools_router)
 app.include_router(recovery_router)
 app.include_router(pairing_router)
@@ -78,6 +81,8 @@ def check_config():
     # development-cycle worker is started, without paid cloud or new pairing.
     if os.getenv('ASTERION_MODEL_WATCH_ENABLED','0') == '1':
         model_watch_service.start()
+    if os.getenv('ASTERION_SECURITY_GUARDIAN_ENABLED','0') == '1':
+        security_guardian.start()
     if os.getenv('ASTERION_DEV_CYCLE_ENABLED','0') == '1':
         state=development_cycle_driver.start()
         if not state.get('configured',False):
@@ -834,5 +839,6 @@ install_stream(app, _desktop_jpeg, _desktop_ws_input)
 def stop_lan_discovery():
     development_cycle_driver.stop()
     model_watch_service.stop()
+    security_guardian.stop()
     shutdown_mcp()
     stop_discovery()
