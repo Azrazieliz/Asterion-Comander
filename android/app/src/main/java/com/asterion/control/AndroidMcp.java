@@ -37,6 +37,8 @@ final class AndroidMcp {
     tools.put(tool("control_phone_bridge_status","Legacy alias for phone direct TLS state",null));
     tools.put(tool("control_phone_direct_status","Inspect phone initiated direct TLS MCP",null));
     tools.put(tool("control_phone_own_logcat","Owner-only bounded Android logcat limited to Asterion Control process",null));
+    tools.put(tool("control_phone_diagnostic_events","Read bounded durable Control app event history without global access",args("since","integer","limit","integer")));
+    tools.put(tool("control_phone_exit_history","Read authorized Control process exit causes",null));
     tools.put(tool("control_phone_health","Android native battery, memory, thermal and screen state",null));
     tools.put(tool("control_phone_performance_status","Read applied Android workload controls and observed pressure",null));
     tools.put(tool("control_phone_performance_mode","Set bounded phone workload mode: automatic, foreground, full, quiet",
@@ -114,6 +116,10 @@ final class AndroidMcp {
       case "control_phone_bridge_status":
       case "control_phone_direct_status":return textContent(PhoneDirectMcp.status());
       case "control_phone_own_logcat":return textContent(owner.ownLogcat());
+      case "control_phone_diagnostic_events":return textContent(
+        ControlEventJournal.recent(owner,args.optLong("since",0),args.optInt("limit",100)));
+      case "control_phone_exit_history":return textContent(
+        ControlCrashDiagnostics.recentExitHistory(owner));
       case "control_phone_health":return textContent(owner.health());
       case "control_phone_performance_status":return textContent(PerformanceManager.status(owner));
       case "control_phone_performance_mode":return textContent(
