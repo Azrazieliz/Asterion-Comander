@@ -23,6 +23,7 @@ ALLOWED={
  'pc_script_parallel':('POST','/api/v1/internal/scripts/batch'),
  'phone_status':('GET','/api/v1/phone'),
  'phone_exit_history':('GET','/api/v1/phone/diagnostics/exit-history'),
+ 'phone_diagnostic_events':('GET','/api/v1/phone/diagnostics/events'),
  'phone_security_status':('GET','/api/v1/phone/diagnostics/security'),
  'phone_permission_matrix':('GET','/api/v1/phone/diagnostics/permissions'),
  'phone_bridge_status':('GET','/api/v1/phone/bridge/status'),
@@ -146,6 +147,18 @@ def run(request,key):
         return phone_native(path,method,args if method=='POST' else None)
     if op not in ALLOWED:raise ValueError('Unsupported operation')
     method,path=ALLOWED[op]
+    if op=='phone_diagnostic_events':
+        # Authenticated native Android Control *own-process* telemetry only.
+        # Query values are fixed scalar cursors, never arbitrary URLs/paths.
+        if set(args)-{'since','limit'}:
+            raise ValueError('Unsupported phone journal argument')
+        since=args.get('since',0)
+        limit=args.get('limit',60)
+        if type(since) is not int or not 0<=since<2**62:
+            raise ValueError('Invalid phone journal cursor')
+        if type(limit) is not int or not 1<=limit<=80:
+            raise ValueError('Invalid phone journal limit')
+        return pc(path+'?'+urllib.parse.urlencode({'since':since,'limit':limit}),key)
     if op=='pc_diagnostic_triage':
         # Explicit read-only operation; never allow arbitrary API paths or
         # unbounded results through a GitHub fallback response.
