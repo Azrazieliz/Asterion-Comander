@@ -30,7 +30,7 @@ _HASH = re.compile(r"^[a-f0-9]{64}$")
 _ALLOWED_PROVIDER = {"phone_local", "pc_local", "chatgpt"}
 _CYCLE_STATES = {
     "ready", "paused", "dispatch_uncertain", "awaiting_verification",
-    "needs_review", "finished", "stopped",
+    "needs_review", "finished", "turn_limit_reached", "stopped",
 }
 _MAX_HISTORY = 50
 
@@ -231,13 +231,16 @@ def stop(cycle_id: str) -> dict:
     return status(cycle_id)
 
 
-def _prompt(row: sqlite3.Row, n: int, request_id: str) -> str:
+def _prompt(row: sqlite3.Row, n: int, request_id: str,
+            previous_summary: str = "", previous_evidence: str = "") -> str:
     return (
         "ASTERION CONTINUOUS PROJECT DEVELOPMENT TURN\n"
         f"Cycle: {row['id']}\nRequest ID: {request_id}\n"
         f"Project: {row['project']}\nSpecification: {row['spec_ref']}\n"
         f"Verified turns already completed: {row['verified_turns']}\n"
         f"Original objective: {row['objective']}\n"
+        f"Latest verified work: {previous_summary or 'none'}\n"
+        f"Latest verified evidence SHA-256: {previous_evidence or 'none'}\n"
         f"Next substantial project work: {row['next_work']}\n"
         "This is an overnight DEVELOPMENT turn, not a normal UI action.\n"
         "Inspect exact source and previous checkpoints; perform real approved "
@@ -270,7 +273,12 @@ def claim(cycle_id: str) -> dict:
             if row["max_turns"] and number > row["max_turns"]:
                 raise RuntimeError("cycle_turn_limit_reached")
             ident = f"{cycle_id}-turn-{number}"
-            prompt = _prompt(row, number, ident)
+            previous = con.execute("""SELECT work_summary,evidence_sha256 FROM turns
+                WHERE cycle_id=? AND state='verified'
+                ORDER BY turn_index DESC LIMIT 1""", (cycle_id,)).fetchone()
+            prompt = _prompt(row, number, ident,
+                             previous['work_summary'] if previous else '',
+                             previous['evidence_sha256'] if previous else '')
             now = _now()
             con.execute("""INSERT INTO turns
                 (request_id,cycle_id,turn_index,state,prompt_sha256,started_ms,updated_ms)
@@ -383,7 +391,8 @@ def verify(cycle_id: str, request_id: str, *,
                 raise RuntimeError("no_matching_turn_to_verify")
             reached_limit=(row["max_turns"]>0 and
                            row["turn_index"] >= row["max_turns"])
-            new_state="finished" if (done or reached_limit) else "ready"
+            new_state=("finished" if done else
+                       "turn_limit_reached" if reached_limit else "ready")
             con.execute("""UPDATE cycles SET state=?,next_work=?,verified_turns=verified_turns+1,
                 updated_ms=?,completion_evidence_sha256=?
                 WHERE id=? AND state='awaiting_verification'""",
