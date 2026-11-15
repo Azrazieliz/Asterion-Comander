@@ -1,7 +1,10 @@
 """Authenticated Control diagnostic query and event ingestion API."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+import asyncio
+import json
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, ConfigDict
 from .security import require_token
 from . import diagnostic_core as core
@@ -50,3 +53,64 @@ def submit_event(event: DiagnosticEvent):
         return core.record(**event.model_dump())
     except ValueError as exc:
         raise HTTPException(422,str(exc)) from exc
+
+
+def sse_message(event: str, value: dict, event_id: int | None = None) -> str:
+    """Encode bounded event payload without unescaped SSE newlines."""
+    if event not in {"ready","event","gap"}:
+        raise ValueError("Unsupported SSE event kind")
+    # No raw logs, URLs or user media; diagnostic_core already sanitizes metadata.
+    body=json.dumps(value,ensure_ascii=True,separators=(",",":"),allow_nan=False)
+    if len(body)>12000:
+        raise ValueError("Diagnostic event too large")
+    identity=(f"id: {event_id}\n" if event_id is not None else "")
+    return identity+f"event: {event}\ndata: {body}\n\n"
+
+
+@router.get("/stream")
+async def live_events(request: Request, since: int | None = None,
+                      app: str = "", trace_id: str = ""):
+    """Authenticated bounded SSE; durable Last-Event-ID resume, no video polling."""
+    cursor=since
+    if cursor is None:
+        last=request.headers.get("last-event-id","0")
+        if not last.isascii() or not last.isdecimal() or len(last)>19:
+            raise HTTPException(422,"Invalid resume event ID")
+        cursor=int(last)
+    if cursor<0 or cursor>=2**62:
+        raise HTTPException(422,"Invalid cursor")
+    if app and (len(app)>96 or core._safe_id(app)!=app):
+        raise HTTPException(422,"Invalid app filter")
+    if trace_id and (len(trace_id)>96 or core._safe_id(trace_id)!=trace_id):
+        raise HTTPException(422,"Invalid trace ID")
+
+    async def stream():
+        nonlocal cursor
+        yield sse_message("ready",{"schema_version":1,**core.bounds(),
+                                    "app_filter":app or None,"trace_filter":trace_id or None})
+        while not await request.is_disconnected():
+            state=core.bounds()
+            if cursor>0 and state["oldest_sequence"]>cursor+1:
+                yield sse_message("gap",{"requested_after":cursor,
+                       "oldest_retained":state["oldest_sequence"],
+                       "dropped":state["oldest_sequence"]-cursor-1})
+                cursor=state["oldest_sequence"]-1
+            page=core.events(since=cursor,limit=100,app=app,trace_id=trace_id)
+            if page["events"]:
+                for event in page["events"]:
+                    cursor=event["seq"]
+                    yield sse_message("event",event,cursor)
+                continue
+            # On filtered streams a newer event for another app must not
+            # produce a busy spin. Advance to latest cursor, then wait for
+            # the next committed event. The core is a durable event ledger.
+            cursor=max(cursor,state["latest_sequence"])
+            changed=await asyncio.to_thread(core.wait_for_change,cursor,8.0)
+            if not changed:
+                yield ": keepalive\n\n"
+
+    return StreamingResponse(stream(),media_type="text/event-stream",
+        headers={"Cache-Control":"no-cache, no-store",
+                 "X-Accel-Buffering":"no",
+                 "X-Content-Type-Options":"nosniff",
+                 "Connection":"keep-alive"})
