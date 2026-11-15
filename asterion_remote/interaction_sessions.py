@@ -41,7 +41,9 @@ class SessionRequest(BaseModel):
     stop_on_error: bool = True
     # Exact repeated requests return the original receipt, never repeat taps.
     request_id: str | None = Field(default=None,min_length=8,max_length=100,
-        pattern=r'^[A-Za-z0-9][A-Za-z0-9_.:-]{7,99}(mode="after")
+        pattern=r'^[A-Za-z0-9][A-Za-z0-9_.:-]{7,99}\\Z')
+
+    @model_validator(mode="after")
     def check(self):
         if self.device=="mixed" and any(step.device is None for step in self.steps):
             raise ValueError("Mixed sessions require each step to name its device")
