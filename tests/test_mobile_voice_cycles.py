@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from asterion_remote import native_routes, mcp_protocol, mcp_gateway
+from asterion_remote import native_routes, github_bridge, native_phone_relay
 
 
 def test_voice_and_cycle_requests_remain_bounded():
@@ -28,14 +28,15 @@ def test_voice_and_cycle_requests_remain_bounded():
         native_routes.VoiceQuestion(text="z" * 701)
 
 
-def test_catalog_lists_phone_voice_and_operator_checkpoint_tools():
-    catalog={spec["name"] for spec in mcp_protocol.TOOLS}
+def test_private_bridge_lists_phone_voice_and_cycle_controls():
+    operations=set(github_bridge.ALLOWED)|set(github_bridge.PHONE_NATIVE)
     assert {
-        "control_phone_network_status", "control_phone_voice_ack",
-        "control_phone_cycle_status", "control_phone_continuation_queue",
-        "control_phone_continuation_dispatch", "control_phone_continuation_ack",
-    }.issubset(catalog)
-    assert "control_phone_cycle_start" not in catalog
+        "phone_network_status", "phone_voice_ack", "phone_cycle_status",
+        "phone_continuation_queue", "phone_continuation_dispatch",
+        "phone_continuation_ack",
+    }.issubset(operations)
+    assert "phone_cycle_start" in operations
+
 
 def test_existing_native_voice_and_cycles_dispatch_to_phone(monkeypatch):
     visited = []
@@ -77,8 +78,11 @@ def test_phone_source_uses_direct_tls_and_phone_owned_cycles():
     assert "speaker.speak" in voice and "SpeechRecognizer" in voice
 
 
-def test_gateway_uses_direct_phone_and_has_no_cloud_command_queue():
-    src = Path(mcp_gateway.__file__).read_text()
-    assert "phone_live_invoke(message)" in src
-    assert "phone_cloud_relay.submit" not in src
-    assert "control_phone_cloud_receipt" not in src
+def test_private_relay_has_no_callable_public_mcp_gateway():
+    routes={getattr(item,"path",None) for item in native_phone_relay.app.routes}
+    assert "/healthz" in routes
+    assert "/mcp" not in routes
+    assert "/oauth/authorize" not in routes
+    source=(Path(__file__).resolve().parents[1]/
+            "android/app/src/main/java/com/asterion/control/PhoneDirectMcp.java").read_text()
+    assert "sec-websocket-accept" in source.lower()
