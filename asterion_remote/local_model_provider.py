@@ -22,6 +22,15 @@ _MODEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}$")
 _LOCAL = {"127.0.0.1", "::1", "localhost"}
 
 
+class _RefuseRedirect(urllib.request.HTTPRedirectHandler):
+    """A local inference server must never redirect a prompt outside loopback."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(
+            req.full_url, code,
+            "local_inference_redirect_forbidden", headers, fp)
+
+
+
 @dataclass(frozen=True)
 class LocalModelConfig:
     endpoint: str = "http://127.0.0.1:8080/v1/chat/completions"
@@ -56,7 +65,8 @@ class LocalModelProvider:
         # Never honor HTTP(S)_PROXY, which could turn a local request into an
         # unexpected external paid/privacy-sensitive network operation.
         self.opener = urllib.request.build_opener(
-            urllib.request.ProxyHandler({}), urllib.request.HTTPHandler())
+            urllib.request.ProxyHandler({}), urllib.request.HTTPHandler(),
+            _RefuseRedirect())
 
     def __call__(self, prompt: str, request_id: str) -> dict:
         if not isinstance(prompt, str) or not 20 <= len(prompt) <= 24000:
