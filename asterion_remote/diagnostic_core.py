@@ -90,6 +90,12 @@ def _db():
             last_seen_ms INTEGER NOT NULL
         );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_incident_fingerprint ON incidents(fingerprint);
+        CREATE TABLE IF NOT EXISTS incident_snapshots(
+            incident_id TEXT PRIMARY KEY,
+            captured_utc_ms INTEGER NOT NULL,
+            sha256 TEXT NOT NULL,
+            content_json TEXT NOT NULL
+        );
     """)
     return connection
 
@@ -166,6 +172,7 @@ def record(
                  json.dumps(attrs,sort_keys=True,separators=(",",":"))),
             )
             seq = cur.lastrowid
+            event_incident_id = None
             if should_incident:
                 con.execute(
                     """INSERT INTO incidents(incident_id,fingerprint,first_seq,last_seq,
@@ -176,6 +183,42 @@ def record(
                     (uuid.uuid4().hex,fingerprint,seq,seq,1,app,kind,component,
                      attrs.get("reason",attrs.get("error_class",""))[:160],timestamp,timestamp),
                 )
+                event_incident_id=con.execute(
+                    "SELECT incident_id FROM incidents WHERE fingerprint=?",
+                    (fingerprint,)).fetchone()[0]
+                if not con.execute(
+                    "SELECT 1 FROM incident_snapshots WHERE incident_id=?",
+                    (event_incident_id,)).fetchone():
+                    # Immutable pre-failure window. Same-app, bounded to 30
+                    # sanitized records from the last five minutes.
+                    con.row_factory=sqlite3.Row
+                    rows=con.execute(
+                        """SELECT seq,event_id,recorded_utc_ms,session_id,trace_id,
+                            operation_id,app,component,kind,state,severity,attributes_json
+                            FROM events WHERE app=? AND recorded_utc_ms>=? AND seq<=?
+                            ORDER BY seq DESC LIMIT 30""",
+                        (app,timestamp-300000,seq)).fetchall()
+                    snapshot_events=[]
+                    for entry in reversed(rows):
+                        row=dict(entry)
+                        row["attributes"]=json.loads(row.pop("attributes_json"))
+                        snapshot_events.append(row)
+                    snapshot={
+                        "schema_version":1,"incident_id":event_incident_id,
+                        "fingerprint":fingerprint,"trigger_seq":seq,
+                        "captured_utc_ms":timestamp,
+                        "classification":"unresolved",
+                        "scope":"redacted_control_instrumented_events",
+                        "post_failure_capture":False,
+                        "events":snapshot_events,
+                    }
+                    body=json.dumps(snapshot,sort_keys=True,separators=(",",":"))
+                    signature=hashlib.sha256(body.encode("utf8")).hexdigest()
+                    con.execute(
+                        """INSERT INTO incident_snapshots(
+                            incident_id,captured_utc_ms,sha256,content_json)
+                            VALUES(?,?,?,?)""",
+                        (event_incident_id,timestamp,signature,body))
             # Bounded local journal, deterministic oldest-first pruning.
             if seq % 128 == 0:
                 con.execute("DELETE FROM events WHERE seq <= (SELECT COALESCE(MAX(seq),0)-? FROM events)",(_DEFAULT_LIMIT,))
@@ -183,6 +226,7 @@ def record(
                     "DELETE FROM incidents WHERE last_seen_ms < (SELECT COALESCE(MAX(last_seen_ms),0) FROM incidents)-? AND incident_id NOT IN (SELECT incident_id FROM incidents ORDER BY last_seen_ms DESC LIMIT ?)",
                     (90*24*60*60*1000,_DEFAULT_INCIDENT_LIMIT),
                 )
+                con.execute("DELETE FROM incident_snapshots WHERE incident_id NOT IN (SELECT incident_id FROM incidents)")
             con.execute("COMMIT")
         except BaseException:
             con.execute("ROLLBACK")
@@ -193,7 +237,10 @@ def record(
     # Subscribers always requery SQLite, so a missed notification cannot lose data.
     with _EVENT_CHANGED:
         _EVENT_CHANGED.notify_all()
-    return {"ok":True,"event_id":event_id,"sequence":seq,"incident":should_incident}
+    result={"ok":True,"event_id":event_id,"sequence":seq,"incident":should_incident}
+    if should_incident:
+        result["incident_id"]=event_incident_id
+    return result
 
 
 def _query(sql: str, args: tuple = ()) -> list[dict]:
@@ -237,6 +284,42 @@ def incidents(*, limit: int = 100, app: str = "") -> dict:
     rows = _query(q+" ORDER BY last_seen_ms DESC LIMIT ?",tuple(args+[limit]))
     return {"ok":True,"incidents":rows}
 
+
+
+
+def incident_bundle(incident_id: str) -> dict | None:
+    """Retrieve the exact immutable, sanitized evidence captured at first trigger."""
+    if not isinstance(incident_id,str) or not re.fullmatch(r"[0-9a-f]{32}",incident_id):
+        raise ValueError("Invalid incident identifier")
+    rows=_query(
+        """SELECT s.sha256,s.content_json,
+            i.count,i.first_seen_ms,i.last_seen_ms
+            FROM incident_snapshots s JOIN incidents i
+            ON s.incident_id=i.incident_id
+            WHERE s.incident_id=?""",(incident_id,))
+    if not rows:
+        return None
+    saved=rows[0]
+    raw=saved["content_json"]
+    actual=hashlib.sha256(raw.encode("utf8")).hexdigest()
+    if actual!=saved["sha256"]:
+        raise RuntimeError("Incident evidence integrity check failed")
+    evidence=json.loads(raw)
+    # Preserve immutable contents and hash; aggregate count is separate metadata.
+    return {"ok":True,"evidence_sha256":actual,"evidence":evidence,
+            "occurrences":saved["count"],
+            "first_seen_ms":saved["first_seen_ms"],
+            "last_seen_ms":saved["last_seen_ms"],
+            "immutable_snapshot":True,"redacted":True}
+
+
+def trace_events(trace_id: str, limit: int = 500) -> dict:
+    """A paginated, bounded evidence-backed operation graph (not inferred)."""
+    if not isinstance(trace_id,str) or _safe_id(trace_id)!=trace_id or trace_id=="unspecified":
+        raise ValueError("Invalid trace identifier")
+    if not 1 <= limit <= 500:
+        raise ValueError("Invalid trace limit")
+    return events(since=0,limit=limit,trace_id=trace_id)
 
 def health() -> dict:
     rows = _query("SELECT COUNT(*) AS n,COALESCE(MAX(seq),0) AS latest FROM events")
