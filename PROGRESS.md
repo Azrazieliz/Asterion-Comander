@@ -1,3 +1,14 @@
+# 2026-11-15 — V3 comprehensive architecture committed; strict no-code hold
+
+- Current owner-approved design: [docs/CONTROL_V3_COMPLETE_DESIGN_NO_CODE_20261115.md](docs/CONTROL_V3_COMPLETE_DESIGN_NO_CODE_20261115.md). It specifies every previously approved module, unambiguous action/task/overnight cycle boundaries, native all-rounder, voice + future Sound voice packages, file scanning, VPN/Tor, Skill Studio, Model Laboratory, GitHub MCP, external missing-source reverse engineering, owner permissions, UI and acceptance tests.
+- **No coding yet:** this owner instruction overrides the interim V2 "source implementation authorized" note. No Android/Windows source edits, builds, installations, device manipulation, VPN-provider setup, testing or new runtime deployment are permitted solely by this request.
+- **SuperVPN rejected outright:** no integration, dependency, provider, candidate, fallback or recommendation. Older reports referencing it as a candidate are historical and no longer active.
+- **Zero-cost fast VPN constraint:** no owner-controlled servers abroad; actual eligible free exits must be independently verified; VPN throughput must remain at least 75% of comparable direct baseline; 30–60 min IP changes verified rather than assumed. If no provider satisfies requirements, mark blocked; do not silently disable privacy.
+- **More optional systems suggested:** V3 §15 contains N01–N30 with detailed behavior. They are RECOMMENDATIONS, not yet owner-approved. Existing 20 V2 systems remain approved scope.
+- **Historical runtime status remains unchanged:** source/compiled/deployed/installed/device-verified levels retained as previously recorded; this V3 action is documentation only. No Downloader project implementation performed by Control.
+
+---
+
 # 2026-11-15 — Owner approved Control V2 architecture, no build authorized
 
 - **Canonical new design source:** [docs/CONTROL_V2_OWNER_APPROVED_ARCHITECTURE_20261115.md](docs/CONTROL_V2_OWNER_APPROVED_ARCHITECTURE_20261115.md), committed on branch work/control-0927-overnight-cycles-20261111.
