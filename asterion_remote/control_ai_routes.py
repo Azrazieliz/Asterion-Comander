@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from .security import require_token
 from .control_v2_routes import _owner_approval
-from . import overnight_supervisor, development_cycle_driver
+from . import overnight_supervisor, development_cycle_driver, model_watch_service
 from .local_model_provider import LocalModelConfig, LocalModelProvider
 
 router = APIRouter(prefix="/api/v1/intelligence",
@@ -29,6 +29,35 @@ class CycleRequest(BaseModel):
     objective: str = Field(min_length=12,max_length=3000)
     provider: str = Field(default="pc_local",pattern=r"^(pc_local|phone_local|chatgpt)$")
     max_turns: int = Field(default=0,ge=0,le=100000)
+
+
+@router.get("/model-watch/status")
+def model_release_watch_status():
+    return {"ok":True,**model_watch_service.status()}
+
+
+@router.get("/model-watch/events")
+def model_release_events(limit:int=30):
+    try:return model_watch_service.events(limit)
+    except ValueError as exc:raise HTTPException(422,str(exc)) from exc
+
+
+@router.post("/model-watch/refresh")
+def model_release_check_now(x_owner_approval:str|None=Header(default=None)):
+    _owner_approval(x_owner_approval)
+    try:return model_watch_service.scan_once(limit=20)
+    except Exception as exc:
+        raise HTTPException(503,"Model release metadata unavailable: "+
+                            type(exc).__name__) from exc
+
+
+@router.post("/model-watch/events/{event_id}/ack")
+def model_release_ack(event_id:str,
+                      x_owner_approval:str|None=Header(default=None)):
+    _owner_approval(x_owner_approval)
+    try:return model_watch_service.acknowledge(event_id)
+    except KeyError as exc:raise HTTPException(404,"Event not found") from exc
+    except ValueError as exc:raise HTTPException(422,str(exc)) from exc
 
 
 @router.get("/autonomy/status")
