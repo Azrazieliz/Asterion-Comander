@@ -15,6 +15,8 @@ from pathlib import Path
 SOURCES=(
     "android/app/src/main/java/com/asterion/control/PublicExitIp.java",
     "android/app/src/test/java/com/asterion/control/PublicExitIpCheck.java",
+    "android/app/src/main/java/com/asterion/control/ModelDownloadPolicy.java",
+    "android/app/src/test/java/com/asterion/control/ModelDownloadPolicyCheck.java",
 )
 
 
@@ -66,15 +68,20 @@ def main(repo:str,ref:str="FETCH_HEAD")->int:
         if compiled.returncode:
             print(compiled.stderr[-2200:])
             return 13
-        result=subprocess.run(
-            [java,"-cp",str(classes),
-             "com.asterion.control.PublicExitIpCheck"],
-            stdout=subprocess.PIPE,stderr=subprocess.PIPE,
-            text=True,timeout=20)
-        print("JAVA_UNIT_EXIT",result.returncode)
-        print(result.stdout[-1200:])
-        if result.returncode:print(result.stderr[-1600:])
-        return 0 if result.returncode==0 else 14
+        for testclass in (
+            "com.asterion.control.PublicExitIpCheck",
+            "com.asterion.control.ModelDownloadPolicyCheck"
+        ):
+            result=subprocess.run(
+                [java,"-cp",str(classes),testclass],
+                stdout=subprocess.PIPE,stderr=subprocess.PIPE,
+                text=True,timeout=20)
+            print("JAVA_UNIT_EXIT",testclass,result.returncode)
+            print(result.stdout[-1200:])
+            if result.returncode:
+                print(result.stderr[-1600:])
+                return 14
+        return 0
 
 
 if __name__=="__main__":
