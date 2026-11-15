@@ -39,6 +39,8 @@ final class AndroidMcp {
     tools.put(tool("control_phone_own_logcat","Owner-only bounded Android logcat limited to Asterion Control process",null));
     tools.put(tool("control_phone_diagnostic_events","Read bounded durable Control app event history without global access",args("since","integer","limit","integer")));
     tools.put(tool("control_phone_exit_history","Read authorized Control process exit causes",null));
+    tools.put(tool("control_phone_security_status","Read enforced local owner security policy",null));
+    tools.put(tool("control_phone_permission_matrix","Read actual Android developer and permission capabilities",null));
     tools.put(tool("control_phone_health","Android native battery, memory, thermal and screen state",null));
     tools.put(tool("control_phone_performance_status","Read applied Android workload controls and observed pressure",null));
     tools.put(tool("control_phone_performance_mode","Set bounded phone workload mode: automatic, foreground, full, quiet",
@@ -106,6 +108,8 @@ final class AndroidMcp {
       .put("data",Base64.encodeToString(jpeg,Base64.NO_WRAP))));
   }
   private static JSONObject invoke(AgentService owner,String name,JSONObject args)throws Exception{
+    if(!ControlSecurityPolicy.canTool(owner,name))
+      throw new SecurityException("Remote tool denied by local owner security level");
     ContinuationLedger ledger=ContinuationLedger.get(owner);
     switch(name){
       case "control_phone_status":
@@ -120,6 +124,10 @@ final class AndroidMcp {
         ControlEventJournal.recent(owner,args.optLong("since",0),args.optInt("limit",100)));
       case "control_phone_exit_history":return textContent(
         ControlCrashDiagnostics.recentExitHistory(owner));
+      case "control_phone_security_status":return textContent(
+        ControlSecurityPolicy.status(owner));
+      case "control_phone_permission_matrix":return textContent(
+        ControlPermissionMatrix.status(owner));
       case "control_phone_health":return textContent(owner.health());
       case "control_phone_performance_status":return textContent(PerformanceManager.status(owner));
       case "control_phone_performance_mode":return textContent(
