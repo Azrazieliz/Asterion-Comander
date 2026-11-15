@@ -1,3 +1,14 @@
+# 2026-11-15 — Owner approved Control V2 architecture, no build authorized
+
+- **Canonical new design source:** [docs/CONTROL_V2_OWNER_APPROVED_ARCHITECTURE_20261115.md](docs/CONTROL_V2_OWNER_APPROVED_ARCHITECTURE_20261115.md), committed on branch work/control-0927-overnight-cycles-20261111.
+- **Owner's corrected requirements:** normal actions and tasks are distinct from long-running overnight development cycles; current screenshot cycle stopped, manual review, zero verified replies. Local configurable content-flexible all-rounder AI, optional PC with no mandatory paid cloud; Bixby-like voice wake/proactive questions and versioned Asterion Sound voice packs; full-phone default VPN, 30–60min verified IP rotation, country/Tor modes, **no more than 25% measured sustained throughput loss**; integrated cybersecurity/privacy with Standard auto-scan/Deep for risky files; Skill Studio, Model Lab model-release monitoring and owner-reviewed per-app replacement suggestions; GitHub MCP; reverse engineering of third-party/external systems without already available source; all 20 specified modules.
+- **Owner resources and limits:** NO remote foreign servers; prior free VPN reference is package com.jrzheng.supervpnfree, requiring independent integration/security/performance validation; no evidence of official supported external automation; Android has only one prepared VpnService at once. Zero mandatory subscriptions/payments and no APK build, transfer, install, signing change or deployment without renewed approval.
+- **Critical role correction:** Downloader is not Control's project. No Downloader code, test, build, release or device changes as part of this work. Cross-app contracts are preserved without changing partner repositories.
+- **Verification honesty:** prior Windows diagnostics/SSE source and live worker tests remain as recorded; recent Android source, WireGuard, durable session/transfer changes are NOT a signed phone-upgraded product. The Control release packaging attempt stopped at ownerRelease missing original signing storeFile; no replacement key is allowed. No V2 native AI, geographic exit system, malware scan engine or advanced reverse engineering is installed by this documentation commit.
+- **Action performed:** GitHub documentation only. Source artifacts and runtime unchanged; implementation and device test statuses remain separate.
+
+---
+
 # 2026-11-13 — Windows Control command relay dirty-receipt recovery guardrail
 
 - **Confirmed failure:** a locally modified tracked `results/*.json` receipt blocked `git rebase origin/main` with `cannot rebase: You have unstaged changes`. The Windows API on port 8911 remained healthy while the relay supervisor repeatedly relaunched the failing worker.
