@@ -1,3 +1,14 @@
+# 2026-11-15 — V4 VPN and native AI research, NO CODE
+
+- **New research:** [docs/CONTROL_V4_VPN_EVIDENCE_AI_TRAINING_SYSTEMS_RESEARCH_20261115.md](docs/CONTROL_V4_VPN_EVIDENCE_AI_TRAINING_SYSTEMS_RESEARCH_20261115.md); detailed provider-by-provider eligibility, primary official sources and 24 proposed actual independent tool/engine subsystems for a ChatGPT-class offline-first Control assistant.
+- Proton VPN Free officially permits standard WireGuard configuration export and third-party WireGuard clients, subject to owner account/free plan rules; free Android server change is randomized/cooldown, country-specific automated rotation and actual 75% throughput acceptance NOT proven.
+- VPN Gate volunteer relays are publicly integrable but centrally record originating IP, destination metadata for >=3 months and volunteer packet headers for >=2 weeks; excluded from default privacy provider. hide.me/Windscribe/Privado free WireGuard manual config availability restricted; Amnezia Free is split-only, WARP not geo rotation. Generous VPN free standard configs, but speed/geo/privacy independent proof missing.
+- Tor Project Tor VPN Beta (2026) is free, open-source with app-specific circuits; Tor Project warns beta may leak information. Tor Browser is the recommended verified .onion browser mode; Tor VPN Beta is experimental alternative and may conflict with Control VpnService.
+- User wants "basically all you can do": language model PLUS browser/research, real code/IDE, Python/data, docs/sheets/slides/PDF, MCP/connectors, voice, local workflow/overnight cycle, cybersecurity, reverse engineering, device operations and inter-app creative tools. Model code/runtime changes and PEFT/LoRA training possible with applicable licenses and hardware; proprietary flagship parity impossible to guarantee.
+- **No changes to Android/Windows runtime or source, no app builds, no VPN on-device tests, no downloaded models, no new account creation.** This commit records research only. Original signer/pairing preserved; no Downloader work.
+
+---
+
 # 2026-11-15 — V3 comprehensive architecture committed; strict no-code hold
 
 - Current owner-approved design: [docs/CONTROL_V3_COMPLETE_DESIGN_NO_CODE_20261115.md](docs/CONTROL_V3_COMPLETE_DESIGN_NO_CODE_20261115.md). It specifies every previously approved module, unambiguous action/task/overnight cycle boundaries, native all-rounder, voice + future Sound voice packages, file scanning, VPN/Tor, Skill Studio, Model Laboratory, GitHub MCP, external missing-source reverse engineering, owner permissions, UI and acceptance tests.
