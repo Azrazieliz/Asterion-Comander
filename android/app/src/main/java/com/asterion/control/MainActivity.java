@@ -309,6 +309,9 @@ public final class MainActivity extends Activity {
     gap(model,7);
     twoActions(model,"Load model","activity",()->showNativeAiDetails(),
       "Stop response","stop",()->ControlNativeInference.cancel(this));
+    gap(model,7);
+    button(model,"Spoken replies · French / English / Off","activity",false,
+      this::selectNativeAiSpeech);
     wide(body,model);
     gap(body,12);
 
@@ -357,8 +360,12 @@ public final class MainActivity extends Activity {
     button(privacy,"Inspect private IP / VPN","devices",false,
       this::showVpnDetails);
     gap(privacy,7);
-    button(privacy,"Security and quarantine","activity",false,
-      ()->showWorkerSubsystem("Security quarantine",
+    button(privacy,"Automatic Security Guardian","activity",false,
+      ()->showWorkerSubsystem("Automatic Security Guardian",
+        "/api/v1/intelligence/security/guardian/status"));
+    gap(privacy,7);
+    button(privacy,"Quarantine inventory","activity",false,
+      ()->showWorkerSubsystem("Quarantine inventory",
         "/api/v1/v2/security/quarantine"));
     gap(privacy,7);
     button(privacy,"Voice and device connections","devices",false,
@@ -406,7 +413,55 @@ public final class MainActivity extends Activity {
       if(destroyed||foregroundActivity()!=this)return;
       addIntelligenceTranscript("ASTERION · ACTUAL LOCAL RESPONSE",response);
       refreshIntelligenceRuntimeStatus();
+      speakNativeAiReplyIfEnabled(response);
     });
+  }
+
+  /**
+   * Reuse the EXISTING VoiceDialogueService speaker. This doesn't grant new
+   * microphone permissions or start persistent background listening.
+   * The owner explicitly selects French, English or Off; disabled by default.
+   */
+  private void selectNativeAiSpeech(){
+    final String current=prefs.getString("native_ai_speech_locale","off");
+    final String[] locales={"off","fr-FR","en-US"};
+    final String[] labels={"Off — text-only replies",
+      "French — installed offline voice","English — installed offline voice"};
+    int selected=0;
+    for(int i=0;i<locales.length;i++)
+      if(locales[i].equals(current))selected=i;
+    new AlertDialog.Builder(this).setTitle("Native AI spoken replies")
+      .setSingleChoiceItems(labels,selected,(dialog,index)->{
+        dialog.dismiss();
+        prefs.edit().putString("native_ai_speech_locale",locales[index]).apply();
+        if(index!=0&&VoiceDialogueService.active==null){
+          toast("Speech output selected. Start the existing voice service "+
+            "under Connect before asking AI to speak.");
+        }else toast("Local AI voice: "+labels[index]);
+      }).setNegativeButton("Cancel",null).show();
+  }
+
+  private void speakNativeAiReplyIfEnabled(String reply){
+    String locale=prefs.getString("native_ai_speech_locale","off");
+    if(!"fr-FR".equals(locale)&&!"en-US".equals(locale))return;
+    VoiceDialogueService active=VoiceDialogueService.active;
+    if(active==null){
+      toast("Local response available as text; existing voice service is stopped");
+      return;
+    }
+    if(reply==null||reply.isBlank())return;
+    String spoken=reply.trim();
+    if(spoken.length()>650){
+      spoken=spoken.substring(0,650);
+      int last=spoken.lastIndexOf(' ');
+      if(last>300)spoken=spoken.substring(0,last);
+      toast("Speaking opening excerpt; full answer remains in the AI tab");
+    }
+    try{
+      active.sayOnly(spoken,locale);
+    }catch(Exception e){
+      toast("Voice output unavailable: "+e.getClass().getSimpleName());
+    }
   }
 
   private void showWorkerSubsystem(String title,String endpoint){
