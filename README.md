@@ -1,3 +1,5 @@
+> **CURRENT OWNER-APPROVED ARCHITECTURE (2026-11-15):** [Asterion Control V2 — zero-cost native AI, true overnight cycles, security/privacy, VPN performance gate, voice, GitHub MCP, reverse engineering and all approved modules](docs/CONTROL_V2_OWNER_APPROVED_ARCHITECTURE_20261115.md). This is **specification only**; do not build/transfer/install or replace the owner signer without an explicit subsequent authorization. The owner has assigned **Downloader to someone else**: no Downloader source edits/builds from Control work. V2's explicit corrections override older suggestions that Control's only AI must be ChatGPT, that a normal action is a cycle, or that the VPN is optional by default. Preserve all old contracts as historical sources, not current contradictory requirements.
+
 # Asterion Control — existing external Android/Windows infrastructure
 
 **Active operating method (owner correction, 2026-11-11).** Read this before any Asterion Control work. This replaces all past MCP-gateway/callable-Control-connector experiments. Preserve current signed app, owner data/pairing and persistent Windows worker; the original setup is not to be rebuilt.
