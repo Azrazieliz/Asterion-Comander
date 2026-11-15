@@ -489,6 +489,10 @@ public final class AgentService extends Service {
         json(out,200,ControlEventJournal.recent(this,since,limit));
       }catch(Exception e){json(out,400,error("Invalid local diagnostic cursor"));}return;
     }
+    if(method.equals("GET")&&path.equals("/diagnostics/vpn")){
+      try{json(out,200,ControlPrivateVpn.status(this));}
+      catch(Exception e){json(out,503,error("VPN status unavailable"));}return;
+    }
     if(method.equals("GET")&&path.equals("/diagnostics/security")){
       try{json(out,200,ControlSecurityPolicy.status(this));}
       catch(Exception e){json(out,503,error("Owner security level unavailable"));}return;
