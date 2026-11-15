@@ -467,6 +467,10 @@ public final class AgentService extends Service {
       try{json(out,200,PerformanceManager.prioritizeForegroundNow(this));}
       catch(Exception e){json(out,400,error(e.getMessage()));}return;
     }
+    if(method.equals("GET")&&path.equals("/diagnostics/exit-history")){
+      try{json(out,200,ControlCrashDiagnostics.recentExitHistory(this));}
+      catch(Exception e){json(out,503,error("Control exit history unavailable"));}return;
+    }
     if(method.equals("GET")&&path.equals("/diagnostics/logcat")){
       try{json(out,200,ownLogcat());}
       catch(Exception e){json(out,503,error("Own-process logcat unavailable"));}return;
