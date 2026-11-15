@@ -15,6 +15,7 @@ import tempfile
 from pathlib import Path
 
 FILES = (
+    "asterion_remote/session_journal.py",
     "asterion_remote/interaction_sessions.py",
     "asterion_remote/model_lab.py",
     "asterion_remote/diagnostic_core.py",
@@ -49,7 +50,7 @@ def check(source: Path, dest: Path) -> dict:
     native = (dest / "asterion_remote/phone_bridge.py").read_text("utf8")
     if "/diagnostics/events" not in native or "/diagnostics/exit-history" not in native:
         raise RuntimeError("existing_native_phone_diagnostic_adapter_missing")
-    receipts = (dest / "asterion_remote/session_journal.py").read_text("utf8")
+    receipts = (source / "asterion_remote/session_journal.py").read_text("utf8")
     if "def reserve_if_new" not in receipts or "def progress" not in receipts:
         raise RuntimeError("existing_persistent_session_receipts_missing")
     status = subprocess.run(
