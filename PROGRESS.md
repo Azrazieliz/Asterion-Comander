@@ -3,7 +3,7 @@
 - User explicitly excludes French. Native AI voice choices are now **English (en-US) / Off**; the newly added French option was removed. Older stored non-English voice preferences are not activated by the new AI response feature.
 - Native Android GGUF assistant and Windows local assistant now explicitly request **English-only responses**. Original voice service and permission infrastructure are retained.
 - Source changed on `work/control-ai-core-20261115`: MainActivity.java, ControlNativeInference.java, assistant_routes.py. No APK build, signing, install, or deployed worker change.
-- The independently initiated source-only regression is tracked under Asterion Control bridge request `ctl-source-20261115-english-voice-c2`; do not mark as passed until its result is verified.
+- **Verification complete:** English-only UI and assistant source checks **6/6 passed**; full isolated Windows source regression **174/174 passed, zero Python syntax errors across 102 files** (bridge receipt `results/ctl-source-20261115-english-voice-c4.json`). A Windows loopback test's prior flaky 10053 connection abort was removed by testing its no-redirect policy deterministically, while preserving the independent real HTTP-loopback inference test.
 
 ---
 
