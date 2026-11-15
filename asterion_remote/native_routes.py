@@ -48,6 +48,12 @@ def app_bridges():return request('/app-bridge/apps').json()
 def app_bridge_invoke(data:AppBridgeAction):
     return request('/app-bridge/invoke','POST',data.model_dump(),timeout=11).json()
 
+@router.get('/phone/diagnostics/events')
+def phone_diagnostic_events(since: int = 0, limit: int = 100):
+    if not 0 <= since < 2**62 or not 1 <= limit <= 200:
+        raise HTTPException(422,'Invalid phone diagnostic cursor or limit')
+    return request('/diagnostics/events','POST',{'since':since,'limit':limit},timeout=6).json()
+
 @router.get('/phone/diagnostics/exit-history')
 def phone_exit_history():
     return request('/diagnostics/exit-history',timeout=5).json()
