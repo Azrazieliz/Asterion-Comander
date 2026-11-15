@@ -468,13 +468,19 @@ public final class AgentService extends Service {
       try{json(out,200,PerformanceManager.prioritizeForegroundNow(this));}
       catch(Exception e){json(out,400,error(e.getMessage()));}return;
     }
-    if(method.equals("GET")&&path.equals("/diagnostics/events")){
+    if((method.equals("GET")||method.equals("POST"))&&path.equals("/diagnostics/events")){
       try{
-        android.net.Uri requested=android.net.Uri.parse("http://localhost"+request[1]);
-        String querySince=requested.getQueryParameter("since");
-        String queryLimit=requested.getQueryParameter("limit");
-        long since=querySince==null?0:Long.parseLong(querySince);
-        int limit=queryLimit==null?100:Integer.parseInt(queryLimit);
+        long since;int limit;
+        if(method.equals("GET")){
+          android.net.Uri requested=android.net.Uri.parse("http://localhost"+request[1]);
+          String querySince=requested.getQueryParameter("since");
+          String queryLimit=requested.getQueryParameter("limit");
+          since=querySince==null?0:Long.parseLong(querySince);
+          limit=queryLimit==null?100:Integer.parseInt(queryLimit);
+        }else{
+          since=body.optLong("since",0);
+          limit=body.optInt("limit",100);
+        }
         json(out,200,ControlEventJournal.recent(this,since,limit));
       }catch(Exception e){json(out,400,error("Invalid local diagnostic cursor"));}return;
     }
