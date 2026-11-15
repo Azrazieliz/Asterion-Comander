@@ -115,7 +115,12 @@ def _sanitize_attributes(value: Any) -> dict:
         elif isinstance(raw, str):
             # Field-specific freeform data is deliberately short and sanitized.
             if key in {"reason", "error_class", "exception_class", "stage"}:
-                result[key] = re.sub(r"(?i)(?:bearer|token|password|secret|cookie|authorization)[=: ]+\S+", "[REDACTED]", raw)[:160]
+                # Persist only short static diagnostic identifiers, not raw
+                # exception messages/URLs that might contain owner credentials.
+                value=raw.strip()
+                result[key]=(value if _SAFE.fullmatch(value) and not
+                    re.search(r"(?i)(?:password|bearer|token|secret|cookie|credential)",value)
+                    else "redacted_non_identifier")
             elif _SAFE.fullmatch(raw):
                 result[key] = raw
     return result
