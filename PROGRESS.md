@@ -1,3 +1,15 @@
+# 2026-11-15 — CONTROL PHASE 2: Native assistant tools, IP masking verification and live hardware admission
+
+- Canonical phase-2 implementation record: [docs/CONTROL_AI_PHASE2_NATIVE_TOOLS_IP_PRIVACY_MODEL_ADMISSION_20261115.md](docs/CONTROL_AI_PHASE2_NATIVE_TOOLS_IP_PRIVACY_MODEL_ADMISSION_20261115.md). Current independent branch: work/control-ai-core-20261115. Old broader 7-star/V5 requirements remain, latest user VPN simplification supersedes mandatory geographic selection.
+- **Verified source:** temporary Windows extraction: 85 Python files, zero syntax errors, **105/105 tests passed**, bridge result results/ctl-source-20261115-2146-modelgate-g1.json. Isolated pure Java public-IP validator: javac compilation and **27/27 checks passed**, bridge result results/ctl-source-20261115-2047-agentvpn-java-e2.json. NOT APK/device integration proof.
+- **Implemented source:** native_assistant finite local-model JSON tool runner with durable no-replay and allowed real Control tools (health, sessions, skills, models, scoped files, approved skills and MCP); owner-authenticated assistant API; resource-aware model admission and real phone capacity API; soft-Japan private IP exit policy; Android HTTPS public-IP check before/after user-initiated WireGuard and recheck UI. Original separate overnight cycle architecture untouched.
+- **Measured constraints:** Samsung SM-S948B about 11.62 GB total RAM, 3.66 GB available at sample, thermal status 2, 68.25 GB free storage; existing Windows machine ~8.19 GB total RAM, ~2.62 GB free, Intel UHD integrated GPU. No installed phone-native model or training performed; initial official open-weight candidate Qwen3.5-2B Apache-2.0 needs real quantized model benchmarking.
+- **VPN owner correction:** fast free private IP change/hiding for restricted browsing is primary; Japan only nice-to-have. Unknown exit country is allowed if true IP change, privacy, native connectivity and previous <=25% speed loss condition meet independent tests. No real free public exit or full Android VPN test yet, no ipify requests executed during source checks.
+- **Remaining:** actual phone LLM model/runtime, real independent multistep workflows and overnight development, GitHub MCP official real server, voice and Sound package support, security scanning, reverse engineering, free VPN/Tor, signed app adapters, premium UI and full original-owner signed Android device acceptance.
+- **HOLD:** no Android APK build/sign/install, no Windows worker replacement, no Downloader code, no pairing/signature change until separately authorized.
+
+---
+
 # 2026-11-15 — Source implementation AUTHORIZED; isolated Control AI kernel, 71/71 source tests
 
 - **Active implementation branch:** `work/control-ai-core-20261115` (isolated from concurrently modified `work/control-0927-overnight-cycles-20261111`). Source-only phase report: [docs/CONTROL_AI_PHASE1_SOURCE_IMPLEMENTATION_20261115.md](docs/CONTROL_AI_PHASE1_SOURCE_IMPLEMENTATION_20261115.md).
