@@ -1,3 +1,5 @@
+> **V4 RESEARCH ADDENDUM · 2026-11-15:** [VPN provider facts, official Tor VPN Beta, all-rounder AI model/source modification and 24 real executable systems](CONTROL_V4_VPN_EVIDENCE_AI_TRAINING_SYSTEMS_RESEARCH_20261115.md). V3 is preserved as the broad owner-approved design; V4 narrows feasibility for actual free VPN exit sourcing and expands implementation-level architecture. Existing strict NO-CODE HOLD remains in force.
+
 # ASTERION CONTROL V3 — COMPLETE SYSTEM DESIGN, NO-CODE HOLD
 Date: 2026-11-15
 Owner instruction: "Discard SuperVPN ... develop everything ... Do not code yet, just develop everything and suggest more systems."
