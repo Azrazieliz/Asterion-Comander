@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, Field, ConfigDict
 from .security import require_token
 from . import diagnostic_core as core
+from . import diagnostic_analysis
 
 router = APIRouter(prefix="/api/v1/diagnostics",dependencies=[Depends(require_token)])
 
@@ -37,6 +38,18 @@ def events(since: int = 0, limit: int = 100, app: str = "", trace_id: str = ""):
         return core.events(since=since,limit=limit,app=app,trace_id=trace_id)
     except ValueError as exc:
         raise HTTPException(422,str(exc)) from exc
+
+
+@router.get("/triage")
+def triage(app: str = "", lookback_minutes: int = 1440, limit: int = 1200,
+           stale_after_seconds: int = 300):
+    """Read-only diagnostic correlation, never a current device-health claim."""
+    try:
+        return diagnostic_analysis.inspect(
+            app=app, lookback_minutes=lookback_minutes, limit=limit,
+            stale_after_seconds=stale_after_seconds)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @router.get("/incidents")
