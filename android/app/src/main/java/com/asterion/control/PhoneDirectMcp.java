@@ -96,6 +96,8 @@ final class PhoneDirectMcp {
             String message=e.getMessage()==null?"":e.getMessage();
             lastErrorDetail=message.replaceAll("[\\r\\n\\t]"," ").substring(0,Math.min(160,message.length()));
             phase="reconnecting";
+            ControlEventJournal.write(owner,"transport_error",lastStage,
+              "disconnected",name,0);
             Log.w("AsterionDirectMcp","Direct cellular relay disconnected: "+name);
           }
         }finally{connected=false;active=null;}
@@ -240,6 +242,7 @@ final class PhoneDirectMcp {
       lastStage="tls_handshake";sock.startHandshake();
       lastStage="wss_upgrade";handshake(sock,pairedToken);
       connected=true;phase="connected";lastStage="connected";lastError="";lastErrorDetail="";lastSuccess=System.currentTimeMillis();
+      ControlEventJournal.write(owner,"transport_connected","wss_upgrade","connected","authenticated",0);
       InputStream in=sock.getInputStream();OutputStream out=sock.getOutputStream();
       while(!stop){
         Frame frame;
