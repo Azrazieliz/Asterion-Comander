@@ -74,6 +74,49 @@ class ControlAiRoutesTests(unittest.TestCase):
         self.assertEqual(self.client.post(base+"/resume",headers=self.owner).json()["state"],"ready")
         self.assertEqual(self.client.post(base+"/stop",headers=self.owner).json()["state"],"stopped")
 
+    def test_autonomy_route_fails_closed_when_no_owner_runtime(self):
+        self.client.post("/api/v1/intelligence/cycles",
+                         headers=self.owner,json=self.cycle())
+        endpoint="/api/v1/intelligence/cycles/ownerproject01/advance"
+        denied=self.client.post(endpoint,headers=self.auth)
+        self.assertEqual(denied.status_code,403)
+        unavailable=self.client.post(endpoint,headers=self.owner)
+        self.assertEqual(unavailable.status_code,503)
+        self.assertEqual(self.client.get(
+            "/api/v1/intelligence/cycles/ownerproject01",
+            headers=self.auth).json()["verified_turns"],0)
+
+    def test_autonomy_queue_receipt_is_not_misreported_as_completed(self):
+        from asterion_remote import control_ai_routes as routes
+        self.client.post("/api/v1/intelligence/cycles",
+                         headers=self.owner,json=self.cycle())
+        endpoint="/api/v1/intelligence/cycles/ownerproject01/advance"
+        with patch.object(routes.development_cycle_driver,"start",
+                          return_value={"configured":True}), patch.object(
+               routes.development_cycle_driver,"queue_turn",
+               return_value={"ok":True,"cycle_id":"ownerproject01",
+                             "state":"queued","completed":False}):
+            response=self.client.post(endpoint,headers=self.owner)
+        self.assertEqual(response.status_code,200)
+        self.assertEqual(response.json()["state"],"queued")
+        self.assertFalse(response.json()["completed"])
+        cycle=self.client.get(
+            "/api/v1/intelligence/cycles/ownerproject01",headers=self.auth)
+        self.assertEqual(cycle.json()["verified_turns"],0)
+
+    def test_status_distinguishes_active_automatic_worker_from_stored_cycle(self):
+        from asterion_remote import control_ai_routes as routes
+        self.client.post("/api/v1/intelligence/cycles",
+                         headers=self.owner,json=self.cycle())
+        with patch.object(routes.development_cycle_driver,"worker_status",
+                return_value={"recent_turns":[{
+                    "cycle_id":"ownerproject01","state":"running"}]}):
+            current=self.client.get(
+                "/api/v1/intelligence/cycles/ownerproject01",
+                headers=self.auth)
+        self.assertTrue(current.json()["automatic_turns_running"])
+        self.assertEqual(current.json()["verified_turns"],0)
+
     def test_local_model_unconfigured_not_faked(self):
         req={"prompt":"Investigate current source evidence for a real project",
              "request_id":"owner-request-12345"}
