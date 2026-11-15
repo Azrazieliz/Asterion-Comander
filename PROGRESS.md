@@ -1,3 +1,13 @@
+# 2026-11-15 — VPN geography relevance, Rounder reuse, ambitious model evaluation — design-only
+
+- V5 specification committed: [docs/CONTROL_V5_GEO_USAGE_ROUNDER_MODEL_TRAINING_REVIEW_20261115.md](docs/CONTROL_V5_GEO_USAGE_ROUNDER_MODEL_TRAINING_REVIEW_20261115.md), plus updated pointers. No application source, build, device, downloader, Rounder, model weights or runtime modifications authorized/performed.
+- Result of comparison across actual content categories: selected-country VPN exit has occasional value (Pixiv region restrictions, some Japan-only media, content licensed by geography), but constant specific-country routing is not necessary as a normal default. Trustworthy free IP masking, >75% relative throughput, native Control connectivity and session continuity provide greater regular utility. On-demand geo mode only for proven site requirements and permitted available exits, not speculative 403 fixes.
+- GitHub review of Azrazieliz/AsterionRounder main identified UniversalReader, ReaderLibrary, KoikatsuCards and 3D preview code: Control should delegate document/EPUB/library/3D preview and related functions, NOT recreate them. These are source features, not proof of installed Rounder runtime acceptance. Browser should automate existing browser where supported; Downloader remains separate owner.
+- Owner objected to only 500 AI tests. Replacement TRAINING/QA contract: at least 50,000 distinct locked holdout evaluation cases, 200,000+ separate synthetic stress/robustness cases, 2,000+ actual integration/workflow tests, and 1,000+ human-adjudicated quality cases. These are proposed eventual benchmarks, not completed or affordable-to-run-on-phone claims. Owner should not need to manually train the local model; Model Forge is tasked with verified automated preparation/fine-tuning/evaluation when implementation authorized.
+- No changes to original Control signer, native pairing, existing Windows worker, VPN settings or other Asterion app sources.
+
+---
+
 # 2026-11-15 — V5 corrected usage scope, app reuse and 12k test requirement; documentation only
 
 - **New source:** [docs/CONTROL_V5_USAGE_GEO_BROWSER_REUSE_12000_EVAL_20261115.md](docs/CONTROL_V5_USAGE_GEO_BROWSER_REUSE_12000_EVAL_20261115.md), committed to existing Control development branch.
