@@ -24,6 +24,7 @@ class AgentTests(unittest.TestCase):
         self.env=patch.dict(os.environ,{
             "ASTERION_ASSISTANT_ROOT":self.tmp.name,
             "ASTERION_DIAGNOSTIC_ROOT":self.tmp.name,
+            "ASTERION_SKILL_STUDIO_ROOT":self.tmp.name,
         })
         self.env.start()
         self.ident="ownerrequest-00001"
@@ -140,6 +141,67 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(row["state"],"completed")
         self.assertEqual(row["client_request_id"],self.ident+":0")
         self.assertFalse(row["replay_allowed"])
+
+    def test_actual_owner_scoped_source_file_read_is_not_default(self):
+        from asterion_remote import app as control_app
+        source=Path(self.tmp.name)/"example.py"
+        source.write_text("def alive():\\n    return 42\\n".replace(
+            "\\\\n","\\n"),encoding="utf-8")
+        provider=self.provider_script(
+            {"action":"tool","name":"files.read_text",
+             "arguments":{"path":"example.py","start_line":1,"max_lines":5}},
+            {"action":"final","message":"I read the actual code"})
+        with patch.object(control_app,"ROOT",Path(self.tmp.name)), patch.object(
+                control_app,"EXTRA_ROOTS",[]):
+            result=agent.execute(self.prompt,self.ident,provider,
+                      owner_grants=frozenset({"files.read_text"}))
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["tool_receipts"],1)
+        self.assertIn("return 42",provider.calls[1][0])
+        self.assertNotIn("return 42",str(agent.list_recent()))
+
+    def test_hidden_credentials_are_not_sent_to_model(self):
+        provider=self.provider_script({
+            "action":"tool","name":"files.read_text",
+            "arguments":{"path":".env","start_line":1}})
+        result=agent.execute(self.prompt,self.ident,provider,
+                      owner_grants=frozenset({"files.read_text"}))
+        self.assertEqual(result["state"],"needs_review")
+        self.assertEqual(result["error_code"],"PermissionError")
+        self.assertEqual(result["tool_receipts"],0)
+
+    def test_preapproved_skill_executes_actual_session_not_fake_done(self):
+        from asterion_remote import skill_studio,session_journal
+        created=skill_studio.create("sample_skill_01",
+            "Wait briefly on PC without changing owner data",
+            "pc",[{"kind":"wait","wait_ms":25}],timeout_s=5)
+        skill_studio.approve("sample_skill_01",created["sha256"])
+        provider=self.provider_script(
+            {"action":"tool","name":"skills.execute",
+             "arguments":{"skill_id":"sample_skill_01",
+                          "sha256":created["sha256"]}},
+            {"action":"final",
+             "message":"Authorized skill submitted; execution status separate"})
+        result=agent.execute(self.prompt,self.ident,provider,
+                    owner_grants=frozenset({"skills.execute"}),
+                    allow_device_actions=True)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["verified_device_sessions"],0)
+        self.assertEqual(result["tool_receipts"],1)
+        until=time.monotonic()+4
+        entry=None
+        while time.monotonic()<until:
+            receipts=session_journal.recent()
+            entry=receipts[0] if receipts else None
+            if entry and entry["state"] in (
+                 "completed","failed","cancelled","timed_out"):
+                break
+            time.sleep(.04)
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry["state"],"completed")
+        self.assertEqual(entry["client_request_id"],self.ident+":0")
+        self.assertEqual(
+            skill_studio.details("sample_skill_01")["executions"],1)
 
     def test_model_cannot_inject_own_idempotency_key(self):
         provider=self.provider_script({
