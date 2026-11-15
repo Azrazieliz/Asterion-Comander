@@ -49,6 +49,21 @@ final class ControlSecurityPolicy {
     else return false;
     return storage(c).getBoolean("allow:"+cap,false);
   }
+  static boolean canTool(Context c,String name){
+    if(NORMAL.equals(level(c))||DEVELOPER.equals(level(c)))return true;
+    String path;
+    if(name.equals("control_phone_input"))path="/input";
+    else if(name.equals("control_phone_app_launch"))path="/apps/launch";
+    else if(name.startsWith("control_phone_app_invoke")||
+            name.startsWith("control_phone_app_operation"))path="/app-bridge/invoke";
+    else if(name.contains("transfer"))path="/transfer/chunk";
+    else if(name.contains("cycle")||name.contains("continuation")||
+            name.contains("chat_"))path="/cycles/start";
+    else if(name.matches("control_phone_(status|health|ui|screen|stream_status|apps|app_bridges|bridge_status|direct_status|network_status|own_logcat|diagnostic_events|exit_history|performance_status|observation_status|observation_events|observation_timeline)"))
+      path="/health";
+    else path="/restricted-operation";
+    return canRemote(c,path.equals("/health")?"GET":"POST",path);
+  }
   static boolean developerAuthorized(Context c){
     return DEVELOPER.equals(level(c)) ||
       (CUSTOM.equals(level(c)) && storage(c).getBoolean("allow:developer_diagnostics",false));
