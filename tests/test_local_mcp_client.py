@@ -36,6 +36,7 @@ for line in sys.stdin:
             elif method=="tools/list":
                 result={"result":{"resultType":"complete","tools":[
                     {"name":"safe.echo","description":"Echo","inputSchema":{"type":"object"}},
+                    {"name":"safe.ask","description":"Ask","inputSchema":{"type":"object"}},
                     {"name":"danger.delete","description":"Danger","inputSchema":{"type":"object"}}
                 ]}}
             elif method=="tools/call":
@@ -118,18 +119,20 @@ class McpTests(unittest.TestCase):
     def test_modern_2026_discovery_and_tool_call(self):
         with McpStdioClient(self.config("modern")) as client:
             listed=client.list_tools()
-            self.assertEqual(listed["owner_authorized_tools"],1)
+            self.assertEqual(listed["owner_authorized_tools"],2)
             result=client.call_tool("safe.echo",{"text":"modern call"})
             self.assertTrue(result["ok"])
             self.assertEqual(result["result"]["content"][0]["text"],"modern call")
 
     def test_modern_input_required_is_not_false_success(self):
-        # A mock server reports input_required for one tool without exposing
-        # it as a catalog entry; the client must still reject undiscovered use.
+        # Modern MCP can return a partial response requiring owner input.
+        # That is NOT a successful tool execution and is not auto-completed.
         with McpStdioClient(self.config("modern")) as client:
             client.list_tools()
-            with self.assertRaises(RuntimeError):
-                client.call_tool("safe.ask",{})
+            result=client.call_tool("safe.ask",{})
+            self.assertFalse(result["ok"])
+            self.assertTrue(result["input_required"])
+            self.assertFalse(result["project_work_verified"])
 
     def test_tool_must_be_discovered_and_auth_scoped(self):
         with McpStdioClient(self.config()) as client:
