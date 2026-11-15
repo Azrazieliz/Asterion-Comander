@@ -31,8 +31,13 @@ def sha(raw: bytes) -> str:
 def check(source: Path, dest: Path) -> dict:
     if source.resolve() == dest.resolve():
         raise RuntimeError("production_is_source")
-    if not (source / ".git").is_dir() or not (dest / ".git").is_dir():
-        raise RuntimeError("source_and_existing_production_git_identity_required")
+    if not (source / ".git").is_dir():
+        raise RuntimeError("source_git_identity_required")
+    # Owner's existing Windows release is an unpacked installation, not
+    # necessarily a Git working tree. Verify its canonical location and
+    # mounted native Control API instead of requiring production .git.
+    if dest.name.lower() != "asterioncontrolrelease":
+        raise RuntimeError("unexpected_production_control_directory")
     if not (dest / "asterion_remote/app.py").is_file():
         raise RuntimeError("production_control_application_missing")
     active = (dest / "asterion_remote/app.py").read_text("utf8")
