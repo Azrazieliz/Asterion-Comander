@@ -195,10 +195,8 @@ def _parse_and_apply(worktree: Path, policy: GitProject, text: str) -> list[dict
             target.parent.mkdir(parents=True,exist_ok=True)
             # After mkdir ensure no symlink ancestor was introduced.
             _file(worktree,path,policy)
-        if (len(output)>_MAX_NEW_BYTES or b"\0" in output or
-            output==target.read_bytes() if exists else False):
-            raise ValueError("invalid_or_unchanged_patch_bytes")
-        # Explicit checks avoid the conditional's precedence ambiguity.
+        if exists and output == original:
+            raise ValueError("patch_did_not_change_existing_file")
         if len(output)>_MAX_NEW_BYTES or b"\0" in output:
             raise ValueError("source_file_size_or_binary_not_permitted")
         total+=len(output)
@@ -245,12 +243,13 @@ def _branch(cycle_id:str)->str:
     return "work/asterion-ai/"+slug[:40]+"-"+_sha(cycle_id.encode())[:10]
 
 
-def project_context(policy:GitProject,focus_paths:tuple[str,...])->str:
+def project_context(policy:GitProject,cycle_id:str,
+                    focus_paths:tuple[str,...])->str:
     """Existing source excerpts with SHA pins for model replacements."""
     root=_require_repo(policy)
     if not 1<=len(focus_paths)<=8:
         raise ValueError("approved_focus_paths_required")
-    branch=_branch(policy.name)
+    branch=_branch(cycle_id)
     try:
         _git(root,"rev-parse","--verify","refs/heads/"+branch)
         baseline=branch
@@ -295,8 +294,6 @@ def apply_verified_draft(policy:GitProject,model_output:str,
     never that model-authored code passes functional or device acceptance.
     """
     root=_require_repo(policy)
-    if cycle_id!=policy.name:
-        raise PermissionError("cycle_not_authorized_for_git_project")
     if not re.fullmatch(re.escape(cycle_id)+r"-turn-[1-9][0-9]*",request_id):
         raise ValueError("invalid_development_turn_receipt")
     branch=_branch(cycle_id)
