@@ -68,26 +68,30 @@ class VpnPolicyTests(unittest.TestCase):
         self.assertTrue(result["eligible"])
         self.assertFalse(result["latency_25_percent_target_met"])
 
-    def test_country_selection_only_when_needed_and_only_japan(self):
+    def test_optional_japan_not_required_for_secure_ip_masking(self):
         available=[candidate(),candidate(
             endpoint_id="japan",country="JP",exit_ip="1.1.1.1",
             vpn_down_mbps=80)]
         default=policy.choose(available)
         self.assertEqual(default["mode"],"private")
-        japan=policy.choose(available,mode="geo_on_demand",country="JP")
-        self.assertTrue(japan["ok"])
+        self.assertTrue(default["ok"])
+        japan=policy.choose(available,mode="japan_preferred")
         self.assertEqual(japan["selected"]["country"],"JP")
+        self.assertTrue(japan["japan_preference_satisfied"])
         with self.assertRaises(ValueError):
-            policy.choose(available,country="JP")
-        with self.assertRaises(ValueError):
-            policy.choose(available,mode="geo_on_demand",country="US")
+            policy.choose(available,country="US")
 
-    def test_unavailable_japan_does_not_fall_back_to_wrong_country(self):
+    def test_unavailable_japan_uses_fast_private_exit_instead(self):
         route=policy.choose([candidate()],mode="geo_on_demand",country="JP")
-        self.assertFalse(route["ok"])
-        self.assertIsNone(route["selected"])
-        self.assertIn("requested_japan_exit_unavailable",
-                      route["examined"][0]["reject_reasons"])
+        self.assertTrue(route["ok"])
+        self.assertEqual(route["selected"]["country"],"NL")
+        self.assertFalse(route["japan_preference_satisfied"])
+        self.assertFalse(route["selected"]["actual_tunnel_connected"])
+
+    def test_unknown_country_does_not_block_verified_ip_hider(self):
+        route=policy.choose([candidate(country="")])
+        self.assertTrue(route["ok"])
+        self.assertEqual(route["selected"]["country"],"")
 
     def test_cheap_route_with_leaks_or_too_few_samples_fails(self):
         a=policy.assess(candidate(ip_leak_detected=True))
