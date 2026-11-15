@@ -3,7 +3,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from asterion_remote import mcp_protocol, app as app_module
+from asterion_remote import github_bridge, app as app_module
 
 ROOT=Path(__file__).resolve().parents[1]
 NATIVE=ROOT/"android/app/src/main/java/com/asterion/control"
@@ -50,23 +50,15 @@ def test_governor_never_force_stops_unrelated_apps_or_disables_cycles():
     assert '"other_app_process_control",false' in manager
 
 
-def test_phoneside_mcp_and_authenticated_lan_reach_performance_actions():
+def test_existing_native_phone_and_private_bridge_reach_performance_actions():
     agent=source("AgentService.java")
-    mcp=source("AndroidMcp.java")
     allowed=(ROOT/"asterion_remote/phone_bridge.py").read_text()
-    names={x["name"] for x in mcp_protocol.TOOLS}
-    for name in (
-        "control_phone_performance_status",
-        "control_phone_performance_mode",
-        "control_phone_performance_optimize",
-        "control_pc_performance_status",
-        "control_pc_performance_mode"
-    ):
-        assert name in names
     for path in ("/performance/status","/performance/mode","/performance/optimize"):
         assert path in agent and path in allowed
-    for name in ("performance_status","performance_mode","performance_optimize"):
-        assert "control_phone_"+name in mcp
+    for op in ("phone_performance_status","phone_performance_mode",
+               "phone_performance_optimize"):
+        assert op in github_bridge.PHONE_NATIVE
+    assert "mcp_gateway" not in (ROOT/"scripts/start_windows.ps1").read_text()
 
 
 def test_windows_process_changes_are_only_for_managed_jobs():
