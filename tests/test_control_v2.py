@@ -140,6 +140,21 @@ class ControlV2Tests(unittest.TestCase):
         self.assertEqual(first["session"]["id"],repeat["session"]["id"])
         self.assertTrue(repeat["session"]["reused"])
         self.assertEqual(skill_studio.details("test_health")["executions"],1)
+        # The session executor is asynchronous. Wait for its actual terminal
+        # journal receipt before temporary test roots are removed or replaced;
+        # otherwise a Windows background thread may still hold events.sqlite3.
+        import time
+        from asterion_remote import interaction_sessions,session_journal
+        ident=first["session"]["id"]
+        deadline=time.monotonic()+4
+        observed=""
+        while time.monotonic()<deadline:
+            persisted=session_journal.get(ident)
+            observed=persisted["state"] if persisted else ""
+            if observed in {"completed","failed","cancelled","timed_out"}:
+                break
+            time.sleep(.03)
+        self.assertIn(observed,{"completed","failed","cancelled","timed_out"})
         skill_studio.revoke("test_health")
         with self.assertRaises(PermissionError):
             skill_studio.execute("test_health",doc["sha256"],"request-67890")
