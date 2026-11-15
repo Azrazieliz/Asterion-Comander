@@ -13,6 +13,7 @@ ALLOWED={
  'pc_status':('GET','/api/v1/health'),
  'pc_health':('GET','/api/v1/device-health'),
  'pc_diagnostic_triage':('GET','/api/v1/diagnostics/triage'),
+ 'pc_diagnostic_snapshot':('GET','/api/v1/diagnostics/snapshot'),
  'pc_screen':('GET','/api/v1/screen'),
  'pc_monitors':('GET','/api/v1/monitors'),
  'pc_input':('POST','/api/v1/input'),
@@ -159,6 +160,23 @@ def run(request,key):
         if type(limit) is not int or not 1<=limit<=80:
             raise ValueError('Invalid phone journal limit')
         return pc(path+'?'+urllib.parse.urlencode({'since':since,'limit':limit}),key)
+    if op=='pc_diagnostic_snapshot':
+        allowed={'app','lookback_minutes','limit','phone'}
+        if set(args)-allowed:
+            raise ValueError('Unsupported diagnostic snapshot argument')
+        app=args.get('app','')
+        if not isinstance(app,str) or (app and not NAME.fullmatch(app)):
+            raise ValueError('Invalid diagnostic snapshot app')
+        for name,minimum,maximum in (
+            ('lookback_minutes',1,10080),('limit',1,3000)):
+            value=args.get(name)
+            if value is not None and (type(value) is not int or
+                                     not minimum<=value<=maximum):
+                raise ValueError('Invalid diagnostic snapshot bound '+name)
+        if 'phone' in args and type(args['phone']) is not bool:
+            raise ValueError('Invalid diagnostic snapshot phone flag')
+        query=urllib.parse.urlencode(args)
+        return pc(path+('?' + query if query else ''),key)
     if op=='pc_diagnostic_triage':
         # Explicit read-only operation; never allow arbitrary API paths or
         # unbounded results through a GitHub fallback response.
