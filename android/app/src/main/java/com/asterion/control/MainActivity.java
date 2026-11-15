@@ -284,7 +284,9 @@ public final class MainActivity extends Activity {
     LinearLayout diagnostics=card();rowTitle(diagnostics,"Incident diagnostics",
       "Durable Control events and actual Android process exit history",icon("activity",DesignSystem.PURPLE,23));
     gap(diagnostics,10);button(diagnostics,"Inspect recent Control incidents","activity",false,
-      ()->showLocalDiagnostics());wide(healthBody,diagnostics);
+      ()->showLocalDiagnostics());
+    gap(diagnostics,10);button(diagnostics,"Review recorded Asterion app incidents","activity",false,
+      ()->showCrossAppDiagnostics());wide(healthBody,diagnostics);
     gap(healthBody,12);LinearLayout security=card();rowTitle(security,"Security level",
       "Enforced locally on both network and direct Control commands",icon("shield",DesignSystem.TEAL,23));
     securitySummary=t("Current: "+ControlSecurityPolicy.level(this),13,DesignSystem.TEXT,true);
@@ -373,6 +375,92 @@ public final class MainActivity extends Activity {
       new AlertDialog.Builder(this).setTitle("Diagnostics unavailable")
         .setMessage(e.getClass().getSimpleName()).setPositiveButton("Close",null).show();
     }
+  }
+  /** Read-only owner-authorized correlation from existing paired Windows worker.
+   * No Android app-private logging, screenshot loop, or new connection/pairing.
+   * This is recorded evidence, not a live phone-state or root-cause verdict.
+   */
+  private void showCrossAppDiagnostics(){
+    String host=prefs.getString("url","").replaceAll("/+$","");
+    String token=prefs.getString("token","");
+    if(host.isEmpty()||token.isEmpty()){
+      new AlertDialog.Builder(this).setTitle("Asterion incident evidence")
+        .setMessage("Windows agent is not paired. Local Control incidents remain available above.")
+        .setPositiveButton("Close",null).show();
+      return;
+    }
+    toast("Reading recorded app events from Windows");
+    io.execute(()->{
+      HttpURLConnection connection=null;
+      try{
+        connection=(HttpURLConnection)new URL(host+
+          "/api/v1/diagnostics/triage?lookback_minutes=1440&limit=60&stale_after_seconds=300")
+          .openConnection();
+        connection.setRequestMethod("GET");
+        connection.setConnectTimeout(4000);
+        connection.setReadTimeout(6000);
+        connection.setRequestProperty("Authorization","Bearer "+token);
+        connection.setRequestProperty("Accept","application/json");
+        int status=connection.getResponseCode();
+        if(status!=200)throw new IllegalStateException("windows_diagnostics_http_"+status);
+        byte[] body=connection.getInputStream().readNBytes(131073);
+        if(body.length>131072)throw new IllegalStateException("diagnostic_response_too_large");
+        JSONObject triage=new JSONObject(new String(body,StandardCharsets.UTF_8));
+        if(!triage.optBoolean("ok",false))
+          throw new IllegalStateException("diagnostic_response_not_verified");
+        org.json.JSONArray findings=triage.optJSONArray("findings");
+        org.json.JSONArray stale=triage.optJSONArray("needs_fresh_state");
+        StringBuilder message=new StringBuilder("Recorded in last 24 hours: ")
+          .append(triage.optInt("events_examined",0))
+          .append(" events\\nApps observed: ");
+        org.json.JSONArray apps=triage.optJSONArray("observed_apps");
+        message.append(apps==null?0:apps.length())
+          .append("\\nCurrent runtime state: NOT VERIFIED\\n");
+        if(triage.optBoolean("window_may_be_truncated",false))
+          message.append("\\nEvidence limit reached: some earlier events omitted.\\n");
+        if(findings!=null&&findings.length()>0){
+          message.append("\\nObserved symptoms:\\n");
+          for(int i=0;i<Math.min(8,findings.length());i++){
+            JSONObject finding=findings.optJSONObject(i);
+            if(finding==null)continue;
+            message.append("• ").append(finding.optString("code","reported"))
+              .append(": ").append(finding.optString("meaning","Recorded symptom"))
+              .append("\\n");
+          }
+        }else message.append("\\nNo classified symptoms in the recorded sample. "
+                           +"This does not prove there were no failures.\\n");
+        if(stale!=null&&stale.length()>0){
+          message.append("\\nOperations needing fresh engine evidence:\\n");
+          for(int i=0;i<Math.min(8,stale.length());i++){
+            JSONObject item=stale.optJSONObject(i);
+            if(item==null)continue;
+            message.append("• ").append(item.optString("app","unknown"))
+              .append(" / ").append(item.optString("operation_id","unknown"))
+              .append(" (").append(item.optString("last_state","unknown"))
+              .append(")\\n");
+          }
+        }
+        message.append("\\nOnly opted-in, sanitized telemetry is available. "
+                      +"HTTP 403 alone cannot establish a geographical block. "
+                      +"Uninstrumented apps may have failures not shown here.");
+        final String displayed=message.toString();
+        runOnUiThread(()->{
+          if(destroyed)return;
+          new AlertDialog.Builder(this).setTitle("Asterion incident evidence")
+            .setMessage(displayed).setPositiveButton("Close",null).show();
+        });
+      }catch(Exception e){
+        final String reason=e.getClass().getSimpleName();
+        runOnUiThread(()->{
+          if(destroyed)return;
+          new AlertDialog.Builder(this).setTitle("Recorded diagnostics unavailable")
+            .setMessage("No claim about app health can be made. Windows diagnostic route "
+                       +"is unreachable or not deployed ("+reason+"). Local Control "
+                       +"incident history remains available.")
+            .setPositiveButton("Close",null).show();
+        });
+      }finally{if(connection!=null)connection.disconnect();}
+    });
   }
   private void showPermissionDetails(){
     try{
