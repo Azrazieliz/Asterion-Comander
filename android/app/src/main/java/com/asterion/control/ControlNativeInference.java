@@ -303,6 +303,8 @@ final class ControlNativeInference {
     });
   }
 
+  static boolean statusSafeLoaded(){return reallyLoaded();}
+
   static JSONObject status()throws Exception{
     return new JSONObject()
       .put("native_runtime_packaged",available())
