@@ -99,99 +99,182 @@ function diagnosticRecord(parent,title,detail,severity='neutral'){
  const body=document.createElement('p');body.textContent=detail;
  item.append(heading,body);parent.append(item);
 }
+function readableDiagnosticIssue(finding){
+ const code=String(finding.code||'');
+ switch(code){
+  case 'http_403':
+   return ['A website or server refused a request (HTTP 403)',
+    'Open that app and check which provider, URL stage, and authorization failed. HTTP 403 alone does not show a geographical block.'];
+  case 'stale_operations':
+   return ['Some work stopped reporting progress',
+    'Open the affected app and check the current queue and worker state. A historical queued entry does not prove the job is still waiting.'];
+  case 'crash_or_anr_reported':
+   return ['An application crash or freeze was reported',
+    'Check the matching crash stack or Android exit record and the build version; the recorded event alone does not identify the cause.'];
+  default:
+   return ['A failure was reported',
+    'Inspect the originating app and its related request trace. Cause has not been verified.'];
+ }
+}
+function readableDiagnosticEvent(event){
+ const code=String(event.symptom||event.kind||'');
+ if(code==='http_403_observed_not_root_cause'||event.status_code===403)
+  return ['Server refused a request (403)','Open this app to check provider and authentication. This is not proof of a regional block.'];
+ if(code.includes('crash')||code.includes('anr'))
+  return ['App crash or freeze reported','A matching stack trace is needed to confirm the cause.'];
+ if(code.includes('stalled')||code.includes('worker_dead'))
+  return ['Worker progress stopped being reported','Check the worker in the originating application.'];
+ return ['A failure event was recorded','The app-specific engine trace is needed to investigate.'];
+}
+function diagnosticAppAction(parent,app){
+ if(!app||typeof app!=='string')return;
+ const button=document.createElement('button');
+ button.type='button';button.className='diagnostic-app-action';
+ button.textContent='Investigate '+app;
+ button.addEventListener('click',()=>{
+  $('#diagnostic-app').value=app;
+  loadDiagnostics().catch(e=>toast(e.message));
+ });
+ parent.append(button);
+}
+function readableExitState(code){
+ const meanings={
+  0:'Exit reason not reported by Android',
+  1:'App closed itself',
+  2:'App received a process signal',
+  3:'Android stopped the app under memory pressure',
+  4:'Java application crash',
+  5:'Native-code application crash',
+  6:'App stopped responding (ANR)',
+  7:'App failed while starting',
+  8:'Permissions changed',
+  9:'Android reported excessive resource use',
+  10:'User requested app exit',
+  11:'User stopped the application',
+  12:'An app dependency stopped',
+  13:'Other operating-system exit'
+ };
+ return meanings[code]||'Android did not provide a recognized exit classification';
+}
 async function loadPhoneDiagnosticEvidence(){
  const panel=$('#diagnostic-phone');
  if(!panel)return;
  panel.replaceChildren();
  if(!state.token){
-  diagnosticRecord(panel,'Not linked','Connect to Windows to read the paired Android Control journal.');
+  diagnosticRecord(panel,'Connection required','Connect to Windows to read Control’s own Android event history.');
   return;
  }
- diagnosticRecord(panel,'Reading Android journal','Checking the paired native phone listener…');
+ diagnosticRecord(panel,'Reading Control connection history','Checking the existing paired phone listener…');
  try{
   const head=await request('/phone/diagnostics/events'+qp({since:0,limit:1}));
   if(head.scope!=='asterion_control_process_only')throw new Error('Unexpected journal scope');
   const latest=Number(head.latest_sequence||0);
-  const start=Math.max(0,latest-30);
-  const page=await request('/phone/diagnostics/events'+qp({since:start,limit:30}));
+  const start=Math.max(0,latest-25);
+  const page=await request('/phone/diagnostics/events'+qp({since:start,limit:25}));
   if(page.scope!=='asterion_control_process_only')throw new Error('Unexpected journal scope');
   panel.replaceChildren();
   const data=page.events||[];
   if(!data.length){
-   diagnosticRecord(panel,'No recent Control journal entries',
-    'The paired Android listener returned no records in the selected recent window.');
+   diagnosticRecord(panel,'No Control connection events found',
+    'Only Control’s own events can appear here. This does not tell us whether other apps are healthy.');
    return;
   }
-  diagnosticRecord(panel,'Android Control · own-process telemetry',
-   data.length+' of the newest retained events · last recorded sequence '+latest+
-    ' · This does not include private logs belonging to other apps.');
-  for(const event of data.slice().reverse().slice(0,30)){
-   const title=String(event.kind||'event')+' · '+String(event.state||'unknown');
-   const detail='Stage: '+String(event.stage||'unspecified')+
-     ' · Reason code: '+String(event.reason_code||'unspecified')+
-     ' · Sequence '+String(event.seq||'?');
-   diagnosticRecord(panel,title,detail);
+  for(const event of data.slice().reverse().slice(0,16)){
+   const kind=String(event.kind||'');
+   const state=String(event.state||'');
+   const stage=String(event.stage||'');
+   let title=kind.replaceAll('_',' ');
+   let detail='Historical Control event';
+   if(kind.includes('transport')||kind.includes('wss')){
+    title=state==='failed'?'Control connection problem':'Control connection activity';
+    detail=state==='failed'?
+     'The phone reported a connection problem; check the current link before retrying.':
+     'A phone-to-Windows connection event was recorded.';
+   }else if(kind.includes('service')){
+    title='Control background service';
+    detail='Android recorded a service lifecycle change.';
+   }else if(state==='failed'||state==='error'){
+    title='Control recorded an error';
+    detail='Check the native connection and OS permissions for more evidence.';
+   }
+   if(stage)detail+=' Area: '+stage.replaceAll('_',' ')+'.';
+   diagnosticRecord(panel,title,detail,state==='failed'?'warning':'neutral');
   }
+  diagnosticRecord(panel,'Scope of these records',
+   'Only Control’s own process is visible. Other applications must send their own diagnostic evidence.');
  }catch(err){
   panel.replaceChildren();
-  diagnosticRecord(panel,'Android journal unavailable',
-   friendlyError(err)+' · This does not imply that the phone is offline or healthy.');
+  diagnosticRecord(panel,'Connection history unavailable',
+   friendlyError(err)+' · No conclusion about app health can be drawn.','warning');
  }
 }
+
 async function loadIntegrationCoverage(){
  const panel=$('#diagnostic-coverage');
  if(!panel)return;
  panel.replaceChildren();
  if(!state.token){
-  diagnosticRecord(panel,'Connect to inspect app coverage',
-   'Partner apps disclose only opted-in bridge capabilities and events.');
+  diagnosticRecord(panel,'Connection required',
+   'Connect to Windows to see which apps have opted into Control.');
   return;
  }
- diagnosticRecord(panel,'Discovering native integrations',
-   'Checking the paired phone app catalog and recorded diagnostic sources…');
+ diagnosticRecord(panel,'Checking your Asterion applications',
+  'Reading actual installed apps and native bridge support…');
  try{
   const data=await request('/diagnostics/coverage'+qp({
    lookback_minutes:Number($('#diagnostic-window').value),limit:1200}));
   if(!data.ok)throw new Error('Coverage response unverified');
   panel.replaceChildren();
   const count=data.native_partner_count;
-  diagnosticRecord(panel,'Instrumentation status · not universal',
-   'Recent sources: '+String(data.recent_event_source_count||0)+
-   ' · Native opt-in bridges: '+(count===null||count===undefined?'unavailable':String(count))+
-   ' · Other-app private logs: not accessed.');
+  diagnosticRecord(panel,'Connected app evidence',
+   'Apps that sent recent events: '+String(data.recent_event_source_count||0)+
+   '. Apps exposing a native bridge: '+(count===null||count===undefined?
+    'not checked':String(count))+'. These are separate capabilities.');
   if(!data.phone_app_catalog_available)
-   diagnosticRecord(panel,'Phone app list unavailable',
-    'Native catalog cannot be read right now; this is not evidence of missing apps.','warning');
+   diagnosticRecord(panel,'App list could not be read',
+    'The phone list is unavailable at this moment. It does not mean your apps were removed.','warning');
   if(!data.partner_bridge_catalog_available)
-   diagnosticRecord(panel,'Partner bridge list unavailable',
-    'Opt-in provider discovery could not be verified.','warning');
+   diagnosticRecord(panel,'Native integrations could not be checked',
+    'An app’s bridge status must be checked on the phone.','warning');
   const apps=data.apps||[];
-  if(!apps.length)
-   diagnosticRecord(panel,'No recognized Asterion app entries returned',
-    'This may reflect unavailable access, app discovery or a narrow catalog. Do not infer app absence.');
+  if(!apps.length&&data.phone_app_catalog_available)
+   diagnosticRecord(panel,'No matching Asterion apps in this sample',
+    'Select a recorded source in the app filter above, or use Tools > Add an app on Android.');
   for(const app of apps.slice(0,50)){
    const title=String(app.name||app.package||'Asterion app');
    const bridge=app.partner_bridge_discovered?
-    (app.partner_bridge_approved?'approved on device':'requires local approval'):
-    'not discovered';
+    (app.partner_bridge_approved?'Connected with owner approval':
+      'Native bridge exists; approve it in Control > Tools > Add an app'):
+    'Native bridge not available in this installed version';
    const evidence=app.recent_instrumented_event_observed?
-    'recent events recorded':'no recent matching events observed';
-   diagnosticRecord(panel,title,'Native bridge: '+bridge+
-    ' · Diagnostic evidence: '+evidence);
+    'Events were recorded in this window':
+    'No events from this app were recorded in this window';
+   const item=document.createElement('div');
+   item.className='diagnostic-coverage-item';
+   diagnosticRecord(item,title,bridge+' · '+evidence);
+   if(app.recent_instrumented_event_observed)
+    diagnosticAppAction(item,app.package);
+   panel.append(item);
   }
   if(data.events_window_may_be_truncated)
-   diagnosticRecord(panel,'Evidence window truncated',
-    'Older events may exist beyond the inspected limit.','warning');
+   diagnosticRecord(panel,'Only the newest events were inspected',
+    'Use a narrower app filter to investigate a specific application.','warning');
  }catch(err){
   panel.replaceChildren();
-  diagnosticRecord(panel,'Integration coverage unavailable',
-   friendlyError(err)+' · No claim about installed app or engine health is made.','warning');
+  diagnosticRecord(panel,'App coverage could not be checked',
+   friendlyError(err)+' · App installations and approvals have not been changed.','warning');
  }
 }
+
 async function loadDiagnostics(){
- if(!state.token){$('#diagnostic-state').textContent='Connect to load diagnostics.';return;}
+ if(!state.token){
+  $('#diagnostic-state').textContent='Connect to Windows to check your Asterion apps.';
+  return;
+ }
  const status=$('#diagnostic-state');
- status.textContent='Loading recorded diagnostic evidence…';
+ const guidance=$('#diagnostic-guidance');
+ status.textContent='Checking recorded events…';
+ guidance.textContent='Only diagnostic events that an app has actually reported can be inspected.';
  loadPhoneDiagnosticEvidence().catch(e=>toast(e.message));
  loadIntegrationCoverage().catch(e=>toast(e.message));
  const filter=$('#diagnostic-app').value.trim();
@@ -203,50 +286,88 @@ async function loadDiagnostics(){
   const count=data.events_examined||0;
   const operations=data.operations||[];
   const needs=data.needs_fresh_state||[];
+  const records=data.findings||[];
+  const affected=data.observed_apps||[];
   status.className='device-status';
-  status.textContent=count+' recorded events · '+operations.length+' observed operations · '+
-    needs.length+' needing fresh evidence'+(data.window_may_be_truncated?' · Result limit reached':'');
+  if(count===0){
+   status.textContent='No diagnostic events recorded in the selected period.';
+   guidance.textContent='This does not prove any app is working. Use Tools > Add an app on Android to inspect native integration support, and instrument app engines for detailed failures.';
+  }else if(records.length){
+   status.textContent=records.length+' type(s) of recorded problem across '+affected.length+
+    ' event source(s).';
+   guidance.textContent='Select a problem to see what is known and the next useful check. These records do not identify root causes on their own.';
+  }else{
+   status.textContent=count+' events recorded from '+affected.length+
+    ' source(s), with no classified failures in this sample.';
+   guidance.textContent='This is not a clean bill of health. Many Asterion apps do not yet send detailed engine traces.';
+  }
   const metrics=$('#diagnostic-metrics');metrics.replaceChildren();
-  const labels=[
-   ['Recorded events',String(count)],
-   ['Observed apps',String((data.observed_apps||[]).length)],
-   ['Historical operations',String(operations.length)],
-   ['Potentially stale',String(needs.length)],
-  ];
-  for(const [title,value] of labels){
+  for(const [title,value] of [
+    ['Recorded events',String(count)],
+    ['Apps reporting events',String(affected.length)],
+    ['Jobs with recorded IDs',String(operations.length)],
+    ['Jobs needing a fresh check',String(needs.length)],
+  ]){
    const card=document.createElement('article');card.className='diagnostic-metric';
    const number=document.createElement('strong');number.textContent=value;
    const label=document.createElement('span');label.textContent=title;
    card.append(number,label);metrics.append(card);
   }
   const findings=$('#diagnostic-findings');findings.replaceChildren();
-  const records=data.findings||[];
-  if(!records.length)diagnosticRecord(findings,'No classified symptoms in the selected window',
-    'This does not establish that the app is healthy or that all activity was instrumented.');
-  for(const finding of records.slice(0,20)){
-   diagnosticRecord(findings,finding.code||'Observed finding',
-     (finding.meaning||'')+' · Next evidence: '+(finding.required_next_evidence||'unknown'),
-     'warning');
+  if(!records.length){
+   diagnosticRecord(findings,'No matching failure reports',
+    count?'None of these recorded events match the supported error categories. Other apps or failures may not have reported events.':
+    'No events were received. Turn on app-side diagnostics to investigate specific failures.');
+  }
+  for(const f of records.slice(0,20)){
+   const [title,next]=readableDiagnosticIssue(f);
+   const item=document.createElement('div');
+   diagnosticRecord(item,title,(f.meaning||'')+'\nNext useful check: '+next,'warning');
+   findings.append(item);
   }
   const ops=$('#diagnostic-operations');ops.replaceChildren();
   const review=operations.filter(o=>o.review_reason);
-  if(!review.length)diagnosticRecord(ops,'No operations flagged for review',
-    'Only recorded states are checked; uninstrumented work is not visible.');
+  if(!review.length)
+   diagnosticRecord(ops,'No recorded jobs require a fresh check',
+    'This checks only jobs with instrumented operation IDs. It cannot inspect private engine queues.');
   for(const op of review.slice(0,35)){
-   const stateLabel=op.last_state||'unknown';
    const age=Math.max(0,Math.round(op.seconds_since_last_observation||0));
-   diagnosticRecord(ops,(op.app||'unknown')+' · '+(op.operation_id||'unknown'),
-     'Last recorded: '+stateLabel+' · '+age+'s ago · '+
-     (op.review_reason||'')+' · Trace: '+(op.trace_id||'unspecified'),'warning');
+   const last=String(op.last_state||'not reported').replaceAll('_',' ');
+   const cause=op.review_reason==='stale_nonterminal_observation'?
+     'No recent update in this journal. Check the app’s current queue; the job may have finished since.':
+     'A failure was reported. Check this job’s engine logs for the actual cause.';
+   const item=document.createElement('div');
+   diagnosticRecord(item,(op.app||'App')+' · Job '+(op.operation_id||'not identified'),
+    'Last recorded: '+last+', '+age+' seconds before this snapshot. '+cause,'warning');
+   diagnosticAppAction(item,op.app);
+   ops.append(item);
   }
-  $('#diagnostic-limits').textContent=(data.limitations||[]).join(' · ')+
-    (data.operations_truncated?' · More operations exist than displayed.':'');
+  const timeline=$('#diagnostic-timeline');timeline.replaceChildren();
+  const notable=data.notable_events||[];
+  if(!notable.length)
+   diagnosticRecord(timeline,'No recorded failures to list',
+    'The timeline will show actual app failure events when an instrumented app reports them.');
+  for(const e of notable.slice().reverse().slice(0,25)){
+   const [title,detail]=readableDiagnosticEvent(e);
+   const item=document.createElement('div');
+   const when=e.recorded_utc_ms?
+    new Date(e.recorded_utc_ms).toLocaleString():'Recorded time unavailable';
+   diagnosticRecord(item,title,'App: '+String(e.app||'Not identified')+
+    ' · '+when+'. '+detail,'warning');
+   diagnosticAppAction(item,e.app);
+   timeline.append(item);
+  }
+  const limits=$('#diagnostic-limits');
+  limits.textContent='What this view cannot check: other apps’ private logs, current engine queue status, the cause of an HTTP 403, or a model’s correctness. These need the respective app’s diagnostic bridge and real traces.'+
+    (data.window_may_be_truncated||data.operations_truncated?
+     ' The event limit was reached, so older records may be missing.':'');
  }catch(err){
-  status.textContent='Unable to load recorded diagnostics: '+friendlyError(err);
+  status.textContent='Could not read diagnostic events: '+friendlyError(err);
   status.className='device-status warn';
-  $('#diagnostic-metrics').replaceChildren();
-  $('#diagnostic-findings').replaceChildren();
-  $('#diagnostic-operations').replaceChildren();
+  guidance.textContent='The connection or diagnostic API needs checking. This is not proof of an app failure or successful operation.';
+  for(const sel of ['#diagnostic-metrics','#diagnostic-findings',
+                    '#diagnostic-operations','#diagnostic-timeline'])
+   $(sel).replaceChildren();
  }
 }
 async function discoverMonitors(){try{const data=await request('/monitors');const select=$('#desktop-monitor');select.replaceChildren();for(const m of data.items){const o=document.createElement('option');o.value=m.index;o.textContent=m.index===0?'All monitors':'Monitor '+m.index;select.append(o);}select.value=String(data.items.length>1?1:0);}catch(e){toast(e.message)}}
