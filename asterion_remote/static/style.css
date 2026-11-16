@@ -61,3 +61,6 @@ body.embedded #desktop-shot,body.embedded #refresh-devices{display:none!importan
 .diagnostic-app-action:hover,.diagnostic-app-action:focus-visible{background:#285976;border-color:#86c7ee;outline:2px solid transparent}
 .diagnostic-app-action:focus-visible{outline:2px solid #86c7ee;outline-offset:2px}
 @media(max-width:700px){.diagnostic-app-action{width:100%;justify-self:stretch;text-align:left}.diagnostic-panel{padding:14px}.diagnostic-record{padding:12px}}
+
+/* No data is not a card; hide vacant diagnostics panels on small screens. */
+.diagnostic-panel[hidden]{display:none!important}
