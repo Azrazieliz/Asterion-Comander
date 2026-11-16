@@ -1,0 +1,138 @@
+name: Phone-head native GGUF and owner-signed Android v0.9.35
+on:
+  push:
+    branches:
+      - work/control-0927-overnight-cycles-20261111
+    paths:
+      - 'android/**'
+      - 'tests/test_phone_head_native_0935.py'
+      - '.github/workflows/phone-head-native-0935.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: control-phone-head-0935
+  cancel-in-progress: true
+jobs:
+  local-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 85
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Source contracts (not a substitute for on-device acceptance)
+        run: |
+          python -m unittest discover -s tests -p 'test_phone_head_native_0935.py' -v
+          python -m unittest discover -s tests -p 'test_android_dialog_choices_0935.py' -v
+          node --check asterion_remote/static/app.js
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Provision exact Android NDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'ndk;27.2.12479018' 'platforms;android-35' 'build-tools;35.0.0'
+          test -f "$ANDROID_HOME/ndk/27.2.12479018/build/cmake/android.toolchain.cmake"
+      - name: Pin native llama.cpp implementation
+        run: |
+          mkdir -p "$RUNNER_TEMP/llama"
+          git -C "$RUNNER_TEMP/llama" init -q
+          git -C "$RUNNER_TEMP/llama" remote add origin https://github.com/ggml-org/llama.cpp.git
+          git -C "$RUNNER_TEMP/llama" fetch --depth 1 origin 1d2e880bad3f4f2adced6c9f5a3ecf035f7f0f61
+          git -C "$RUNNER_TEMP/llama" checkout --detach -f FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/llama" rev-parse HEAD)" = "1d2e880bad3f4f2adced6c9f5a3ecf035f7f0f61"
+      - name: Compile actual arm64 Android model inference library
+        run: |
+          cmake -S android/app/src/main/cpp -B "$RUNNER_TEMP/llm-build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            "-DCMAKE_TOOLCHAIN_FILE=$ANDROID_HOME/ndk/27.2.12479018/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 -DANDROID_STL=c++_static \
+            "-DLLAMA_SOURCE_DIR=$RUNNER_TEMP/llama"
+          cmake --build "$RUNNER_TEMP/llm-build" --target asterion_llm --parallel 3
+          LIB=$(find "$RUNNER_TEMP/llm-build" -name libasterion_llm.so -type f -print -quit)
+          test -n "$LIB"
+          test "$(stat -c%s "$LIB")" -gt 100000
+          mkdir -p android/app/src/main/jniLibs/arm64-v8a
+          cp "$LIB" android/app/src/main/jniLibs/arm64-v8a/libasterion_llm.so
+          file android/app/src/main/jniLibs/arm64-v8a/libasterion_llm.so
+      - name: Download independently SHA-verified GGUF weights
+        run: |
+          mkdir -p android/app/src/main/assets/models
+          URL=https://huggingface.co/tauqir02/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q4_K_M.gguf
+          TARGET=android/app/src/main/assets/models/Qwen3-0.6B-Q4_K_M.gguf
+          curl -fL --retry 4 --retry-all-errors --connect-timeout 25 -o "$TARGET" "$URL"
+          test "$(stat -c%s "$TARGET")" = "484220288"
+          echo "373db06783953f0981572d008f183eb2167b93304f5adbf7c4ce6ed6a91ee437  $TARGET" | sha256sum -c -
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - name: Confirm original owner signer from protected secret
+        id: owner
+        env:
+          ORIGINAL_OWNER_KEY_B64: ${{ secrets.ASTERION_ANDROID_DEBUG_KEYSTORE_B64 }}
+        run: |
+          python - <<'PY'
+          import base64,hashlib,os,pathlib,re,subprocess
+          b64=os.getenv("ORIGINAL_OWNER_KEY_B64","")
+          if not b64:
+              print("OWNER_SIGNER_UNAVAILABLE: native build verification only")
+              with open(os.environ["GITHUB_OUTPUT"],"a") as out:out.write("signed=false\n")
+              raise SystemExit(0)
+          data=base64.b64decode(b64,validate=True)
+          if not 500<=len(data)<=100000:raise SystemExit("Unexpected keystore size")
+          p=pathlib.Path.home()/".android"/"debug.keystore"
+          p.parent.mkdir(exist_ok=True);p.write_bytes(data);p.chmod(0o600)
+          result=subprocess.run(["keytool","-list","-v","-keystore",str(p),"-storepass",
+            "android","-alias","androiddebugkey"],text=True,capture_output=True,timeout=30)
+          if result.returncode:raise SystemExit("Owner keystore unreadable")
+          match=re.search(r"SHA256:\s*([0-9A-Fa-f:]+)",result.stdout)
+          if not match:raise SystemExit("Owner certificate absent")
+          actual=match.group(1).lower().replace(":","")
+          if actual!="9bc439712a0a460cc4703ebf254aaaf9bf3cc6e67b0ced6fc12162ed3ca3b9ad":
+              raise SystemExit("Refusing incompatible signing identity")
+          with open(os.environ["GITHUB_ENV"],"a") as out:
+              out.write("ASTERION_OWNER_KEYSTORE_PATH="+str(p)+"\n")
+          with open(os.environ["GITHUB_OUTPUT"],"a") as out:out.write("signed=true\n")
+          print("ORIGINAL_OWNER_SIGNER_VERIFIED=true")
+          PY
+      - name: Compile Android app with actual JNI and GGUF
+        working-directory: android
+        run: gradle --no-daemon --console=plain :app:assembleRelease
+        if: steps.owner.outputs.signed == 'true'
+      - name: Compile Android debug for source/API compatibility only
+        working-directory: android
+        run: gradle --no-daemon --console=plain :app:assembleDebug
+        if: steps.owner.outputs.signed != 'true'
+      - name: Verify actual owner-signed release contains both real assets
+        if: steps.owner.outputs.signed == 'true'
+        run: |
+          python - <<'PY'
+          import hashlib,pathlib,zipfile
+          apk=pathlib.Path("android/app/build/outputs/apk/release/app-release.apk")
+          assert apk.is_file()
+          with zipfile.ZipFile(apk) as z:
+              name="assets/models/Qwen3-0.6B-Q4_K_M.gguf"
+              weight=z.getinfo(name)
+              assert weight.file_size==484220288
+              digest=hashlib.sha256()
+              with z.open(name) as model:
+                  for block in iter(lambda:model.read(1024*1024),b""):
+                      digest.update(block)
+              assert digest.hexdigest()=="373db06783953f0981572d008f183eb2167b93304f5adbf7c4ce6ed6a91ee437"
+              assert z.getinfo("lib/arm64-v8a/libasterion_llm.so").file_size>100000
+          print("REAL_NATIVE_AND_GGUF_VERIFIED_INSIDE_OWNER_RELEASE=true")
+          print("APK_SHA256="+hashlib.sha256(apk.read_bytes()).hexdigest())
+          PY
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs android/app/build/outputs/apk/release/app-release.apk \
+            | grep -F '9bc439712a0a460cc4703ebf254aaaf9bf3cc6e67b0ced6fc12162ed3ca3b9ad'
+      - uses: actions/upload-artifact@v4
+        if: success() && steps.owner.outputs.signed == 'true'
+        with:
+          name: Asterion-Control-v0.9.35-OWNER-SIGNED-phone-model
+          path: android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 2
+          if-no-files-found: error
