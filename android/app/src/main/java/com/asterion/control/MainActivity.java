@@ -79,7 +79,8 @@ public final class MainActivity extends Activity {
     MainActivity current=visibleActivity.get();
     return current==null||current.isFinishing()||current.isDestroyed()?null:current;
   }
-  private static final int CAPTURE_REQUEST=112,NOTIFICATION_REQUEST=113,MICROPHONE_REQUEST=115,VPN_REQUEST=119,HUB_MICROPHONE_REQUEST=120,HUB_NOTIFICATION_REQUEST=121;
+  private static final int CAPTURE_REQUEST=112,NOTIFICATION_REQUEST=113,MICROPHONE_REQUEST=115,VPN_REQUEST=119,HUB_MICROPHONE_REQUEST=120,HUB_NOTIFICATION_REQUEST=121,VPN_IMPORT_REQUEST=122;
+  private boolean pendingVpnFullTunnel=false;
   private final Handler handler=new Handler(Looper.getMainLooper());
   private final ExecutorService io=Executors.newSingleThreadExecutor();
   private SharedPreferences prefs;
@@ -661,8 +662,23 @@ public final class MainActivity extends Activity {
     final String[] options={"Private-device split routes (recommended)",
       "Full-device tunnel (requires extra consent)"};
     new AlertDialog.Builder(this).setTitle("WireGuard traffic scope")
-      .setItems(options,(d,which)->showVpnImportEditor(which==1))
+      .setItems(options,(d,which)->showVpnImportMethod(which==1))
       .setNegativeButton("Cancel",null).show();
+  }
+  private void showVpnImportMethod(boolean fullTunnel){
+    String[] methods={"Select a local WireGuard .conf file",
+                      "Paste WireGuard configuration"};
+    new AlertDialog.Builder(this)
+      .setTitle("Import WireGuard inside Control")
+      .setItems(methods,(d,which)->{
+        if(which==1){showVpnImportEditor(fullTunnel);return;}
+        pendingVpnFullTunnel=fullTunnel;
+        Intent picker=new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        picker.addCategory(Intent.CATEGORY_OPENABLE);
+        picker.setType("*/*");
+        try{startActivityForResult(picker,VPN_IMPORT_REQUEST);}
+        catch(Exception error){toast("Android file picker unavailable");}
+      }).setNegativeButton("Cancel",null).show();
   }
   private void showVpnImportEditor(boolean fullTunnel){
     final EditText editor=new EditText(this);
@@ -2479,6 +2495,40 @@ public final class MainActivity extends Activity {
           "Screen sharing authorization was not granted by Android");
       }
       handler.postDelayed(this::updateConnectionIssue,500);
+    }
+    if(request==VPN_IMPORT_REQUEST){
+      if(code==RESULT_OK&&data!=null&&data.getData()!=null){
+        Uri uri=data.getData();
+        final boolean fullTunnel=pendingVpnFullTunnel;
+        io.execute(()->{
+          String contents=null;
+          try(java.io.InputStream from=getContentResolver().openInputStream(uri);
+              java.io.ByteArrayOutputStream bytes=new java.io.ByteArrayOutputStream()){
+            if(from==null)throw new java.io.IOException("No readable configuration");
+            byte[] buffer=new byte[4096];
+            int read,seen=0;
+            while((read=from.read(buffer))!=-1){
+              seen+=read;
+              if(seen>16000)throw new java.io.IOException("WireGuard file exceeds limit");
+              bytes.write(buffer,0,read);
+            }
+            contents=bytes.toString("UTF-8");
+          }catch(Exception error){
+            runOnUiThread(()->toast("Cannot read WireGuard profile: "+
+              error.getClass().getSimpleName()));
+          }
+          final String cleartext=contents;
+          if(cleartext!=null)runOnUiThread(()->{
+            try{
+              ControlPrivateVpn.importLocally(this,cleartext,fullTunnel);
+              toast("WireGuard profile stored encrypted in Control. "+
+                "Android VPN permission is still required to connect.");
+            }catch(Exception error){
+              toast("VPN profile rejected: "+error.getClass().getSimpleName());
+            }
+          });
+        });
+      }
     }
     if(request==VPN_REQUEST){
       if(code==RESULT_OK)ControlPrivateVpn.connect(this,this::toast);
