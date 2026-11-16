@@ -19,7 +19,15 @@ def credential():
 def download(destination):
     req=urllib.request.Request("https://api.github.com/repos/"+REPO+"/actions/artifacts/"+str(ARTIFACT)+"/zip",
         headers={"Authorization":"Bearer "+credential(),"Accept":"application/vnd.github+json","User-Agent":"Asterion-Control-Release-Transfer"})
-    with urllib.request.urlopen(req,timeout=90) as response, open(destination,"wb") as out:
+    class StripCrossHostAuthorization(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self,request,fp,code,msg,headers,newurl):
+            next_request=super().redirect_request(request,fp,code,msg,headers,newurl)
+            if next_request is not None and __import__('urllib.parse',fromlist=['urlsplit']).urlsplit(newurl).hostname!="api.github.com":
+                next_request.headers.pop("Authorization",None)
+                next_request.unredirected_hdrs.pop("Authorization",None)
+            return next_request
+    opener=urllib.request.build_opener(StripCrossHostAuthorization())
+    with opener.open(req,timeout=90) as response, open(destination,"wb") as out:
         total=0
         while True:
             data=response.read(1024*1024)
