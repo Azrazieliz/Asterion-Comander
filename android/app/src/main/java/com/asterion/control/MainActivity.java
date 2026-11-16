@@ -443,17 +443,63 @@ public final class MainActivity extends Activity {
     }
   }
   /** A single readable incident UI, not competing raw JSON dialogs. */
+  /** Phone-head diagnostics: query the installed Android partner catalog
+   * directly. Windows event analysis is optional, never a prerequisite.
+   */
   private void showCrossAppDiagnostics(){
-    if(prefs.getString("url","").isEmpty()||
-       prefs.getString("token","").isEmpty()){
-      new AlertDialog.Builder(this).setTitle("Connect to investigate")
-        .setMessage("Pair your Windows computer first. You can still "+
-          "view Control's local connection history from Health or Tools.")
-        .setPositiveButton("Open Connect",(d,w)->show(3))
-        .setNegativeButton("Close",null).show();
-      return;
-    }
-    showRemoteSection("diagnostics");
+    io.execute(()->{
+      try{
+        java.util.Map<String,String> installed=AppCatalog.launchable(this);
+        JSONObject discovery=AppBridge.list(this);
+        org.json.JSONArray providers=discovery.getJSONArray("apps");
+        java.util.Map<String,Boolean> available=new java.util.HashMap<>();
+        for(int i=0;i<providers.length();i++){
+          JSONObject item=providers.getJSONObject(i);
+          available.put(item.getString("package"),item.optBoolean("approved"));
+        }
+        java.util.List<String> packages=new ArrayList<>();
+        java.util.List<String> titles=new ArrayList<>();
+        for(java.util.Map.Entry<String,String> app:installed.entrySet()){
+          String pkg=app.getKey(),label=app.getValue();
+          if(!(label.toLowerCase(Locale.ROOT).startsWith("asterion")||
+               pkg.startsWith("com.asterion.")||
+               pkg.startsWith("com.azrael.pixivdumpsync")||
+               pkg.equals("com.ailm.android")))continue;
+          if(pkg.equals(getPackageName()))continue;
+          packages.add(pkg);
+          String bridge=available.containsKey(pkg)?
+            (available.get(pkg)?"Approved · read live evidence":
+             "Bridge available · tap to authorize"):
+            "No native bridge in installed build";
+          titles.add(label+"\n"+bridge);
+        }
+        runOnUiThread(()->{
+          if(destroyed)return;
+          new AlertDialog.Builder(this)
+            .setTitle("Phone diagnostics · "+available.size()+" bridges found")
+            .setItems(titles.toArray(new String[0]),(d,index)->{
+              String pkg=packages.get(index);
+              showAppIntegrationActions(pkg,installed.get(pkg),
+                available.containsKey(pkg),
+                Boolean.TRUE.equals(available.get(pkg)));
+            })
+            .setPositiveButton("Windows event archive",(d,w)->
+              showRemoteSection("diagnostics"))
+            .setNegativeButton("Close",null).show();
+        });
+      }catch(Exception e){
+        runOnUiThread(()->{
+          if(destroyed)return;
+          new AlertDialog.Builder(this)
+            .setTitle("Phone diagnostic discovery unavailable")
+            .setMessage("Asterion Control could not read the native app "+
+              "catalog: "+e.getClass().getSimpleName()+
+              ". It does not mean the partner applications are healthy "+
+              "or missing.")
+            .setPositiveButton("Close",null).show();
+        });
+      }
+    });
   }
   /** One owner-facing authorization hub; Android remains the only authority
    * that may actually grant each permission. Required and optional are distinct.
