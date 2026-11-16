@@ -955,10 +955,7 @@ public final class MainActivity extends Activity {
       this::showPhoneAiChat);
     gap(intelligence,9);
     twoActions(intelligence,"Model status","check",this::showPhoneAiStatus,
-      "Android cycles","activity",this::showCycleStatus);
-    gap(intelligence,9);
-    twoActions(intelligence,"PC model lab","activity",()->showWindowsRegistry("models"),
-      "PC skills","settings",()->showWindowsRegistry("skills"));
+      "App integrations","settings",this::showAppBridgeApprovals);
     wide(toolsBody,intelligence);
     gap(toolsBody,12);LinearLayout incidents=card();
     rowTitle(incidents,"Incident investigation",
@@ -971,7 +968,7 @@ public final class MainActivity extends Activity {
     button(incidents,"Android Control crash history","activity",false,
       this::showLocalDiagnostics);
     gap(incidents,8);
-    button(incidents,"Open evidence dashboard","monitor",false,
+    button(incidents,"Historical Windows event archive","monitor",false,
       ()->showRemoteSection("diagnostics"));
     wide(toolsBody,incidents);
     gap(toolsBody,12);LinearLayout privacyTools=card();
