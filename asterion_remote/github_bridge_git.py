@@ -223,7 +223,7 @@ def sync_remote():
 def setup():
     ROOT.parent.mkdir(parents=True,exist_ok=True)
     if not (ROOT/'.git').exists():
-        git('clone','--quiet','--branch','main',URL,str(ROOT),timeout=90)
+        git('clone','--quiet','--depth','1','--single-branch',\n            '--branch','main',URL,str(ROOT),timeout=120)
     remote=git('remote','get-url','origin').rstrip('/')
     if remote.lower()!=URL.lower():
         raise RuntimeError('Unexpected bridge remote: refusing to execute')
