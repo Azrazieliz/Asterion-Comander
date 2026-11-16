@@ -42,8 +42,11 @@ def preflight(source: Path, production: Path):
     if source.resolve()==production.resolve():
         raise RuntimeError("Source and live installation cannot be the same")
     origin=run_git(source,"remote","get-url","origin").lower().rstrip("/")
-    if EXPECTED_ORIGIN not in origin or not origin.endswith(
-        ("asterion-comander","asterion-comander.git")):
+    if origin not in (
+        "https://github.com/azrazieliz/asterion-comander",
+        "https://github.com/azrazieliz/asterion-comander.git",
+        "git@github.com:azrazieliz/asterion-comander.git",
+    ):
         raise RuntimeError("Source repository is not the authorized Control project")
     branch=run_git(source,"branch","--show-current")
     if branch!=EXPECTED_BRANCH:
