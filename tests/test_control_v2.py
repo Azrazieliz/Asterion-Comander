@@ -4,6 +4,7 @@ import io
 import json
 import os
 import tempfile
+import time
 import unittest
 import zipfile
 from pathlib import Path
@@ -140,6 +141,17 @@ class ControlV2Tests(unittest.TestCase):
         self.assertEqual(first["session"]["id"],repeat["session"]["id"])
         self.assertTrue(repeat["session"]["reused"])
         self.assertEqual(skill_studio.details("test_health")["executions"],1)
+        # start() schedules the native session executor asynchronously. It may
+        # still hold the per-test SQLite database when TemporaryDirectory exits
+        # on Windows. Consume its terminal receipt before destroying the DB.
+        from asterion_remote import interaction_sessions
+        terminal={"completed","failed","cancelled","timed_out","outcome_unknown"}
+        settled=None
+        for _ in range(120):
+            settled=interaction_sessions.status(first["session"]["id"])
+            if settled["state"] in terminal:break
+            time.sleep(0.05)
+        self.assertIn(settled["state"],terminal)
         skill_studio.revoke("test_health")
         with self.assertRaises(PermissionError):
             skill_studio.execute("test_health",doc["sha256"],"request-67890")
