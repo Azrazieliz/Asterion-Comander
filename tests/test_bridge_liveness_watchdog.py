@@ -22,6 +22,7 @@ def prepare(tmp_path, monkeypatch):
         "last_publish_utc":None, "inflight_id":None,
         "pending_count":None, "consecutive_errors":0})
     monkeypatch.setattr(worker, "git", lambda *args, **kwargs: "")
+    monkeypatch.setattr(worker, "preserve_dirty_receipts", lambda: 0)
     monkeypatch.setattr(worker, "publish", lambda paths: None)
     monkeypatch.setattr(worker, "ensure_agent", lambda key: {"ok":True})
     (tmp_path/"commands"/"active").mkdir(parents=True)
