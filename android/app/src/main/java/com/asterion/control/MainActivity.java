@@ -226,12 +226,13 @@ public final class MainActivity extends Activity {
     gap(homeBody,13);
     LinearLayout quick=card();
     rowTitle(quick,"What do you want to do?","Capabilities and real incidents, without another setup screen",icon("settings",DesignSystem.TEAL,22));
-    gap(quick,13);twoActions(quick,"Tools","settings",()->show(4),
-      "Incidents","activity",this::showCrossAppDiagnostics);
+    gap(quick,13);
+    twoActions(quick,"Add app","devices",this::showAppBridgeApprovals,
+      "Tools","settings",()->show(4));
+    gap(quick,9);
+    twoActions(quick,"Diagnose","activity",this::showCrossAppDiagnostics,
+      "Permissions","shield",this::showPermissionsHub);
     wide(homeBody,quick);
-    gap(homeBody,10);
-    button(homeBody,"Permissions & authorizations","shield",false,
-      this::showPermissionsHub);
     gap(homeBody,20);
     LinearLayout privacy=card();rowTitle(privacy,"Private by design","No account, no subscription. Access is yours to authorize.",icon("shield",DesignSystem.TEAL,24));wide(homeBody,privacy);
     return scroll(homeBody);
