@@ -2141,9 +2141,51 @@ public final class MainActivity extends Activity {
               android.text.format.DateFormat.format(
                 "dd MMM HH:mm",new java.util.Date(timestamp)));
           }
-          report.append("\n\nEngine queue and individual request traces: ")
-            .append(evidence.optBoolean("engine_telemetry_available")?
-              "Reported by partner":"Not yet exposed by this partner");
+          JSONObject video=evidence.optJSONObject("videoflow");
+          if(video!=null){
+            report.append("\n\nVideoFlow persisted queue snapshot");
+            if(video.optBoolean("stored_queue_counts_verified")){
+              JSONObject counts=video.optJSONObject("counts");
+              report.append("\nQueued: ").append(counts==null?0:counts.optInt("queued",0))
+                .append(" · Running in DB: ")
+                .append(counts==null?0:counts.optInt("running",0))
+                .append("\nDone: ").append(counts==null?0:counts.optInt("done",0))
+                .append(" · Failed: ").append(counts==null?0:counts.optInt("error",0));
+              org.json.JSONArray failed=video.optJSONArray("recent_failed_items");
+              if(failed!=null&&failed.length()>0){
+                report.append("\nRecent failures (sanitized):");
+                for(int n=0;n<Math.min(failed.length(),8);n++){
+                  JSONObject f=failed.optJSONObject(n);
+                  if(f==null)continue;
+                  report.append("\n• Item ").append(f.optLong("item_id"))
+                    .append(": ").append(
+                      f.optString("error_category","unclassified"));
+                }
+              }
+              report.append("\nStored running/queued states may be stale. "+
+                "The actual worker count is not verified by this snapshot.");
+            }else report.append("\nVideoFlow database has no verified queue "+
+              "snapshot. This does not mean there are no downloads.");
+          }
+          JSONObject work=evidence.optJSONObject("workmanager");
+          if(work!=null){
+            report.append("\n\nAndroid WorkManager history");
+            if(work.optBoolean("stored_work_counts_verified")){
+              JSONObject counts=work.optJSONObject("counts");
+              if(counts!=null)for(String key:new String[]{
+                "enqueued","running_in_stored_db","succeeded",
+                "failed","blocked","cancelled"}){
+                if(counts.has(key))
+                  report.append("\n• ").append(key.replace('_',' '))
+                    .append(": ").append(counts.optInt(key));
+              }
+              report.append("\nThese include all background WorkManager tasks, "+
+                "not only AI or generation jobs. Live execution is unverified.");
+            }else report.append("\nNo verified WorkManager history is available.");
+          }
+          if(video==null&&work==null)
+            report.append("\n\nEngine request/queue telemetry is not yet "+
+              "exposed by this partner version.");
           report.append("\nThis is real process evidence, not a diagnosis "+
             "of model quality or third-party sites.");
         }
