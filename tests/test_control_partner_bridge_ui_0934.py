@@ -25,7 +25,7 @@ class PartnerOwnerUiTests(unittest.TestCase):
         self.assertIn('installed_gguf_count',s)
         self.assertIn('stored_queue_counts_verified',s)
         self.assertIn('stored_work_counts_verified',s)
-        self.assertIn('live_workers_verified',s)
+        self.assertIn('The actual worker count is not verified',s)
         self.assertIn('Control has not loaded or',s)
         self.assertIn('No result is fabricated',s)
 
