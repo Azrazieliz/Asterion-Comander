@@ -11,6 +11,8 @@ on:
       - 'tests/test_bridge_liveness_watchdog.py'
       - 'tests/test_control_worker_recovery.py'
       - 'tests/test_bridge_dirty_receipt_recovery.py'
+      - 'scripts/deploy_private_bridge_recovery_20261116.py'
+      - 'tests/test_bridge_recovery_deployment.py'
       - '.github/workflows/control-relay-recovery.yml'
   workflow_dispatch:
 permissions:
@@ -27,7 +29,7 @@ jobs:
       - name: Install relay test runner
         run: python -m pip install pytest
       - name: Verify durable command queue, heartbeat, no side-effect replay
-        run: python -m pytest -q tests/test_bridge_liveness_watchdog.py tests/test_control_worker_recovery.py tests/test_bridge_dirty_receipt_recovery.py
+        run: python -m pytest -q tests/test_bridge_liveness_watchdog.py tests/test_control_worker_recovery.py tests/test_bridge_dirty_receipt_recovery.py tests/test_bridge_recovery_deployment.py
       - name: Parse Windows watchdog and launcher without executing them
         shell: pwsh
         run: |
