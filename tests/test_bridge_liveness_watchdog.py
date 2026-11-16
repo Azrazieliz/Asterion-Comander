@@ -21,7 +21,8 @@ def prepare(tmp_path, monkeypatch):
         "phase":"starting", "last_sync_utc":None,
         "last_publish_utc":None, "inflight_id":None,
         "pending_count":None, "consecutive_errors":0})
-    monkeypatch.setattr(worker, "git", lambda *args, **kwargs: "")
+    monkeypatch.setattr(worker, "git", lambda *args, **kwargs:
+        "0" if args and args[0] == "rev-list" else "")
     monkeypatch.setattr(worker, "preserve_dirty_receipts", lambda: 0)
     monkeypatch.setattr(worker, "publish", lambda paths: None)
     monkeypatch.setattr(worker, "ensure_agent", lambda key: {"ok":True})
