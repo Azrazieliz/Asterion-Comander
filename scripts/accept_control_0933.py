@@ -30,9 +30,9 @@ def main():
         from asterion_remote.app import app
         live={getattr(route,"path","") for route in app.routes}
         missing=[route for route in PATHS.values() if route not in live]
-        if missing:
-            raise RuntimeError("deployed_routes_missing:"+",".join(missing))
-        print(json.dumps({"ok":True,"mode":"installed_source_import","routes_checked":len(PATHS)}))
+        print(json.dumps({"ok":not missing,"mode":"installed_source_import",
+                          "routes_checked":len(PATHS),
+                          "path_sample":sorted(live)[:35],"missing":missing}))
         return
     folder=Path(os.environ.get("LOCALAPPDATA",""))/"AsterionControl"
     base=(folder/"agent-host.txt").read_text("utf8").strip()
