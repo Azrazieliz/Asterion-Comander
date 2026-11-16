@@ -46,8 +46,11 @@ def events(since: int = 0, limit: int = 100, app: str = "", trace_id: str = ""):
 def coverage(lookback_minutes: int = 1440, limit: int = 1200):
     """Read-only visibility, not an invented claim of universal instrumentation."""
     import re
-    triage=diagnostic_analysis.inspect(
-        lookback_minutes=lookback_minutes, limit=limit)
+    try:
+        triage=diagnostic_analysis.inspect(
+            lookback_minutes=lookback_minutes, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(422,str(exc)) from exc
     observed=set(triage["observed_apps"])
     catalog=None
     partner=None
