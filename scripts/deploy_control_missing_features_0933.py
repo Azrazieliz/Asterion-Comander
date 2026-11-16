@@ -26,6 +26,7 @@ FILES = (
     "asterion_remote/security_scanner.py",
     "asterion_remote/skill_studio.py",
     "asterion_remote/vpn_route_policy.py",
+    "asterion_remote/github_bridge.py",
 )
 MARKER_IMPORT = "from .diagnostic_routes import router as diagnostic_router"
 MARKER_MOUNT = "app.include_router(diagnostic_router)"
