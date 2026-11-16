@@ -22,7 +22,7 @@ class VisibleNativeChoices(unittest.TestCase):
             "new AlertDialog.Builder(this)")[-1]
         self.assertNotIn(".setMessage(",first)
         self.assertIn(".setTitle(",first)
-        self.assertIn("Approve",self.app)
+        self.assertIn("Authorize native bridge",self.app)
         self.assertIn("AppBridge.approveLocally(this,pkg,!approved)",self.app)
         self.assertIn(".setItems(actions,",self.app)
 
