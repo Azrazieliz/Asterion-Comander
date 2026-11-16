@@ -179,24 +179,35 @@ async function loadPhoneDiagnosticEvidence(){
     'Only Control’s own events can appear here. This does not tell us whether other apps are healthy.');
    return;
   }
-  for(const event of data.slice().reverse().slice(0,16)){
-   const kind=String(event.kind||'');
-   const state=String(event.state||'');
+  // Group repeated WSS/lifecycle messages. Rendering 15 identical cards hid
+  // real app failures behind connection noise on the owner's phone.
+  const grouped=new Map();
+  for(const event of data.slice().reverse().slice(0,25)){
+   const kind=String(event.kind||''),state=String(event.state||'');
    const stage=String(event.stage||'');
+   const key=[kind,state,stage].join('|');
+   if(!grouped.has(key))grouped.set(key,{kind,state,stage,count:0});
+   grouped.get(key).count++;
+  }
+  const ordered=[...grouped.values()].sort((a,b)=>
+   (a.state==='failed'?0:1)-(b.state==='failed'?0:1));
+  for(const event of ordered.slice(0,6)){
+   const {kind,state,stage,count}=event;
    let title=kind.replaceAll('_',' ');
    let detail='Historical Control event';
    if(kind.includes('transport')||kind.includes('wss')){
     title=state==='failed'?'Control connection problem':'Control connection activity';
     detail=state==='failed'?
-     'The phone reported a connection problem; check the current link before retrying.':
-     'A phone-to-Windows connection event was recorded.';
+     'A connection problem was recorded. Check the current live status.':
+     'The phone and Windows exchanged a connection event.';
    }else if(kind.includes('service')){
     title='Control background service';
     detail='Android recorded a service lifecycle change.';
    }else if(state==='failed'||state==='error'){
     title='Control recorded an error';
-    detail='Check the native connection and OS permissions for more evidence.';
+    detail='Check current permissions and connection status.';
    }
+   detail+=' '+count+' similar event'+(count===1?'':'s')+' recorded.';
    if(stage)detail+=' Area: '+stage.replaceAll('_',' ')+'.';
    diagnosticRecord(panel,title,detail,state==='failed'?'warning':'neutral');
   }
@@ -314,11 +325,9 @@ async function loadDiagnostics(){
    card.append(number,label);metrics.append(card);
   }
   const findings=$('#diagnostic-findings');findings.replaceChildren();
-  if(!records.length){
-   diagnosticRecord(findings,'No matching failure reports',
-    count?'None of these recorded events match the supported error categories. Other apps or failures may not have reported events.':
-    'No events were received. Turn on app-side diagnostics to investigate specific failures.');
-  }
+  // Empty datasets are not actionable. Collapse their panels rather than
+  // filling the small Android screen with success-looking placeholders.
+  findings.closest('.diagnostic-panel').hidden=records.length===0;
   for(const f of records.slice(0,20)){
    const [title,next]=readableDiagnosticIssue(f);
    const item=document.createElement('div');
@@ -327,9 +336,7 @@ async function loadDiagnostics(){
   }
   const ops=$('#diagnostic-operations');ops.replaceChildren();
   const review=operations.filter(o=>o.review_reason);
-  if(!review.length)
-   diagnosticRecord(ops,'No recorded jobs require a fresh check',
-    'This checks only jobs with instrumented operation IDs. It cannot inspect private engine queues.');
+  ops.closest('.diagnostic-panel').hidden=review.length===0;
   for(const op of review.slice(0,35)){
    const age=Math.max(0,Math.round(op.seconds_since_last_observation||0));
    const last=String(op.last_state||'not reported').replaceAll('_',' ');
@@ -344,9 +351,7 @@ async function loadDiagnostics(){
   }
   const timeline=$('#diagnostic-timeline');timeline.replaceChildren();
   const notable=data.notable_events||[];
-  if(!notable.length)
-   diagnosticRecord(timeline,'No recorded failures to list',
-    'The timeline will show actual app failure events when an instrumented app reports them.');
+  timeline.closest('.diagnostic-panel').hidden=notable.length===0;
   for(const e of notable.slice().reverse().slice(0,25)){
    const [title,detail]=readableDiagnosticEvent(e);
    const item=document.createElement('div');
