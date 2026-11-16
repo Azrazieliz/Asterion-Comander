@@ -1,0 +1,45 @@
+name: Asterion Control relay recovery regression
+on:
+  push:
+    branches:
+      - work/control-0927-overnight-cycles-20261111
+    paths:
+      - 'asterion_remote/github_bridge.py'
+      - 'asterion_remote/github_bridge_git.py'
+      - 'scripts/control_repair_watchdog.ps1'
+      - 'scripts/start_git_bridge.ps1'
+      - 'tests/test_bridge_liveness_watchdog.py'
+      - 'tests/test_control_worker_recovery.py'
+      - 'tests/test_bridge_dirty_receipt_recovery.py'
+      - '.github/workflows/control-relay-recovery.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-relay:
+    runs-on: windows-latest
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install relay test runner
+        run: python -m pip install pytest
+      - name: Verify durable command queue, heartbeat, no side-effect replay
+        run: python -m pytest -q tests/test_bridge_liveness_watchdog.py tests/test_control_worker_recovery.py tests/test_bridge_dirty_receipt_recovery.py
+      - name: Parse Windows watchdog and launcher without executing them
+        shell: pwsh
+        run: |
+          $scripts=@('scripts/control_repair_watchdog.ps1','scripts/start_git_bridge.ps1')
+          foreach($script in $scripts){
+            $tokens=$null
+            $errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $script).Path,[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count -gt 0){
+              $errors | ForEach-Object { Write-Error $_.Message }
+              throw "PowerShell AST syntax check failed: $script"
+            }
+            Write-Output "POWERSHELL_AST_OK $script"
+          }
