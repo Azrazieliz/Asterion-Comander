@@ -72,3 +72,58 @@ def test_parallel_saved_scripts_execute_and_report(tmp_path, monkeypatch):
                 time.sleep(.02)
             assert r.json()['exit_code']==0
             assert '-done' in r.json()['output']
+
+
+def test_command_stop_rejects_failed_windows_taskkill(monkeypatch):
+    """Regression: a failed Windows taskkill must never return ok=true."""
+    from types import SimpleNamespace
+    from fastapi import HTTPException
+    from asterion_remote import app as api
+
+    class RunningProcess:
+        pid = 31415
+        def poll(self):
+            return None
+
+    def failed_taskkill(*args, **kwargs):
+        assert args[0][:2] == ['taskkill', '/PID']
+        return SimpleNamespace(returncode=5)
+
+    monkeypatch.setattr(api, 'COMMANDS', {'test-job': {'proc': RunningProcess()}})
+    monkeypatch.setattr(api, 'os', SimpleNamespace(name='nt'))
+    monkeypatch.setattr(api, 'subprocess', SimpleNamespace(
+        run=failed_taskkill, CREATE_NO_WINDOW=0,
+        TimeoutExpired=__import__('subprocess').TimeoutExpired))
+
+    try:
+        api.stop_command('test-job')
+    except HTTPException as exc:
+        assert exc.status_code == 409
+        assert 'not terminated' in exc.detail
+    else:
+        raise AssertionError('False success: taskkill failed while process was live')
+
+
+def test_command_stop_acknowledges_only_finished_process(monkeypatch):
+    """Regression: successful taskkill must be followed by a completed process."""
+    from types import SimpleNamespace
+    from asterion_remote import app as api
+
+    class Process:
+        pid = 31416
+        finished = False
+        def poll(self):
+            return 1 if self.finished else None
+        def wait(self, timeout=None):
+            assert timeout == 2
+            self.finished = True
+            return 1
+
+    proc = Process()
+    monkeypatch.setattr(api, 'COMMANDS', {'test-job': {'proc': proc}})
+    monkeypatch.setattr(api, 'os', SimpleNamespace(name='nt'))
+    monkeypatch.setattr(api, 'subprocess', SimpleNamespace(
+        run=lambda *a, **k: SimpleNamespace(returncode=0),
+        CREATE_NO_WINDOW=0, TimeoutExpired=__import__('subprocess').TimeoutExpired))
+    assert api.stop_command('test-job') == {'ok': True}
+    assert proc.finished is True
