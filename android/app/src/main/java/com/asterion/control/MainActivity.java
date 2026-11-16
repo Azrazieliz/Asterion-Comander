@@ -495,10 +495,8 @@ public final class MainActivity extends Activity {
         "Developer options · Optional diagnostics only · "+
           (state.optBoolean("developer_options_enabled")?"Enabled":"Disabled")
       };
-      new AlertDialog.Builder(this).setTitle("Permissions & authorizations")
-        .setMessage("Tap an item to go directly to its Android authorization. "+
-          "Only remote touch and consented screen capture are needed for full "+
-          "phone remote control. Every permission requires your approval.")
+      // Do not setMessage with setItems: Android otherwise hides the list.
+      new AlertDialog.Builder(this).setTitle("Permissions · tap a setting")
         .setItems(rows,(dlg,item)->openPermissionStep(item))
         .setPositiveButton("Refresh", (d,w)->showPermissionsHub())
         .setNegativeButton("Close",null).show();
@@ -2006,12 +2004,11 @@ public final class MainActivity extends Activity {
       "Open its Android app settings",
       "Choose another app"
     };
-    new AlertDialog.Builder(this).setTitle(label)
-      .setMessage(state+"\n"+pkg+"\n\n"+
-        "Add creates a shortcut immediately. You can still launch this "+
-        "app and control its UI through Android Accessibility and consented "+
-        "screen capture without a native bridge. Private engine diagnostics "+
-        "require an updated, owner-approved provider.")
+    // AlertDialog message and setItems are mutually exclusive in the native
+    // ListAlertController. A message hid ALL action rows on Android 17.
+    new AlertDialog.Builder(this)
+      .setTitle(label+" · "+(bridge?(approved?"Connected":"Approval needed"):
+        "App shortcut"))
       .setItems(actions,(dlg,which)->{
         if(which==0){
           if(markTrackedApp(pkg,!tracked))
