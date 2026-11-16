@@ -1074,10 +1074,16 @@ public final class MainActivity extends Activity {
       .setPositiveButton("Generate locally",(dialog,which)->{
         String prompt=field.getText().toString().trim();
         if(prompt.isEmpty()){toast("Enter a question");return;}
+        java.util.concurrent.atomic.AtomicBoolean abandoned=
+          new java.util.concurrent.atomic.AtomicBoolean(false);
         AlertDialog working=new AlertDialog.Builder(this)
           .setTitle("Running on-device inference")
           .setMessage("Loading the verified local model and decoding "+
             "on this phone. Windows and cloud inference are not used.")
+          .setNegativeButton("Stop",(d,w)->{
+            abandoned.set(true);
+            OnDeviceLlm.cancel();
+          })
           .setCancelable(false).create();
         working.show();
         io.execute(()->{
@@ -1091,7 +1097,7 @@ public final class MainActivity extends Activity {
           final String text=answer;
           runOnUiThread(()->{
             if(working.isShowing())working.dismiss();
-            if(destroyed)return;
+            if(destroyed||abandoned.get())return;
             new AlertDialog.Builder(this).setTitle("On-device AI result")
               .setMessage(text).setPositiveButton("Close",null).show();
           });
