@@ -1994,7 +1994,7 @@ public final class MainActivity extends Activity {
         "How to enable this app's bridge",
       "Read live process and crash evidence",
       "Check installed Writer models",
-      "Open installed app",
+      "Open app · generic Accessibility control",
       "Open its Android app settings",
       "Choose another app"
     }:new String[]{
@@ -2002,14 +2002,16 @@ public final class MainActivity extends Activity {
       bridge?(approved?"Revoke native bridge":"Authorize native bridge"):
         "How to enable this app's bridge",
       "Read live process and crash evidence",
-      "Open installed app",
+      "Open app · generic Accessibility control",
       "Open its Android app settings",
       "Choose another app"
     };
     new AlertDialog.Builder(this).setTitle(label)
       .setMessage(state+"\n"+pkg+"\n\n"+
-        "Add creates a shortcut immediately. The live app diagnostic tools "+
-        "require an updated, approved provider in the selected app.")
+        "Add creates a shortcut immediately. You can still launch this "+
+        "app and control its UI through Android Accessibility and consented "+
+        "screen capture without a native bridge. Private engine diagnostics "+
+        "require an updated, owner-approved provider.")
       .setItems(actions,(dlg,which)->{
         if(which==0){
           if(markTrackedApp(pkg,!tracked))
