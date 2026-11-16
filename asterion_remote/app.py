@@ -389,12 +389,24 @@ def stop_command(jobid: str):
         raise HTTPException(404, 'Unknown job')
     if row['proc'].poll() is None:
         if os.name == 'nt':
-            subprocess.run(['taskkill', '/PID', str(row['proc'].pid), '/T', '/F'],
-                           capture_output=True, timeout=10,
-                           creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            try:
+                stopped = subprocess.run(
+                    ['taskkill', '/PID', str(row['proc'].pid), '/T', '/F'],
+                    capture_output=True, timeout=10,
+                    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            except subprocess.TimeoutExpired as exc:
+                raise HTTPException(504, 'Managed command stop timed out') from exc
+            if stopped.returncode != 0 and row['proc'].poll() is None:
+                raise HTTPException(409, 'Managed command process tree was not terminated')
         else:
             import signal
             os.killpg(row['proc'].pid, signal.SIGTERM)
+        try:
+            row['proc'].wait(timeout=2)
+        except subprocess.TimeoutExpired as exc:
+            raise HTTPException(409, 'Managed command is still running after stop') from exc
+    if row['proc'].poll() is None:
+        raise HTTPException(409, 'Managed command is still running')
     return {'ok': True}
 
 
