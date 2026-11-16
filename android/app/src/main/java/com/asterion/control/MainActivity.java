@@ -885,18 +885,18 @@ public final class MainActivity extends Activity {
       "Actual feature status, useful commands and explicit limitations.");
     gap(toolsBody,15);
     LinearLayout intelligence=card();
-    rowTitle(intelligence,"AI development",
-      "Local inference readiness and registered project cycles",
+    rowTitle(intelligence,"On-device AI",
+      "Qwen3 GGUF runs inside this Samsung, with no Windows inference server",
       icon("activity",DesignSystem.PURPLE,23));
     gap(intelligence,12);
-    button(intelligence,"Check AI and autonomous cycles","activity",true,
-      this::showWindowsIntelligence);
+    button(intelligence,"Ask the phone AI","activity",true,
+      this::showPhoneAiChat);
     gap(intelligence,9);
-    button(intelligence,"Android continuation status","check",false,
-      this::showCycleStatus);
+    twoActions(intelligence,"Model status","check",this::showPhoneAiStatus,
+      "Android cycles","activity",this::showCycleStatus);
     gap(intelligence,9);
-    twoActions(intelligence,"Models","activity",()->showWindowsRegistry("models"),
-      "Skills","settings",()->showWindowsRegistry("skills"));
+    twoActions(intelligence,"PC model lab","activity",()->showWindowsRegistry("models"),
+      "PC skills","settings",()->showWindowsRegistry("skills"));
     wide(toolsBody,intelligence);
     gap(toolsBody,12);LinearLayout incidents=card();
     rowTitle(incidents,"Incident investigation",
@@ -982,6 +982,75 @@ public final class MainActivity extends Activity {
 
 
     return scroll(toolsBody);
+  }
+
+  /** Phone is the AI head. No PC or cloud model endpoint is consulted. */
+  private void showPhoneAiStatus(){
+    io.execute(()->{
+      String report;
+      try{
+        JSONObject data=OnDeviceLlm.status(getApplicationContext());
+        report="Host: this Android phone\n"+
+          "Runtime included: "+data.optBoolean("native_library_loaded",false)+
+          "\nGGUF weights bundled in signed APK: "+
+            data.optBoolean("model_bundled_in_apk",false)+
+          "\nPrivate verified model loaded: "+
+            data.optBoolean("model_loaded",false)+
+          "\nModel source: "+data.optString("model_source","unavailable")+
+          "\nWindows inference required: No"+
+          "\nInternet inference required: No"+
+          "\nLast local failure: "+data.optString("last_failure_code","none")+
+          "\n\nA model file and a compiled native library must both be "+
+          "present before inference can work. Model readiness is NOT "+
+          "evidence that an app operation has been carried out.";
+      }catch(Exception e){report="Phone AI status unavailable: "+
+        e.getClass().getSimpleName();}
+      final String text=report;
+      runOnUiThread(()->{
+        if(destroyed)return;
+        new AlertDialog.Builder(this).setTitle("Phone AI status")
+          .setMessage(text).setPositiveButton("Close",null).show();
+      });
+    });
+  }
+  private void showPhoneAiChat(){
+    EditText field=input("",false,"Ask the on-device model");
+    field.setSingleLine(false);
+    field.setMinLines(3);
+    field.setMaxLines(7);
+    field.setInputType(InputType.TYPE_CLASS_TEXT|
+      InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+    new AlertDialog.Builder(this)
+      .setTitle("Ask Asterion · on this phone")
+      .setMessage("Inference runs locally using the model bundled in this "+
+        "signed APK. The response does not execute app commands.")
+      .setView(field)
+      .setPositiveButton("Generate locally",(dialog,which)->{
+        String prompt=field.getText().toString().trim();
+        if(prompt.isEmpty()){toast("Enter a question");return;}
+        AlertDialog working=new AlertDialog.Builder(this)
+          .setTitle("Running on-device inference")
+          .setMessage("Loading the verified local model and decoding "+
+            "on this phone. Windows and cloud inference are not used.")
+          .setCancelable(false).create();
+        working.show();
+        io.execute(()->{
+          String answer;
+          try{answer=OnDeviceLlm.generate(getApplicationContext(),prompt);}
+          catch(Exception|LinkageError error){
+            answer="Local model execution failed: "+
+              error.getClass().getSimpleName()+
+              ". No text result or completed operation is claimed.";
+          }
+          final String text=answer;
+          runOnUiThread(()->{
+            if(working.isShowing())working.dismiss();
+            if(destroyed)return;
+            new AlertDialog.Builder(this).setTitle("On-device AI result")
+              .setMessage(text).setPositiveButton("Close",null).show();
+          });
+        });
+      }).setNegativeButton("Cancel",null).show();
   }
 
   private void showWindowsIntelligence(){
