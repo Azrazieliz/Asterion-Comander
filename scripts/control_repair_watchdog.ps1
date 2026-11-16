@@ -14,6 +14,101 @@ try{
   $health=Invoke-RestMethod ($url+'/api/v1/health') -Headers @{Authorization=('Bearer '+$token)} -TimeoutSec 2
   $workerOk=[bool]$health.ok
 }catch{}
+# Monitor the private command relay independently of Windows API health.
+# A live process is NOT proof it has fetched or acknowledged a command.
+# This block must run BEFORE API failure branches that exit this watchdog.
+$bridge=@(Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" -ErrorAction SilentlyContinue |
+  Where-Object {$_.CommandLine -match '(?i)(^|\\s)-m\\s+asterion_remote\\.github_bridge_git(\\s|$)'})
+$bridgeHealthFile=Join-Path $state 'control-git-bridge-health.json'
+$bridgeRestartFile=Join-Path $state 'control-git-bridge-last-recovery.txt'
+$bridgeLog=Join-Path $state 'control-watchdog-recovery.log'
+$bridgeLauncher=Join-Path $PSScriptRoot 'start_git_bridge.ps1'
+if($bridge.Count -eq 0){
+  if(Test-Path $bridgeLauncher){
+    # The existing launcher owns a mutex; never create a second relay.
+    Start-Process powershell.exe -ArgumentList @('-NoProfile','-NonInteractive',
+      '-ExecutionPolicy','Bypass','-File',('"'+$bridgeLauncher+'"')) `
+      -WorkingDirectory $root -WindowStyle Hidden | Out-Null
+    Add-Content $bridgeLog ('Git bridge missing; supervised launcher invoked '+(Get-Date -Format o))
+  }
+}elseif($bridge.Count -eq 1){
+  $current=$bridge[0]
+  $health=$null
+  try {
+    if(Test-Path $bridgeHealthFile){
+      $health=Get-Content $bridgeHealthFile -Raw -ErrorAction Stop |
+        ConvertFrom-Json -ErrorAction Stop
+    }
+  }catch{
+    Add-Content $bridgeLog ('Git bridge heartbeat unreadable '+(Get-Date -Format o))
+  }
+  $ageSeconds=0.0
+  if($health -and $health.heartbeat_utc){
+    try{
+      $ageSeconds=([datetimeoffset]::UtcNow -
+        [datetimeoffset]::Parse([string]$health.heartbeat_utc)).TotalSeconds
+    }catch{$ageSeconds=99999.0}
+  }else{
+    $ageSeconds=([datetimeoffset]::UtcNow -
+      [datetimeoffset]$current.CreationDate.ToUniversalTime()).TotalSeconds
+  }
+  $syncAgeSeconds=0.0
+  if($health -and $health.last_sync_utc){
+    try{
+      $syncAgeSeconds=([datetimeoffset]::UtcNow -
+        [datetimeoffset]::Parse([string]$health.last_sync_utc)).TotalSeconds
+    }catch{$syncAgeSeconds=99999.0}
+  }elseif($ageSeconds -gt 0){$syncAgeSeconds=$ageSeconds}
+  $errorCount=if($health){[int]$health.consecutive_errors}else{0}
+  $stalled=($ageSeconds -ge 360 -or
+    ($errorCount -ge 4 -and $syncAgeSeconds -ge 600))
+  if($stalled){
+    # Inflight operations may have already touched the phone or PC.
+    # Never replay or terminate that worker without a durable receipt.
+    $inflight=if($health){[string]$health.inflight_id}else{''}
+    if(-not [string]::IsNullOrWhiteSpace($inflight)){
+      Add-Content $bridgeLog ('Bridge stalled with uncertain in-flight action; NOT restarted '+(Get-Date -Format o))
+    }elseif(-not $workerOk){
+      # The native API must recover first; no unsafe relay cycling.
+      Add-Content $bridgeLog ('Bridge stalled while Windows API offline; deferred '+(Get-Date -Format o))
+    }else{
+      $jobsKnown=$false
+      $activeJobs=$true
+      try {
+        $jobs=Invoke-RestMethod ($url+'/api/v1/commands') -Headers @{
+          Authorization=('Bearer '+$token)
+        } -TimeoutSec 4 -ErrorAction Stop
+        $activeJobs=(@($jobs.items | Where-Object {$_.status -eq 'running'}).Count -gt 0)
+        $jobsKnown=$true
+      }catch{}
+      $cooldown=$true
+      if(Test-Path $bridgeRestartFile){
+        try {
+          $last=[datetimeoffset]::Parse((Get-Content $bridgeRestartFile -Raw).Trim())
+          $cooldown=(([datetimeoffset]::UtcNow-$last).TotalMinutes -ge 20)
+        }catch{$cooldown=$false}
+      }
+      if($jobsKnown -and -not $activeJobs -and $cooldown){
+        # Only the uniquely identified original Git worker may be replaced.
+        # Existing PowerShell mutex-owning supervisor starts its replacement.
+        try {
+          Stop-Process -Id $current.ProcessId -Force -ErrorAction Stop
+          Set-Content -LiteralPath $bridgeRestartFile -Value (Get-Date -Format o) -Encoding ASCII
+          Add-Content $bridgeLog ('Stalled private Git bridge PID '+$current.ProcessId+
+            ' restarted by existing supervisor '+(Get-Date -Format o))
+        }catch{
+          Add-Content $bridgeLog ('Stalled Git bridge restart failed '+(Get-Date -Format o))
+        }
+      }else{
+        Add-Content $bridgeLog ('Stalled Git bridge restart deferred: active/unknown jobs or cooldown '+(Get-Date -Format o))
+      }
+    }
+  }
+}elseif($bridge.Count -gt 1){
+  # Two relays would risk duplicate phone actions. Do not kill blindly.
+  Add-Content $bridgeLog ('Multiple Git relay workers detected; manual inspection required '+(Get-Date -Format o))
+}
+
 $missesFile=Join-Path $state 'control-watchdog-misses.txt'
 $misses=0
 if($workerOk){
@@ -79,12 +174,7 @@ if(Test-Path $nativeFlag){
     }
   }
 }
-$bridge=@(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue|
-  Where-Object {$_.Name -match 'python' -and $_.CommandLine -match 'asterion_remote.github_bridge_git'})
-if($bridge.Count -eq 0){
-  $launch=Join-Path $PSScriptRoot 'start_git_bridge.ps1'
-  if(Test-Path $launch){Start-Process powershell.exe -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',('"'+$launch+'"')) -WorkingDirectory $root -WindowStyle Hidden|Out-Null}
-}
+# Private Git bridge liveness is checked above, before native API recovery exits.
 
 # Native WSS recovery: a running process alone is not proof of a usable phone link.
 # Only intervene after two real phone-side handshake rejections while the phone
