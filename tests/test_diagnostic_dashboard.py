@@ -35,7 +35,7 @@ class DiagnosticDashboardTests(unittest.TestCase):
         for element in (
             "diagnostic-refresh", "diagnostic-app", "diagnostic-window",
             "diagnostic-state", "diagnostic-metrics", "diagnostic-findings",
-            "diagnostic-operations", "diagnostic-limits", "diagnostic-phone", "diagnostic-coverage",
+            "diagnostic-operations", "diagnostic-limits", "diagnostic-phone", "diagnostic-coverage", "diagnostic-guidance", "diagnostic-timeline",
         ):
             self.assertIn(element, parser.ids)
 
@@ -43,14 +43,18 @@ class DiagnosticDashboardTests(unittest.TestCase):
         js = (ROOT / "app.js").read_text(encoding="utf-8")
         self.assertIn("async function loadDiagnostics()", js)
         self.assertIn("'/diagnostics/triage'+qp(query)", js)
-        self.assertIn("data.limitations", js)
+        self.assertIn("Only diagnostic events that an app has actually reported", js)
         self.assertIn("async function loadPhoneDiagnosticEvidence()", js)
         self.assertIn("async function loadIntegrationCoverage()", js)
+        self.assertIn("function readableDiagnosticIssue(", js)
+        self.assertIn("function diagnosticAppAction(", js)
+        self.assertIn("No diagnostic events recorded in the selected period.", js)
+        self.assertIn("HTTP 403 alone does not show a geographical block.", js)
         self.assertIn("\'/diagnostics/coverage\'", js)
         self.assertIn("'/phone/diagnostics/events'+qp({since:0,limit:1})", js)
         self.assertIn("'asterion_control_process_only'", js)
-        self.assertIn("This does not include private logs belonging to other apps.", js)
-        self.assertIn("Only recorded states", js)
+        self.assertIn("Only Control’s own process is visible", js)
+        self.assertIn("A historical queued entry does not prove", js)
         self.assertIn("document.createElement", js)
         self.assertIn("body.textContent=detail", js)
         self.assertNotIn("innerHTML", js)
