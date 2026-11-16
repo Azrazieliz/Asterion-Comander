@@ -138,11 +138,62 @@ async function loadPhoneDiagnosticEvidence(){
    friendlyError(err)+' · This does not imply that the phone is offline or healthy.');
  }
 }
+async function loadIntegrationCoverage(){
+ const panel=$('#diagnostic-coverage');
+ if(!panel)return;
+ panel.replaceChildren();
+ if(!state.token){
+  diagnosticRecord(panel,'Connect to inspect app coverage',
+   'Partner apps disclose only opted-in bridge capabilities and events.');
+  return;
+ }
+ diagnosticRecord(panel,'Discovering native integrations',
+   'Checking the paired phone app catalog and recorded diagnostic sources…');
+ try{
+  const data=await request('/diagnostics/coverage'+qp({
+   lookback_minutes:Number($('#diagnostic-window').value),limit:1200}));
+  if(!data.ok)throw new Error('Coverage response unverified');
+  panel.replaceChildren();
+  const count=data.native_partner_count;
+  diagnosticRecord(panel,'Instrumentation status · not universal',
+   'Recent sources: '+String(data.recent_event_source_count||0)+
+   ' · Native opt-in bridges: '+(count===null||count===undefined?'unavailable':String(count))+
+   ' · Other-app private logs: not accessed.');
+  if(!data.phone_app_catalog_available)
+   diagnosticRecord(panel,'Phone app list unavailable',
+    'Native catalog cannot be read right now; this is not evidence of missing apps.','warning');
+  if(!data.partner_bridge_catalog_available)
+   diagnosticRecord(panel,'Partner bridge list unavailable',
+    'Opt-in provider discovery could not be verified.','warning');
+  const apps=data.apps||[];
+  if(!apps.length)
+   diagnosticRecord(panel,'No recognized Asterion app entries returned',
+    'This may reflect unavailable access, app discovery or a narrow catalog. Do not infer app absence.');
+  for(const app of apps.slice(0,50)){
+   const title=String(app.name||app.package||'Asterion app');
+   const bridge=app.partner_bridge_discovered?
+    (app.partner_bridge_approved?'approved on device':'requires local approval'):
+    'not discovered';
+   const evidence=app.recent_instrumented_event_observed?
+    'recent events recorded':'no recent matching events observed';
+   diagnosticRecord(panel,title,'Native bridge: '+bridge+
+    ' · Diagnostic evidence: '+evidence);
+  }
+  if(data.events_window_may_be_truncated)
+   diagnosticRecord(panel,'Evidence window truncated',
+    'Older events may exist beyond the inspected limit.','warning');
+ }catch(err){
+  panel.replaceChildren();
+  diagnosticRecord(panel,'Integration coverage unavailable',
+   friendlyError(err)+' · No claim about installed app or engine health is made.','warning');
+ }
+}
 async function loadDiagnostics(){
  if(!state.token){$('#diagnostic-state').textContent='Connect to load diagnostics.';return;}
  const status=$('#diagnostic-state');
  status.textContent='Loading recorded diagnostic evidence…';
  loadPhoneDiagnosticEvidence().catch(e=>toast(e.message));
+ loadIntegrationCoverage().catch(e=>toast(e.message));
  const filter=$('#diagnostic-app').value.trim();
  const minutes=Number($('#diagnostic-window').value);
  try{
