@@ -10,6 +10,7 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * In-process, on-device GGUF inference. No Windows AI server and no cloud API.
@@ -25,6 +26,8 @@ final class OnDeviceLlm {
         "373db06783953f0981572d008f183eb2167b93304f5adbf7c4ce6ed6a91ee437";
     static final String MODEL_SOURCE="tauqir02/Qwen3-0.6B-GGUF";
     private static final Object LOCK=new Object();
+    private static final AtomicBoolean BUSY=new AtomicBoolean(false);
+    private static final AtomicBoolean CANCELLED=new AtomicBoolean(false);
     private static final boolean LIBRARY_LOADED;
     private static volatile boolean modelReady=false;
     private static volatile String lastFailure="";
@@ -38,6 +41,12 @@ final class OnDeviceLlm {
     private static native boolean nativeLoad(String privateFile);
     private static native boolean nativeReady();
     private static native byte[] nativeGenerate(String prompt,int maxTokens);
+    private static native void nativeCancel();
+    private static native void nativeResetCancel();
+    static void cancel(){
+        CANCELLED.set(true);
+        if(LIBRARY_LOADED)nativeCancel();
+    }
     private static native void nativeUnload();
 
     static JSONObject status(Context context) throws Exception {
@@ -47,6 +56,7 @@ final class OnDeviceLlm {
             .put("platform","android_phone")
             .put("inference_backend","llama_cpp_jni")
             .put("native_library_loaded",LIBRARY_LOADED)
+            .put("inference_active",BUSY.get())
             .put("model_bundled_in_apk",hasPackagedModel(context))
             .put("model_private_file_bytes",file.isFile()?file.length():0L)
             .put("model_sha_verified",modelReady && LIBRARY_LOADED)
@@ -128,19 +138,30 @@ final class OnDeviceLlm {
     static String generate(Context context,String userPrompt) throws Exception {
         if(userPrompt==null||userPrompt.trim().isEmpty()||userPrompt.length()>1800)
             throw new IllegalArgumentException("prompt_length_invalid");
-        if(!ensureLoaded(context))
-            throw new IllegalStateException(lastFailure);
-        // Qwen3 ChatML. A bounded context and no tool/network permissions.
-        String prompt="<|im_start|>system\n"+
-            "You are Asterion Control's locally hosted phone assistant. "+
-            "Give concise, accurate answers. Never claim an app was modified, "+
-            "a command ran, or a VPN connected unless you receive evidence. "+
-            "You cannot autonomously operate other applications. /no_think"+
-            "<|im_end|>\n<|im_start|>user\n"+
-            userPrompt.trim()+"<|im_end|>\n<|im_start|>assistant\n";
-        byte[] output=nativeGenerate(prompt,192);
-        if(output==null||output.length==0)
-            throw new IllegalStateException("no_generated_tokens");
-        return new String(output,StandardCharsets.UTF_8).trim();
+        if(!BUSY.compareAndSet(false,true))
+            throw new IllegalStateException("on_device_inference_already_running");
+        CANCELLED.set(false);
+        try{
+            if(!LIBRARY_LOADED)throw new IllegalStateException("native_library_missing");
+            nativeResetCancel();
+            if(!ensureLoaded(context))
+                throw new IllegalStateException(lastFailure);
+            if(CANCELLED.get())throw new InterruptedException("user_cancelled");
+            // Qwen3 ChatML. A bounded context and no tool/network permissions.
+            String prompt="<|im_start|>system\n"+
+                "You are Asterion Control's locally hosted phone assistant. "+
+                "Give concise, accurate answers. Never claim an app was modified, "+
+                "a command ran, or a VPN connected unless you receive evidence. "+
+                "You cannot autonomously operate other applications. /no_think"+
+                "<|im_end|>\n<|im_start|>user\n"+
+                userPrompt.trim()+"<|im_end|>\n<|im_start|>assistant\n";
+            byte[] output=nativeGenerate(prompt,192);
+            if(CANCELLED.get())throw new InterruptedException("user_cancelled");
+            if(output==null||output.length==0)
+                throw new IllegalStateException("no_generated_tokens");
+            return new String(output,StandardCharsets.UTF_8).trim();
+        }finally{
+            BUSY.set(false);
+        }
     }
 }
