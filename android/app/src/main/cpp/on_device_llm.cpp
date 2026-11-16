@@ -29,7 +29,7 @@ Java_com_asterion_control_OnDeviceLlm_nativeLoad(JNIEnv *env, jclass, jstring jp
     const char *path=env->GetStringUTFChars(jpath,nullptr);
     if (!path) return JNI_FALSE;
     llama_model_params params=llama_model_default_params();
-    params.n_gpu_layers=0; params.use_mmap=true;
+    params.n_gpu_layers=0; // llama.cpp owns model mmap defaults in this API revision
     llama_model *newModel=llama_model_load_from_file(path,params);
     env->ReleaseStringUTFChars(jpath,path);
     if (!newModel) return JNI_FALSE;
