@@ -10,6 +10,7 @@ from .security import require_token
 from . import diagnostic_core as core
 from . import diagnostic_analysis
 from . import diagnostic_snapshot
+from . import phone_bridge
 
 router = APIRouter(prefix="/api/v1/diagnostics",dependencies=[Depends(require_token)])
 
@@ -39,6 +40,87 @@ def events(since: int = 0, limit: int = 100, app: str = "", trace_id: str = ""):
         return core.events(since=since,limit=limit,app=app,trace_id=trace_id)
     except ValueError as exc:
         raise HTTPException(422,str(exc)) from exc
+
+
+@router.get("/coverage")
+def coverage(lookback_minutes: int = 1440, limit: int = 1200):
+    """Read-only visibility, not an invented claim of universal instrumentation."""
+    import re
+    triage=diagnostic_analysis.inspect(
+        lookback_minutes=lookback_minutes, limit=limit)
+    observed=set(triage["observed_apps"])
+    catalog=None
+    partner=None
+    catalog_error=None
+    bridge_error=None
+    try:
+        catalog=phone_bridge.request("/apps",timeout=6).json()
+        if not isinstance(catalog,dict) or not isinstance(catalog.get("apps"),list):
+            raise ValueError("Invalid native catalog")
+    except Exception as exc:
+        catalog_error=type(exc).__name__
+    try:
+        partner=phone_bridge.request("/app-bridge/apps",timeout=6).json()
+        if not isinstance(partner,dict) or not isinstance(partner.get("apps"),list):
+            raise ValueError("Invalid partner catalog")
+    except Exception as exc:
+        bridge_error=type(exc).__name__
+    approved={}
+    if partner is not None:
+        for item in partner["apps"][:100]:
+            if isinstance(item,dict):
+                pkg=item.get("package")
+                if isinstance(pkg,str) and re.fullmatch(
+                    r"[A-Za-z0-9_.]{3,180}",pkg):
+                    approved[pkg]=item.get("approved") is True
+    items=[]
+    if catalog is not None:
+        for item in catalog["apps"][:150]:
+            if not isinstance(item,dict):
+                continue
+            pkg=item.get("package")
+            name=item.get("label",item.get("name",""))
+            if not isinstance(pkg,str) or not isinstance(name,str):
+                continue
+            if not re.fullmatch(r"[A-Za-z0-9_.]{3,180}",pkg):
+                continue
+            if not (name.lower().startswith("asterion") or
+                    name.lower()=="kuroha" or
+                    pkg.startswith("com.asterion.")):
+                continue
+            evidence=pkg in observed or (
+                pkg.startswith("com.") and pkg[4:] in observed)
+            items.append({
+                "package":pkg,"name":name[:80],
+                "recent_instrumented_event_observed":evidence,
+                "partner_bridge_discovered":pkg in approved,
+                "partner_bridge_approved":approved.get(pkg,False),
+                "no_recent_evidence_is_not_proof_of_failure":True,
+            })
+            if len(items)>=50:
+                break
+    return {
+        "ok":True,
+        "lookback_minutes":lookback_minutes,
+        "recent_event_sources":sorted(observed),
+        "recent_event_source_count":len(observed),
+        "events_examined":triage["events_examined"],
+        "events_window_may_be_truncated":triage["window_may_be_truncated"],
+        "phone_app_catalog_available":catalog is not None,
+        "app_catalog_error_code":catalog_error,
+        "partner_bridge_catalog_available":partner is not None,
+        "bridge_catalog_error_code":bridge_error,
+        "native_partner_count":len(approved) if partner is not None else None,
+        "apps":items,
+        "complete_cross_app_coverage_verified":False,
+        "private_other_app_logs_accessed":False,
+        "limitations":[
+            "Only apps with an existing explicit native provider expose bridge operations",
+            "Only sanitized opted-in event sources can provide diagnostic traces",
+            "No recent event is not proof that an app is uninstrumented or healthy",
+            "Control cannot read arbitrary third-party application-private crash logs",
+        ],
+    }
 
 
 @router.get("/snapshot")
