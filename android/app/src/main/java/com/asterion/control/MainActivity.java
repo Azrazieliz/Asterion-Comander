@@ -604,6 +604,76 @@ public final class MainActivity extends Activity {
         .setNegativeButton("Close",null).show();
     }
   }
+  private void showVpnVerification(){
+    String[] actions={
+      "1. Measure normal public IP & speed before VPN",
+      "2. Verify public IP change and speed with VPN active"
+    };
+    new AlertDialog.Builder(this).setTitle("VPN proof · this phone")
+      .setItems(actions,(dialog,index)->{
+        final boolean baseline=index==0;
+        new AlertDialog.Builder(this)
+          .setTitle("Owner-approved external network test")
+          .setMessage("This check contacts ipify and Cloudflare over HTTPS. "+
+            "Those services will see your public IP, and about 3 MiB "+
+            "of test data will be downloaded. No WireGuard keys or "+
+            "Asterion files are shared.\n\n"+
+            "It checks the actual egress address and short throughput "+
+            "samples, not provider country, trust, automatic rotation "+
+            "or sustained performance.")
+          .setPositiveButton("Run on this phone",(d,w)->{
+            io.execute(()->{
+              String report;
+              try{
+                JSONObject evidence=ControlVpnVerification.measure(
+                  getApplicationContext(),baseline);
+                StringBuilder builder=new StringBuilder();
+                builder.append("Observed public IPv4: ")
+                  .append(evidence.optString("public_ipv4","unavailable"))
+                  .append("\nMeasured median short download: ")
+                  .append(evidence.optDouble("median_sample_mbps",0))
+                  .append(" Mbps\n");
+                if(baseline)builder.append(
+                  "\nBaseline recorded for the next 24 hours. "+
+                  "Activate the configured VPN, then run step 2.");
+                else{
+                  boolean known=evidence.optBoolean("baseline_available",false);
+                  builder.append("\nPrevious baseline: ")
+                    .append(known?
+                      evidence.optString("previous_public_ipv4","unknown"):
+                      "Unavailable or older than 24 hours")
+                    .append("\nPublic-IP replacement verified: ")
+                    .append(evidence.optBoolean("ip_replacement_verified",false)?
+                      "YES for this measurement":"NO")
+                    .append("\nShort speed sample vs baseline: ");
+                  if(known)builder.append(Math.round(
+                    evidence.optDouble("short_sample_speed_ratio",0)*100))
+                    .append("%, 25% loss sample threshold: ")
+                    .append(evidence.optBoolean(
+                      "short_sample_within_25_percent_loss",false)?
+                      "met":"not met");
+                  else builder.append("cannot compare");
+                }
+                builder.append("\n\nJapan exit location, secure peer trust, "+
+                  "IP rotation and sustained throughput are NOT verified "+
+                  "by this measurement.");
+                report=builder.toString();
+              }catch(Exception error){
+                report="Live VPN measurement failed: "+
+                  error.getClass().getSimpleName()+
+                  ". No IP replacement, country or speed result is claimed.";
+              }
+              final String result=report;
+              runOnUiThread(()->{
+                if(destroyed)return;
+                new AlertDialog.Builder(this).setTitle("VPN test evidence")
+                  .setMessage(result).setPositiveButton("Close",null).show();
+              });
+            });
+          }).setNegativeButton("Cancel",null).show();
+      }).setNegativeButton("Close",null).show();
+  }
+
   private void showVpnDetails(){
     try{
       JSONObject android=ControlPermissionMatrix.status(this);
@@ -978,6 +1048,9 @@ public final class MainActivity extends Activity {
     gap(privacyTools,10);
     twoActions(privacyTools,"VPN status","shield",this::showVpnDetails,
       "Security","settings",this::showSecurityChoices);
+    gap(privacyTools,9);
+    button(privacyTools,"Verify VPN public IP & speed","shield",false,
+      this::showVpnVerification);
     gap(privacyTools,9);
     button(privacyTools,"All Android authorizations","shield",true,
       this::showPermissionsHub);
