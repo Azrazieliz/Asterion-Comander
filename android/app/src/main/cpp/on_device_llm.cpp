@@ -1,5 +1,6 @@
 #include <jni.h>
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <mutex>
 #include <string>
@@ -10,7 +11,16 @@
 static std::mutex guard;
 static llama_model * model = nullptr;
 static bool initialized = false;
+static std::atomic<bool> cancel_generation{false};
 
+extern "C" JNIEXPORT void JNICALL
+Java_com_asterion_control_OnDeviceLlm_nativeCancel(JNIEnv *,jclass){
+    cancel_generation.store(true,std::memory_order_release);
+}
+extern "C" JNIEXPORT void JNICALL
+Java_com_asterion_control_OnDeviceLlm_nativeResetCancel(JNIEnv *,jclass){
+    cancel_generation.store(false,std::memory_order_release);
+}
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_asterion_control_OnDeviceLlm_nativeLoad(JNIEnv *env, jclass, jstring jpath) {
     if (!jpath) return JNI_FALSE;
@@ -50,7 +60,7 @@ extern "C" JNIEXPORT jbyteArray JNICALL
 Java_com_asterion_control_OnDeviceLlm_nativeGenerate(JNIEnv *env,jclass,jstring jprompt,jint limit) {
     if (!jprompt || limit<1 || limit>384) return nullptr;
     std::lock_guard<std::mutex> lock(guard);
-    if (!model) return nullptr;
+    if (!model || cancel_generation.load(std::memory_order_acquire)) return nullptr;
     const char *raw=env->GetStringUTFChars(jprompt,nullptr);
     if(!raw)return nullptr;
     std::string prompt(raw);
@@ -77,6 +87,7 @@ Java_com_asterion_control_OnDeviceLlm_nativeGenerate(JNIEnv *env,jclass,jstring 
     bool ok=true;
     int pos=0;
     for(int start=0;start<(int)tokens.size();start+=256){
+        if(cancel_generation.load(std::memory_order_acquire)){ok=false;break;}
         int n=std::min(256,(int)tokens.size()-start);
         batch_tokens(batch,tokens.data()+start,n,start);
         if(llama_process(ctx,LLAMA_PROCESS_TYPE_DECODE,batch)!=0){ok=false;break;}
@@ -84,6 +95,7 @@ Java_com_asterion_control_OnDeviceLlm_nativeGenerate(JNIEnv *env,jclass,jstring 
     }
     std::string answer;
     for(int i=0;ok&&i<limit;i++){
+        if(cancel_generation.load(std::memory_order_acquire)){ok=false;break;}
         llama_token next=llama_sampler_sample(sampler,ctx,-1);
         if(llama_vocab_is_eog(vocab,next))break;
         char piece[1024];
