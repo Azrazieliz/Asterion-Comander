@@ -12,6 +12,7 @@ on:
       - 'tests/test_control_worker_recovery.py'
       - 'tests/test_bridge_dirty_receipt_recovery.py'
       - 'scripts/deploy_private_bridge_recovery_20261116.py'
+      - 'scripts/owner_recover_control_relay_once.ps1'
       - 'tests/test_bridge_recovery_deployment.py'
       - '.github/workflows/control-relay-recovery.yml'
   workflow_dispatch:
@@ -33,7 +34,7 @@ jobs:
       - name: Parse Windows watchdog and launcher without executing them
         shell: pwsh
         run: |
-          $scripts=@('scripts/control_repair_watchdog.ps1','scripts/start_git_bridge.ps1')
+          $scripts=@('scripts/control_repair_watchdog.ps1','scripts/start_git_bridge.ps1','scripts/owner_recover_control_relay_once.ps1')
           foreach($script in $scripts){
             $tokens=$null
             $errors=$null
