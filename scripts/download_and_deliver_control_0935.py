@@ -45,7 +45,7 @@ def main():
         raise RuntimeError("untrusted_control_host")
     dist=Path(r"D:\AsterionControlRelease\dist")
     dist.mkdir(exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="asterion-control-owner-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="asterion-control-owner-",dir=str(dist)) as tmp:
         zpath=Path(tmp)/"v0935.zip"
         downloaded=download(zpath)
         with zipfile.ZipFile(zpath) as z:
