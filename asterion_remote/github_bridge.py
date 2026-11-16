@@ -289,4 +289,10 @@ def main():
             print('Bridge temporarily unavailable:',type(exc).__name__,str(exc)[:100],flush=True)
             time.sleep(min(60,5*(errors+1)))
 
-if __name__=='__main__':main()
+if __name__=='__main__':
+    # Retired REST polling is not allowed to run as a competing worker.
+    # It scans old command directories and hits GitHub's contents API
+    # directory limits. All launched transports share the durable Git
+    # worktree journal and explicit commands/active queue.
+    from .github_bridge_git import main as git_main
+    git_main()
