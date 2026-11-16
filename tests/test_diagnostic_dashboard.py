@@ -35,7 +35,7 @@ class DiagnosticDashboardTests(unittest.TestCase):
         for element in (
             "diagnostic-refresh", "diagnostic-app", "diagnostic-window",
             "diagnostic-state", "diagnostic-metrics", "diagnostic-findings",
-            "diagnostic-operations", "diagnostic-limits", "diagnostic-phone",
+            "diagnostic-operations", "diagnostic-limits", "diagnostic-phone", "diagnostic-coverage",
         ):
             self.assertIn(element, parser.ids)
 
@@ -45,6 +45,8 @@ class DiagnosticDashboardTests(unittest.TestCase):
         self.assertIn("'/diagnostics/triage'+qp(query)", js)
         self.assertIn("data.limitations", js)
         self.assertIn("async function loadPhoneDiagnosticEvidence()", js)
+        self.assertIn("async function loadIntegrationCoverage()", js)
+        self.assertIn("\'/diagnostics/coverage\'", js)
         self.assertIn("'/phone/diagnostics/events'+qp({since:0,limit:1})", js)
         self.assertIn("'asterion_control_process_only'", js)
         self.assertIn("This does not include private logs belonging to other apps.", js)
