@@ -20,6 +20,8 @@ from pathlib import Path
 FILES = (
     "asterion_remote/native_routes.py",
     "asterion_remote/diagnostic_routes.py",
+    "asterion_remote/static/app.js",
+    "asterion_remote/static/index.html",
     "asterion_remote/control_v2_routes.py",
     "asterion_remote/control_ai_routes.py",
     "asterion_remote/overnight_supervisor.py",
@@ -109,7 +111,10 @@ def preflight(source: Path, installed: Path) -> tuple[dict, dict[str, bytes]]:
     patches = {}
     for rel in FILES:
         data = (source / rel).read_bytes()
-        ast.parse(data.decode("utf8"), filename=rel)
+        if rel.endswith(".py"):
+            ast.parse(data.decode("utf8"), filename=rel)
+        elif not data or len(data) > 300000 or b"\\x00" in data:
+            raise RuntimeError("invalid_static_asset:" + rel)
         patches[rel] = data
     app_rel = "asterion_remote/app.py"
     original_app = (installed / app_rel).read_text("utf8")
