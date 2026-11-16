@@ -110,6 +110,23 @@ def test_deprecated_rest_relay_cannot_ignore_active_queue():
     assert "health('retrying',consecutive_errors=failures" in GIT_WORKER
 
 
+def test_watchdog_process_regex_matches_actual_python_module_command():
+    # PowerShell single-quoted regex must use one backslash for .NET regex
+    # metacharacters. Double escaping silently matches literal backslashes.
+    import re
+    line=next(line for line in WATCHDOG.splitlines()
+              if "github_bridge_git" in line and "-match" in line)
+    match=re.search(r"'-match'\s*'([^']+)'", line)
+    if not match:
+        match=re.search(r"-match\s*'([^']+)'",line)
+    assert match is not None
+    expr=match.group(1).replace("(?i)","")
+    assert re.search(expr,
+        r"C:\Python311\python.exe -m asterion_remote.github_bridge_git")
+    assert not re.search(expr,
+        r"C:\Python311\python.exe -m asterion_remote.github_bridge_git_old")
+
+
 def test_backup_and_pairing_are_not_changed_by_watchdog():
     for forbidden in ("Remove-Item $key","Remove-Item $hostFile",
                       "Remove-Item $secret","adb ","-Recurse -Force"):
