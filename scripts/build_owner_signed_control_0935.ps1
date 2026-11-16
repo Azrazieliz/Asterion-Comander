@@ -18,8 +18,8 @@ $expectedSha=($remote -split '\s+')[0].Trim()
 if($local -ne $expectedSha){throw 'Stale Control source; fetch latest branch before building'}
 
 $version='0.9.35'
-$model=Join-Path $repo 'android\app\src\main\assets\models\Qwen3-0.6B-Q4_K_M.gguf'
-$library=Join-Path $repo 'android\app\src\main\jniLibs\arm64-v8a\libasterion_llm.so'
+$model=Join-Path $root 'android\app\src\main\assets\models\Qwen3-0.6B-Q4_K_M.gguf'
+$library=Join-Path $root 'android\app\src\main\jniLibs\arm64-v8a\libasterion_llm.so'
 if(-not(Test-Path $model)){throw 'RELEASE_BLOCKED: actual bundled GGUF is missing'}
 if((Get-Item $model).Length -ne 484220288){throw 'RELEASE_BLOCKED: actual bundled GGUF size mismatch'}
 if((Get-FileHash -Algorithm SHA256 $model).Hash.ToLowerInvariant() -ne '373db06783953f0981572d008f183eb2167b93304f5adbf7c4ce6ed6a91ee437'){throw 'RELEASE_BLOCKED: actual bundled GGUF SHA mismatch'}
