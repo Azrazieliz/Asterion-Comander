@@ -48,3 +48,16 @@ body.embedded #desktop-shot,body.embedded #refresh-devices{display:none!importan
 
 .diagnostic-phone{grid-column:1 / -1}
 .diagnostic-phone .diagnostic-records{max-height:310px}
+
+/* Owner diagnostic controls: clear hierarchy and genuine click-to-investigate. */
+#diagnostic-guidance{margin:10px 0 15px;line-height:1.55;border-left:3px solid #72c7c4;padding:12px 14px;background:#13292b;border-radius:8px}
+.diagnostic-panel h4{font-size:15px;line-height:1.35}
+.diagnostic-record{padding:14px 15px;background:#121d31}
+.diagnostic-record strong{font-size:13px;line-height:1.4}
+.diagnostic-record p{font-size:12px;line-height:1.65;white-space:pre-line}
+.diagnostic-coverage-item{display:grid;gap:8px;padding:1px 0 10px;border-bottom:1px solid var(--border)}
+.diagnostic-coverage-item:last-child{border-bottom:0}
+.diagnostic-app-action{justify-self:start;appearance:none;background:#203a52;border:1px solid #457891;color:#e5f4ff;border-radius:11px;padding:10px 14px;min-height:42px;font-weight:600;font-size:12px;cursor:pointer}
+.diagnostic-app-action:hover,.diagnostic-app-action:focus-visible{background:#285976;border-color:#86c7ee;outline:2px solid transparent}
+.diagnostic-app-action:focus-visible{outline:2px solid #86c7ee;outline-offset:2px}
+@media(max-width:700px){.diagnostic-app-action{width:100%;justify-self:stretch;text-align:left}.diagnostic-panel{padding:14px}.diagnostic-record{padding:12px}}
