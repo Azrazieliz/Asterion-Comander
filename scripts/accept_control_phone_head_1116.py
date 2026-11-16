@@ -4,6 +4,9 @@ No authorization, partner call, installation, model files, tokens, or private
 application data are read. Output is bounded sanitized capability metadata.
 """
 import json
+import sys
+from pathlib import Path
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from asterion_remote import phone_bridge
 paths=["/app-bridge/apps","/health","/diagnostics/vpn"]
 result={}
