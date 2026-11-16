@@ -865,7 +865,9 @@ public final class MainActivity extends Activity {
     rowTitle(integrations,"Asterion app integrations",
       "Native commands · per-app consent · no unrestricted access",icon("shield",DesignSystem.TEAL,22));
     gap(integrations,10);
-    button(integrations,"Manage app access","settings",false,this::showAppBridgeApprovals);
+    button(integrations,"Browse installed apps & add","devices",true,this::showAppBridgeApprovals);
+    gap(integrations,9);
+    button(integrations,"My added apps","settings",false,this::showMyAddedApps);
     gap(integrations,9);
     button(integrations,"Check app diagnostic coverage","activity",false,
       this::showIntegrationCoverage);
@@ -1782,43 +1784,223 @@ public final class MainActivity extends Activity {
     try{AppObservation.configure(this,false,"");toast("Observation stopped");}
     catch(Exception e){toast("Observation could not stop");}
   }
+  /** An owner-facing installed-app chooser, not just the handful of apps
+   * already providing a bridge. No unsupported app is presented as connected.
+   */
+  private java.util.Set<String> trackedApps(){
+    java.util.Set<String> result=new java.util.LinkedHashSet<>();
+    try{
+      org.json.JSONArray saved=new org.json.JSONArray(
+        prefs.getString("tracked_apps_v1","[]"));
+      for(int i=0;i<Math.min(saved.length(),150);i++){
+        String pkg=saved.optString(i,"");
+        if(pkg.matches("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*){1,12}"))
+          result.add(pkg);
+      }
+    }catch(Exception ignored){}
+    return result;
+  }
+  private boolean markTrackedApp(String pkg,boolean added){
+    if(!AppCatalog.launchable(this).containsKey(pkg))return false;
+    java.util.Set<String> stored=trackedApps();
+    if(added)stored.add(pkg);else stored.remove(pkg);
+    org.json.JSONArray out=new org.json.JSONArray();
+    for(String item:stored)out.put(item);
+    return prefs.edit().putString("tracked_apps_v1",out.toString()).commit();
+  }
   private void showAppBridgeApprovals(){
     io.execute(()->{
       try{
-        org.json.JSONArray apps=AppBridge.list(this).getJSONArray("apps");
-        List<String> packages=new ArrayList<>();
-        List<String> choices=new ArrayList<>();
-        for(int i=0;i<apps.length();i++){
-          JSONObject entry=apps.getJSONObject(i);
-          packages.add(entry.getString("package"));
-          choices.add(entry.getString("name")+
-            (entry.optBoolean("approved")?" — Authorized":" — Not authorized"));
+        java.util.Map<String,String> installed=AppCatalog.launchable(this);
+        org.json.JSONArray providers=AppBridge.list(this).getJSONArray("apps");
+        java.util.Map<String,Boolean> bridged=new java.util.HashMap<>();
+        for(int i=0;i<providers.length();i++){
+          JSONObject entry=providers.getJSONObject(i);
+          bridged.put(entry.getString("package"),entry.optBoolean("approved"));
         }
-        runOnUiThread(()->{
-          if(choices.isEmpty()){
-            new AlertDialog.Builder(this).setTitle("Asterion app integration")
-              .setMessage("No installed apps have declared the native Asterion bridge yet. No connected apps were modified.")
-              .setPositiveButton("Close",null).show();
-            return;
-          }
-          new AlertDialog.Builder(this).setTitle("App integration access")
-            .setItems(choices.toArray(new String[0]),(dialog,which)->{
-              String pkg=packages.get(which);
-              boolean enabled=choices.get(which).contains(" — Authorized");
-              new AlertDialog.Builder(this).setTitle(enabled?"Revoke app access":"Authorize app bridge")
-                .setMessage("App: "+pkg+"\n"+
-                  (enabled?"This will revoke Control's stored approval.":
-                  "Only this exact installed app signature will be trusted. The app must separately authorize every supported native action."))
-                .setPositiveButton(enabled?"Revoke":"Authorize",(dlg,n)->{
-                  try{
-                    AppBridge.approveLocally(this,pkg,!enabled);
-                    toast(enabled?"App access revoked":"App bridge authorized");
-                  }catch(Exception e){toast("Access change failed: "+e.getMessage());}
-                }).setNegativeButton("Cancel",null).show();
-            }).setNegativeButton("Close",null).show();
+        java.util.Set<String> favorites=trackedApps();
+        java.util.List<java.util.Map.Entry<String,String>> all=
+          new ArrayList<>(installed.entrySet());
+        all.removeIf(entry->entry.getKey().equals(getPackageName()));
+        all.sort((left,right)->{
+          boolean a=favorites.contains(left.getKey()),b=favorites.contains(right.getKey());
+          if(a!=b)return a?-1:1;
+          return left.getValue().compareToIgnoreCase(right.getValue());
         });
-      }catch(Exception e){runOnUiThread(()->toast("App bridge discovery unavailable"));}
+        runOnUiThread(()->{
+          if(destroyed)return;
+          LinearLayout layout=v();pad(layout,14,10);
+          TextView explanation=t("Tap any installed app to add it to Control or authorize "+
+            "a supported native integration. An app without a bridge can be saved "+
+            "as a shortcut, but cannot be remotely controlled or diagnosed automatically.",
+            12,DesignSystem.MUTED,false);
+          wide(layout,explanation);gap(layout,12);
+          EditText search=input("",false,"Search installed apps");
+          wide(layout,search);gap(layout,8);
+          ListView list=new ListView(this);
+          final ArrayAdapter<String> adapter=new ArrayAdapter<>(
+            this,android.R.layout.simple_list_item_1,new ArrayList<>());
+          list.setAdapter(adapter);
+          layout.addView(list,new LinearLayout.LayoutParams(-1,dp(410)));
+          final java.util.List<String> shown=new ArrayList<>();
+          Runnable update=()->{
+            String query=search.getText().toString().trim().toLowerCase(Locale.ROOT);
+            shown.clear();adapter.clear();
+            for(java.util.Map.Entry<String,String> entry:all){
+              String pkg=entry.getKey(),name=entry.getValue();
+              if(!query.isEmpty()&&!name.toLowerCase(Locale.ROOT).contains(query)
+                 &&!pkg.toLowerCase(Locale.ROOT).contains(query))continue;
+              shown.add(pkg);
+              String state=bridged.containsKey(pkg)?
+                (bridged.get(pkg)?" · Connected":" · Approve bridge"):
+                (favorites.contains(pkg)?" · Saved (not integrated)":" · Add");
+              adapter.add(name+state);
+              if(shown.size()>=120)break;
+            }
+            adapter.notifyDataSetChanged();
+          };
+          search.addTextChangedListener(new android.text.TextWatcher(){
+            @Override public void beforeTextChanged(CharSequence x,int start,int count,int after){}
+            @Override public void onTextChanged(CharSequence x,int start,int before,int count){update.run();}
+            @Override public void afterTextChanged(android.text.Editable x){}
+          });
+          update.run();
+          AlertDialog dlg=new AlertDialog.Builder(this)
+            .setTitle("Add an installed app")
+            .setView(layout)
+            .setNegativeButton("Close",null).create();
+          list.setOnItemClickListener((parent,view,position,id)->{
+            if(position<0||position>=shown.size())return;
+            String pkg=shown.get(position),label=installed.get(pkg);
+            boolean provider=bridged.containsKey(pkg);
+            boolean approved=Boolean.TRUE.equals(bridged.get(pkg));
+            dlg.dismiss();
+            showAppIntegrationActions(pkg,label,provider,approved);
+          });
+          dlg.show();
+        });
+      }catch(Exception e){
+        runOnUiThread(()->toast("Unable to load installed app list: "+
+          e.getClass().getSimpleName()));
+      }
     });
+  }
+  private void showAppIntegrationActions(String pkg,String label,
+                                        boolean bridge,boolean approved){
+    if(!AppCatalog.launchable(this).containsKey(pkg)){
+      toast("App is no longer installed");return;
+    }
+    boolean tracked=trackedApps().contains(pkg);
+    String state=bridge?(approved?"Native bridge authorized":
+      "Native bridge available — owner approval needed"):
+      "No Asterion native bridge provided by this app";
+    String[] actions={
+      tracked?"Remove from my Control apps":"Add to my Control apps",
+      bridge?(approved?"Revoke native bridge":"Authorize native bridge"):
+        "Why can't Control connect to this app?",
+      "Open installed app",
+      "Open its Android app settings",
+      "Choose another app"
+    };
+    new AlertDialog.Builder(this).setTitle(label)
+      .setMessage(state+"\n"+pkg+"\n\n"+
+        "Adding to My apps creates a working shortcut only. "+
+        "Diagnostics and app actions require that app's own native bridge and authorization.")
+      .setItems(actions,(dlg,which)->{
+        if(which==0){
+          if(markTrackedApp(pkg,!tracked))
+            toast(tracked?"Removed from Control shortcuts":
+              "Added to Control shortcuts (not automatically integrated)");
+          else toast("Could not save the app");
+          showAppIntegrationActions(pkg,label,bridge,approved);
+        }else if(which==1){
+          if(!bridge){
+            new AlertDialog.Builder(this)
+              .setTitle("App integration unavailable")
+              .setMessage(label+" has no exported "+pkg+
+                ".asterion.bridge provider. Control cannot add one "+
+                "without an update to that app. You can add it to My apps "+
+                "to launch it, but that does not enable private logs, "+
+                "downloads, diagnostics, or arbitrary app commands.")
+              .setPositiveButton("My apps", (d,w)->showMyAddedApps())
+              .setNegativeButton("Back",(d,w)->
+                showAppIntegrationActions(pkg,label,false,false)).show();
+          }else{
+            new AlertDialog.Builder(this)
+              .setTitle(approved?"Revoke this app's bridge?":"Authorize this app?")
+              .setMessage("Application: "+label+"\n"+
+                (approved?"Revoking Control's local approval will disable "+
+                  "future native calls.":"Control will bind approval to the exact "+
+                  "installed signing certificate. The app must also authorize "+
+                  "each operation individually."))
+              .setPositiveButton(approved?"Revoke":"Authorize",(d,w)->{
+                try{
+                  AppBridge.approveLocally(this,pkg,!approved);
+                  toast(approved?"Bridge revoked":"Native bridge authorized");
+                }catch(Exception e){
+                  toast("Approval failed: "+e.getClass().getSimpleName());
+                }
+                showAppBridgeApprovals();
+              }).setNegativeButton("Cancel",null).show();
+          }
+        }else if(which==2){
+          io.execute(()->{
+            try{
+              JSONObject outcome=AppCatalog.requestLaunch(this,pkg);
+              runOnUiThread(()->{
+                if(!outcome.optBoolean("intent_dispatched"))
+                  toast(outcome.optString("reason","App launch unavailable"));
+              });
+            }catch(Exception e){
+              runOnUiThread(()->toast("App launch rejected"));
+            }
+          });
+        }else if(which==3){
+          try{
+            startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+              Uri.parse("package:"+pkg)));
+          }catch(Exception e){toast("Android app settings unavailable");}
+        }else if(which==4)showAppBridgeApprovals();
+      }).setNegativeButton("Close",null).show();
+  }
+  private void showMyAddedApps(){
+    java.util.Set<String> saved=trackedApps();
+    java.util.Map<String,String> installed=AppCatalog.launchable(this);
+    java.util.List<String> packages=new ArrayList<>();
+    java.util.List<String> labels=new ArrayList<>();
+    for(String pkg:saved){
+      if(installed.containsKey(pkg)){
+        packages.add(pkg);labels.add(installed.get(pkg));
+      }
+    }
+    if(packages.isEmpty()){
+      new AlertDialog.Builder(this).setTitle("My Control apps")
+        .setMessage("No app shortcuts have been added yet. "+
+          "Choose an installed app and tap Add to my Control apps.")
+        .setPositiveButton("Browse apps",(d,w)->showAppBridgeApprovals())
+        .setNegativeButton("Close",null).show();
+      return;
+    }
+    new AlertDialog.Builder(this).setTitle("My Control apps")
+      .setItems(labels.toArray(new String[0]),(d,index)->{
+        String pkg=packages.get(index);
+        io.execute(()->{
+          boolean bridge=false,approved=false;
+          try{
+            org.json.JSONArray apps=AppBridge.list(this).getJSONArray("apps");
+            for(int i=0;i<apps.length();i++){
+              JSONObject entry=apps.getJSONObject(i);
+              if(pkg.equals(entry.optString("package"))){
+                bridge=true;approved=entry.optBoolean("approved");break;
+              }
+            }
+          }catch(Exception ignored){}
+          final boolean b=bridge,a=approved;
+          runOnUiThread(()->showAppIntegrationActions(pkg,installed.get(pkg),b,a));
+        });
+      })
+      .setPositiveButton("Browse installed apps",(d,w)->showAppBridgeApprovals())
+      .setNegativeButton("Close",null).show();
   }
 
   private void enableCheckpointContinuation(){
