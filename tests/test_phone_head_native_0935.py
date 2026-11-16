@@ -41,6 +41,40 @@ class PhoneHeadTests(unittest.TestCase):
             self.assertIn(required,build)
         self.assertIn("versionCode 935",GRADLE)
         self.assertIn("versionName '0.9.35'",GRADLE)
+    def test_real_vpn_measurement(self):
+        net=(ROOT/"android/app/src/main/java/com/asterion/control/ControlVpnVerification.java").read_text("utf8")
+        self.assertIn("https://api.ipify.org?format=json",net)
+        self.assertIn("https://speed.cloudflare.com/__down?bytes=",net)
+        self.assertIn("ControlPrivateVpn.status(context)",net)
+        self.assertIn('"ip_replacement_verified",different',net)
+        self.assertIn('"short_sample_within_25_percent_loss"',net)
+        self.assertIn('"sustained_25_percent_loss_verified",false',net)
+        self.assertIn('"provider_country_verified",false',net)
+        self.assertIn("test_scope",net)
+        self.assertIn("private void showVpnVerification()",MAIN)
+        self.assertIn("ControlVpnVerification.measure(",MAIN)
+        self.assertIn("Japan exit location",MAIN)
+        self.assertNotIn("ControlVpnVerification.measure(",(ROOT/
+            "android/app/src/main/java/com/asterion/control/ControlPrivateVpn.java"
+            ).read_text("utf8"))
+
+    def test_vpn_file_picker_stays_owner_consent_only(self):
+        self.assertIn("Intent.ACTION_OPEN_DOCUMENT",MAIN)
+        self.assertIn("VPN_IMPORT_REQUEST",MAIN)
+        self.assertIn("seen>16000",MAIN)
+        self.assertIn("ControlPrivateVpn.importLocally(this,cleartext,fullTunnel)",MAIN)
+        self.assertIn("Android VPN permission is still required",MAIN)
+
+    def test_phone_ai_can_cancel_expensive_decode(self):
+        self.assertIn("OnDeviceLlm.cancel()",MAIN)
+        self.assertIn("nativeCancel()",LOCAL)
+        self.assertIn("nativeResetCancel()",LOCAL)
+        self.assertIn("on_device_inference_already_running",LOCAL)
+        self.assertIn("BUSY.compareAndSet(false,true)",LOCAL)
+        self.assertIn("Java_com_asterion_control_OnDeviceLlm_nativeCancel",NATIVE)
+        self.assertIn("cancel_generation.load",NATIVE)
+        self.assertIn('setNegativeButton("Stop"',MAIN)
+
     def test_new_native_ui_choices_visible(self):
         app=MAIN.split("private void showAppIntegrationActions(",1)[1].split(
             "private void showPartnerEvidence(",1)[0]
