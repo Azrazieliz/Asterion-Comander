@@ -361,123 +361,98 @@ public final class MainActivity extends Activity {
         }
       }).setNegativeButton("Cancel",null).show();
   }
-  private void showLocalDiagnostics(){
-    try{
-      JSONObject first=ControlEventJournal.recent(this,0,1);
-      long latest=first.optLong("latest_sequence",0);
-      JSONObject log=ControlEventJournal.recent(this,Math.max(0,latest-14),15);
-      JSONObject exits=ControlCrashDiagnostics.recentExitHistory(this);
-      org.json.JSONArray events=log.getJSONArray("events");
-      org.json.JSONArray history=exits.optJSONArray("exits");
-      StringBuilder s=new StringBuilder("Own-process events: ").append(latest)
-        .append("\nRecent events:\n");
-      for(int i=0;i<events.length();i++){
-        JSONObject event=events.getJSONObject(i);
-        s.append(event.optLong("seq")).append(" · ")
-          .append(event.optString("kind")).append(" / ")
-          .append(event.optString("stage")).append(" / ")
-          .append(event.optString("state")).append("\n");
-      }
-      if(history!=null){
-        s.append("\nAndroid historical process exits: ").append(history.length()).append("\n");
-        for(int i=0;i<Math.min(5,history.length());i++){
-          JSONObject item=history.getJSONObject(i);
-          s.append("Reason ").append(item.optInt("reason_code"))
-            .append(" · ").append(item.optLong("timestamp_ms")).append("\n");
-        }
-      }
-      new AlertDialog.Builder(this).setTitle("Control diagnostic evidence")
-        .setMessage(s.toString()).setPositiveButton("Close",null).show();
-    }catch(Exception e){
-      new AlertDialog.Builder(this).setTitle("Diagnostics unavailable")
-        .setMessage(e.getClass().getSimpleName()).setPositiveButton("Close",null).show();
+  private String localExitMeaning(int code){
+    switch(code){
+      case 1:return "App closed itself";
+      case 2:return "Android process signal";
+      case 3:return "Android low-memory termination";
+      case 4:return "Java crash";
+      case 5:return "Native-code crash";
+      case 6:return "App not responding (ANR)";
+      case 7:return "App initialization failed";
+      case 8:return "App permissions changed";
+      case 9:return "Excessive system resource usage";
+      case 10:return "Owner requested exit";
+      case 11:return "App stopped by the owner";
+      case 12:return "Dependency exited";
+      default:return "Other or unidentified Android exit";
     }
   }
-  /** Read-only owner-authorized correlation from existing paired Windows worker.
-   * No Android app-private logging, screenshot loop, or new connection/pairing.
-   * This is recorded evidence, not a live phone-state or root-cause verdict.
-   */
-  private void showCrossAppDiagnostics(){
-    String host=prefs.getString("url","").replaceAll("/+$","");
-    String token=prefs.getString("token","");
-    if(host.isEmpty()||token.isEmpty()){
-      new AlertDialog.Builder(this).setTitle("Asterion incident evidence")
-        .setMessage("Windows agent is not paired. Local Control incidents remain available above.")
+  private void showLocalDiagnostics(){
+    try{
+      JSONObject head=ControlEventJournal.recent(this,0,1);
+      long latest=head.optLong("latest_sequence",0);
+      JSONObject log=ControlEventJournal.recent(
+        this,Math.max(0,latest-18),20);
+      JSONObject exits=ControlCrashDiagnostics.recentExitHistory(this);
+      org.json.JSONArray entries=log.optJSONArray("events");
+      org.json.JSONArray history=exits.optJSONArray("exits");
+      int crashCount=0,exitCount=history==null?0:history.length();
+      StringBuilder report=new StringBuilder();
+      report.append("Control recorded ").append(latest)
+        .append(" local events. These are only from Control, not other apps.\n");
+      report.append("\nRecent connection and service activity:\n");
+      if(entries==null||entries.length()==0)
+        report.append("No local events in this stored sample.\n");
+      else for(int i=Math.max(0,entries.length()-10);i<entries.length();i++){
+        JSONObject event=entries.optJSONObject(i);
+        if(event==null)continue;
+        String kind=event.optString("kind","event");
+        String state=event.optString("state","");
+        String label=kind.replace('_',' ');
+        if(kind.contains("transport")||kind.contains("wss"))
+          label="Control connection";
+        else if(kind.contains("service"))
+          label="Control background service";
+        report.append("• ").append(label);
+        if(!state.isEmpty())report.append(" — ").append(state.replace('_',' '));
+        report.append("\n");
+      }
+      report.append("\nAndroid process exits (historical): ")
+        .append(exitCount).append("\n");
+      if(history!=null)
+        for(int i=0;i<Math.min(8,history.length());i++){
+          JSONObject exit=history.optJSONObject(i);
+          if(exit==null)continue;
+          int reason=exit.optInt("reason_code",-1);
+          if(reason==4||reason==5||reason==6)crashCount++;
+          report.append("• ").append(localExitMeaning(reason));
+          long at=exit.optLong("timestamp_ms",0);
+          if(at>0)report.append(" · ").append(
+            android.text.format.DateFormat.format(
+              "dd MMM yyyy HH:mm",new java.util.Date(at)));
+          report.append("\n");
+        }
+      report.append("\n").append(crashCount)
+        .append(" crashes/freezes classified among the displayed exit entries. ")
+        .append("Other exits may be normal and do not automatically indicate failures.")
+        .append("\n\nTo investigate another Asterion app, open Incident investigation. ")
+        .append("Its own engine must report events to Control.");
+      new AlertDialog.Builder(this)
+        .setTitle("Control connection & exit history")
+        .setMessage(report.toString())
+        .setNeutralButton("All app incidents",(d,w)->
+          showRemoteSection("diagnostics"))
         .setPositiveButton("Close",null).show();
+    }catch(Exception e){
+      new AlertDialog.Builder(this).setTitle("History unavailable")
+        .setMessage("Control could not read its own stored history. No conclusion "+
+          "about other apps or current crashes is possible.")
+        .setPositiveButton("Close",null).show();
+    }
+  }
+  /** A single readable incident UI, not competing raw JSON dialogs. */
+  private void showCrossAppDiagnostics(){
+    if(prefs.getString("url","").isEmpty()||
+       prefs.getString("token","").isEmpty()){
+      new AlertDialog.Builder(this).setTitle("Connect to investigate")
+        .setMessage("Pair your Windows computer first. You can still "+
+          "view Control's local connection history from Health or Tools.")
+        .setPositiveButton("Open Connect",(d,w)->show(3))
+        .setNegativeButton("Close",null).show();
       return;
     }
-    toast("Reading recorded app events from Windows");
-    io.execute(()->{
-      HttpURLConnection connection=null;
-      try{
-        connection=(HttpURLConnection)new URL(host+
-          "/api/v1/diagnostics/triage?lookback_minutes=1440&limit=60&stale_after_seconds=300")
-          .openConnection();
-        connection.setRequestMethod("GET");
-        connection.setConnectTimeout(4000);
-        connection.setReadTimeout(6000);
-        connection.setRequestProperty("Authorization","Bearer "+token);
-        connection.setRequestProperty("Accept","application/json");
-        int status=connection.getResponseCode();
-        if(status!=200)throw new IllegalStateException("windows_diagnostics_http_"+status);
-        byte[] body=connection.getInputStream().readNBytes(131073);
-        if(body.length>131072)throw new IllegalStateException("diagnostic_response_too_large");
-        JSONObject triage=new JSONObject(new String(body,StandardCharsets.UTF_8));
-        if(!triage.optBoolean("ok",false))
-          throw new IllegalStateException("diagnostic_response_not_verified");
-        org.json.JSONArray findings=triage.optJSONArray("findings");
-        org.json.JSONArray stale=triage.optJSONArray("needs_fresh_state");
-        StringBuilder message=new StringBuilder("Recorded in last 24 hours: ")
-          .append(triage.optInt("events_examined",0))
-          .append(" events\\nApps observed: ");
-        org.json.JSONArray apps=triage.optJSONArray("observed_apps");
-        message.append(apps==null?0:apps.length())
-          .append("\\nCurrent runtime state: NOT VERIFIED\\n");
-        if(triage.optBoolean("window_may_be_truncated",false))
-          message.append("\\nEvidence limit reached: some earlier events omitted.\\n");
-        if(findings!=null&&findings.length()>0){
-          message.append("\\nObserved symptoms:\\n");
-          for(int i=0;i<Math.min(8,findings.length());i++){
-            JSONObject finding=findings.optJSONObject(i);
-            if(finding==null)continue;
-            message.append("• ").append(finding.optString("code","reported"))
-              .append(": ").append(finding.optString("meaning","Recorded symptom"))
-              .append("\\n");
-          }
-        }else message.append("\\nNo classified symptoms in the recorded sample. "
-                           +"This does not prove there were no failures.\\n");
-        if(stale!=null&&stale.length()>0){
-          message.append("\\nOperations needing fresh engine evidence:\\n");
-          for(int i=0;i<Math.min(8,stale.length());i++){
-            JSONObject item=stale.optJSONObject(i);
-            if(item==null)continue;
-            message.append("• ").append(item.optString("app","unknown"))
-              .append(" / ").append(item.optString("operation_id","unknown"))
-              .append(" (").append(item.optString("last_state","unknown"))
-              .append(")\\n");
-          }
-        }
-        message.append("\\nOnly opted-in, sanitized telemetry is available. "
-                      +"HTTP 403 alone cannot establish a geographical block. "
-                      +"Uninstrumented apps may have failures not shown here.");
-        final String displayed=message.toString();
-        runOnUiThread(()->{
-          if(destroyed)return;
-          new AlertDialog.Builder(this).setTitle("Asterion incident evidence")
-            .setMessage(displayed).setPositiveButton("Close",null).show();
-        });
-      }catch(Exception e){
-        final String reason=e.getClass().getSimpleName();
-        runOnUiThread(()->{
-          if(destroyed)return;
-          new AlertDialog.Builder(this).setTitle("Recorded diagnostics unavailable")
-            .setMessage("No claim about app health can be made. Windows diagnostic route "
-                       +"is unreachable or not deployed ("+reason+"). Local Control "
-                       +"incident history remains available.")
-            .setPositiveButton("Close",null).show();
-        });
-      }finally{if(connection!=null)connection.disconnect();}
-    });
+    showRemoteSection("diagnostics");
   }
   /** One owner-facing authorization hub; Android remains the only authority
    * that may actually grant each permission. Required and optional are distinct.
