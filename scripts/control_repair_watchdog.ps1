@@ -19,6 +19,25 @@ try{
 # This block must run BEFORE API failure branches that exit this watchdog.
 $bridge=@(Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" -ErrorAction SilentlyContinue |
   Where-Object {$_.CommandLine -match '(?i)(^|\s)-m\s+asterion_remote\.github_bridge_git(\s|$)'})
+# On Windows, a venv python.exe launcher can keep its real python.exe child
+# alive under the SAME -m module invocation. That is ONE logical relay, not
+# two independent workers. Only collapse a directly related, nearly
+# simultaneous parent/child pair. Preserve the duplicate-worker guard for
+# unrelated processes and for any other process topology.
+if($bridge.Count -eq 2){
+  $child=@($bridge | Where-Object {$bridge.ProcessId -contains $_.ParentProcessId})
+  if($child.Count -eq 1){
+    $parent=@($bridge | Where-Object {$_.ProcessId -eq $child[0].ParentProcessId})
+    if($parent.Count -eq 1){
+      $startGap=[math]::Abs(($child[0].CreationDate-$parent[0].CreationDate).TotalSeconds)
+      if($startGap -le 5){
+        # Prefer the executing child for safe idle-only restart: the waiting
+        # venv launcher and existing supervisor will observe its termination.
+        $bridge=@($child[0])
+      }
+    }
+  }
+}
 $bridgeHealthFile=Join-Path $state 'control-git-bridge-health.json'
 $bridgeRestartFile=Join-Path $state 'control-git-bridge-last-recovery.txt'
 $bridgeLog=Join-Path $state 'control-watchdog-recovery.log'
