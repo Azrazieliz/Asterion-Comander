@@ -79,7 +79,7 @@ public final class MainActivity extends Activity {
     MainActivity current=visibleActivity.get();
     return current==null||current.isFinishing()||current.isDestroyed()?null:current;
   }
-  private static final int CAPTURE_REQUEST=112,NOTIFICATION_REQUEST=113,MICROPHONE_REQUEST=115,VPN_REQUEST=119;
+  private static final int CAPTURE_REQUEST=112,NOTIFICATION_REQUEST=113,MICROPHONE_REQUEST=115,VPN_REQUEST=119,HUB_MICROPHONE_REQUEST=120,HUB_NOTIFICATION_REQUEST=121;
   private final Handler handler=new Handler(Looper.getMainLooper());
   private final ExecutorService io=Executors.newSingleThreadExecutor();
   private SharedPreferences prefs;
@@ -229,6 +229,9 @@ public final class MainActivity extends Activity {
     gap(quick,13);twoActions(quick,"Tools","settings",()->show(4),
       "Incidents","activity",this::showCrossAppDiagnostics);
     wide(homeBody,quick);
+    gap(homeBody,10);
+    button(homeBody,"Permissions & authorizations","shield",false,
+      this::showPermissionsHub);
     gap(homeBody,20);
     LinearLayout privacy=card();rowTitle(privacy,"Private by design","No account, no subscription. Access is yours to authorize.",icon("shield",DesignSystem.TEAL,24));wide(homeBody,privacy);
     return scroll(homeBody);
@@ -476,27 +479,109 @@ public final class MainActivity extends Activity {
       }finally{if(connection!=null)connection.disconnect();}
     });
   }
-  private void showPermissionDetails(){
+  /** One owner-facing authorization hub; Android remains the only authority
+   * that may actually grant each permission. Required and optional are distinct.
+   */
+  private void showPermissionDetails(){showPermissionsHub();}
+  private void openOwnAppSettings(){
+    try{startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+      Uri.parse("package:"+getPackageName())));}
+    catch(Exception e){toast("Android app settings unavailable");}
+  }
+  private void showPermissionsHub(){
     try{
       JSONObject state=ControlPermissionMatrix.status(this);
-      String message="Developer Options: "+state.optBoolean("developer_options_enabled")+
-        "\nAccessibility: "+state.optBoolean("accessibility_enabled")+
-        "\nScreen capture active: "+state.optBoolean("media_projection_active")+
-        "\nNotifications: "+state.optBoolean("notifications_granted")+
-        "\nUsage access: "+state.optBoolean("usage_stats_granted")+
-        "\nOwn-app crash history: "+state.optBoolean("own_app_exit_history_available")+
-        "\n\nOther apps' private logs require their own approved diagnostic adapters. Developer Options alone do not unlock them.";
-      new AlertDialog.Builder(this).setTitle("Actual Android permissions")
-        .setMessage(message)
-        .setNegativeButton("Close",null)
-        .setNeutralButton("App permissions",(d,w)->{
-          Intent intent=new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-            Uri.parse("package:"+getPackageName()));
-          startActivity(intent);
-        })
-        .setPositiveButton("Accessibility settings",(d,w)->
-          startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))).show();
-    }catch(Exception e){toast("Permission inspection unavailable");}
+      boolean accessibility=state.optBoolean("accessibility_enabled");
+      boolean capture=state.optBoolean("media_projection_active");
+      boolean notifications=state.optBoolean("notifications_granted");
+      boolean usage=state.optBoolean("usage_stats_granted");
+      boolean mic=checkSelfPermission(Manifest.permission.RECORD_AUDIO)==
+        PackageManager.PERMISSION_GRANTED;
+      boolean installs=Build.VERSION.SDK_INT>=26&&
+        getPackageManager().canRequestPackageInstalls();
+      boolean battery=false;
+      try{
+        PowerManager power=(PowerManager)getSystemService(POWER_SERVICE);
+        battery=power!=null&&power.isIgnoringBatteryOptimizations(getPackageName());
+      }catch(Exception ignored){}
+      String[] rows={
+        "Remote touch · Required for phone input · "+(accessibility?"Enabled":"Not granted"),
+        "Screen sharing · Consent per session · "+(capture?"Active":"Not active"),
+        "Notifications · Recommended for background service · "+(notifications?"Allowed":"Not granted"),
+        "Microphone · Optional voice · "+(mic?"Allowed":"Not granted"),
+        "Usage access · Optional app observation · "+(usage?"Allowed":"Not granted"),
+        "Battery restrictions · Recommended for unattended jobs · "+
+          (battery?"Optimization exemption":"Check Samsung settings"),
+        "Install APK updates · Optional · "+(installs?"Allowed":"Not granted"),
+        "WireGuard VPN · Optional, never automatic · "+
+          (state.optBoolean("asterion_vpn_active")?"Active":"Inactive"),
+        "All Android app permissions · View Control settings",
+        "Developer options · Optional diagnostics only · "+
+          (state.optBoolean("developer_options_enabled")?"Enabled":"Disabled")
+      };
+      new AlertDialog.Builder(this).setTitle("Permissions & authorizations")
+        .setMessage("Tap an item to go directly to its Android authorization. "+
+          "Only remote touch and consented screen capture are needed for full "+
+          "phone remote control. Every permission requires your approval.")
+        .setItems(rows,(dlg,item)->openPermissionStep(item))
+        .setPositiveButton("Refresh", (d,w)->showPermissionsHub())
+        .setNegativeButton("Close",null).show();
+    }catch(Exception e){
+      toast("Permission status unavailable: "+e.getClass().getSimpleName());
+    }
+  }
+  private void openPermissionStep(int selected){
+    try{
+      switch(selected){
+        case 0:
+          startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
+          break;
+        case 1:
+          beginCapture();break;
+        case 2:
+          if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(
+             Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},
+              HUB_NOTIFICATION_REQUEST);
+          else openOwnAppSettings();
+          break;
+        case 3:
+          if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=
+             PackageManager.PERMISSION_GRANTED)
+            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},
+              HUB_MICROPHONE_REQUEST);
+          else openOwnAppSettings();
+          break;
+        case 4:
+          startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS));
+          break;
+        case 5:
+          showBatterySetup();break;
+        case 6:
+          if(Build.VERSION.SDK_INT>=26)
+            startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+              Uri.parse("package:"+getPackageName())));
+          else openOwnAppSettings();
+          break;
+        case 7:
+          showVpnDetails();break;
+        case 8:
+          openOwnAppSettings();break;
+        case 9:
+          startActivity(new Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS));
+          break;
+        default:break;
+      }
+    }catch(Exception e){
+      // Never misreport a Settings action as a granted permission.
+      new AlertDialog.Builder(this)
+        .setTitle("Android setting unavailable")
+        .setMessage("The requested Android settings panel could not open on "+
+          "this device. You can open Asterion Control's own app settings "+
+          "and navigate to the permission manually.")
+        .setPositiveButton("App settings",(d,w)->openOwnAppSettings())
+        .setNegativeButton("Close",null).show();
+    }
   }
   private void showVpnDetails(){
     try{
@@ -764,6 +849,9 @@ public final class MainActivity extends Activity {
     rowTitle(toolsShortcut,"Tools and capabilities",
       "AI, voice, app integrations, incidents, files and updates",icon("settings",DesignSystem.TEAL,22));
     wide(devicesBody,toolsShortcut);
+    gap(devicesBody,9);
+    button(devicesBody,"All Android authorizations","shield",false,
+      this::showPermissionsHub);
     gap(devicesBody,12);LinearLayout security=card();
     rowTitle(security,"Access & privacy","Only connected devices you authorize can control this phone",icon("shield",DesignSystem.TEAL,24));
     gap(security,12);privacyStatus=t("Access is off until you enable it. Android may request accessibility and screen-sharing permission.",12,DesignSystem.MUTED,false);
@@ -831,6 +919,9 @@ public final class MainActivity extends Activity {
     gap(privacyTools,10);
     twoActions(privacyTools,"VPN status","shield",this::showVpnDetails,
       "Security","settings",this::showSecurityChoices);
+    gap(privacyTools,9);
+    button(privacyTools,"All Android authorizations","shield",true,
+      this::showPermissionsHub);
     wide(toolsBody,privacyTools);
 
     // Internal relays, checkpoints and observation have authenticated APIs,
@@ -2070,6 +2161,14 @@ public final class MainActivity extends Activity {
     }
   }
   @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results){super.onRequestPermissionsResult(request,permissions,results);
+    if(request==HUB_MICROPHONE_REQUEST||request==HUB_NOTIFICATION_REQUEST){
+      boolean granted=results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED;
+      toast((request==HUB_MICROPHONE_REQUEST?"Microphone":"Notifications")+
+        (granted?" permission granted":" permission not granted"));
+      // A permission granted in this hub must NEVER start voice listening
+      // or auto-enable a background service.
+      return;
+    }
     if(request==MICROPHONE_REQUEST){
       if(results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED){
         if(runVoiceTestAfterPermission){runVoiceTestAfterPermission=false;testVoiceDialogue();}
