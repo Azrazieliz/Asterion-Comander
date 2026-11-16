@@ -14,6 +14,7 @@ ALLOWED={
  'pc_health':('GET','/api/v1/device-health'),
  'pc_diagnostic_triage':('GET','/api/v1/diagnostics/triage'),
  'pc_diagnostic_snapshot':('GET','/api/v1/diagnostics/snapshot'),
+ 'pc_diagnostic_coverage':('GET','/api/v1/diagnostics/coverage'),
  'pc_intelligence_capabilities':('GET','/api/v1/intelligence/capabilities'),
  'pc_intelligence_cycles':('GET','/api/v1/intelligence/cycles'),
  'pc_v2_models':('GET','/api/v1/v2/models'),
