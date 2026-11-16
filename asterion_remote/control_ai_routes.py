@@ -31,6 +31,36 @@ class CycleRequest(BaseModel):
     max_turns: int = Field(default=0,ge=0,le=100000)
 
 
+@router.get("/capabilities")
+def capabilities():
+    """Owner-visible *actual* feature readiness; never imply autonomous work."""
+    endpoint=os.getenv("ASTERION_LOCAL_MODEL_ENDPOINT","")
+    model=os.getenv("ASTERION_LOCAL_MODEL_ID","")
+    configured=False
+    if endpoint and model:
+        try:
+            LocalModelConfig(endpoint=endpoint,model=model)
+            configured=True
+        except (ValueError,TypeError):
+            configured=False
+    try:
+        registered=len(overnight_supervisor.recent(100))
+    except (ValueError,OSError):
+        registered=0
+    return {
+        "ok":True, "kind":"control_intelligence_readiness",
+        "local_model_configured":configured,
+        "local_model_reachable_verified":False,
+        "paid_cloud_fallback":False,
+        "cycle_registry_available":True,
+        "registered_cycles_visible":registered,
+        "work_executor_bound":False,
+        "automatic_project_work_running":False,
+        "reason":"A provider and an independently verified project executor are "
+                 "required before autonomous development can begin",
+    }
+
+
 @router.get("/cycles")
 def cycles(limit: int = 30):
     try:
