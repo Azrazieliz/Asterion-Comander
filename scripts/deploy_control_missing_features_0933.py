@@ -19,6 +19,7 @@ from pathlib import Path
 
 FILES = (
     "asterion_remote/native_routes.py",
+    "asterion_remote/diagnostic_routes.py",
     "asterion_remote/control_v2_routes.py",
     "asterion_remote/control_ai_routes.py",
     "asterion_remote/overnight_supervisor.py",
