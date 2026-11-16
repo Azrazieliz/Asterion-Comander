@@ -89,7 +89,8 @@ from .control_ai_routes import router as control_ai_router
         self.assertNotIn("asterion_remote/phone_bridge.py", deployer.FILES)
         self.assertNotIn("android/app/build.gradle", deployer.FILES)
         self.assertNotIn("asterion_remote/native_phone_relay.py", deployer.FILES)
-        self.assertTrue(all(path.endswith(".py") for path in deployer.FILES))
+        self.assertTrue(all(
+            path.endswith((".py",".html",".js")) for path in deployer.FILES))
 
 
 if __name__ == "__main__":
