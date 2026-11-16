@@ -85,10 +85,10 @@ public final class MainActivity extends Activity {
   private SharedPreferences prefs;
   private LinearLayout root,navbar,content,homeBody,healthBody,devicesBody;
   private FrameLayout stage;
-  private final View[] pages=new View[4];
-  private final LinearLayout[] tabButtons=new LinearLayout[4];
-  private final DesignSystem.Icon[] tabIcons=new DesignSystem.Icon[4];
-  private final TextView[] tabLabels=new TextView[4];
+  private final View[] pages=new View[5];
+  private final LinearLayout[] tabButtons=new LinearLayout[5];
+  private final DesignSystem.Icon[] tabIcons=new DesignSystem.Icon[5];
+  private final TextView[] tabLabels=new TextView[5];
   private TextView headerStatus,pcConnection,homeAgent,homeBattery,homeMemory,homeThermal,homeConnectionIssue,connectionIssue;
   private TextView healthBattery,healthTemp,healthMemory,healthStorage,healthThermal,healthWifi,healthActionStatus,pcPerformanceActionStatus;
   private TextView remoteConnection,remotePlaceholder,agentConnection,captureConnection,accessConnection,phoneAddress,hostHealth,pairingFeedback,transferFeedback,updateFeedback,phoneBridgeFeedback;
@@ -103,6 +103,7 @@ public final class MainActivity extends Activity {
   private TextView privacyStatus;
   private TextView securitySummary;
   private int currentTab=0;
+  private String pendingRemoteSection="desktop";
   private boolean webStarted=false,hostRefreshing=false;
   private boolean fullRepairInProgress=false;
   private String fullRepairTicket="";
@@ -160,7 +161,7 @@ public final class MainActivity extends Activity {
     }
     root=v();root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,new int[]{0xFF10162A,0xFF090D1C,0xFF070A14}));setContentView(root);
     buildHeader();stage=new FrameLayout(this);root.addView(stage,new LinearLayout.LayoutParams(-1,0,1));
-    pages[0]=scrollHome();pages[1]=remotePage();pages[2]=scrollHealth();pages[3]=scrollDevices();
+    pages[0]=scrollHome();pages[1]=remotePage();pages[2]=scrollHealth();pages[3]=scrollDevices();pages[4]=scrollTools();
     for(View page:pages){page.setVisibility(View.GONE);stage.addView(page,new FrameLayout.LayoutParams(-1,-1));}
     buildNav();show(0);updateHealth();handler.postDelayed(ticker,3500);
     // Owner-authorized continuation is persistent and controlled by the internal
@@ -190,8 +191,8 @@ public final class MainActivity extends Activity {
   private void buildNav(){
     View separator=line();root.addView(separator,new LinearLayout.LayoutParams(-1,dp(1)));
     navbar=h();navbar.setBackgroundColor(0xFF101526);navbar.setPadding(dp(9),dp(7),dp(9),dp(9));
-    String[] names={"Home","Screen","Health","Connect"};String[] images={"home","monitor","pulse","devices"};
-    for(int i=0;i<4;i++){final int index=i;LinearLayout slot=v();slot.setGravity(Gravity.CENTER);slot.setPadding(dp(1),dp(7),dp(1),dp(6));
+    String[] names={"Home","Screen","Health","Connect","Tools"};String[] images={"home","monitor","pulse","devices","settings"};
+    for(int i=0;i<pages.length;i++){final int index=i;LinearLayout slot=v();slot.setGravity(Gravity.CENTER);slot.setPadding(dp(1),dp(7),dp(1),dp(6));
       DesignSystem.Icon ic=icon(images[i],DesignSystem.MUTED,22);slot.addView(ic);
       TextView label=t(names[i],10.6f,DesignSystem.MUTED,false);label.setGravity(Gravity.CENTER);margin(slot,label,5);
       slot.setOnClickListener(w->show(index));slot.setContentDescription("Open "+names[i]);
@@ -222,6 +223,12 @@ public final class MainActivity extends Activity {
     homeBattery=smallMetric(metrics,"BATTERY","—",DesignSystem.TEAL);
     homeThermal=smallMetric(metrics,"THERMAL","—",DesignSystem.PURPLE);
     homeMemory=smallMetric(metrics,"FREE RAM","—",DesignSystem.WARNING);wide(homeBody,metrics);
+    gap(homeBody,13);
+    LinearLayout quick=card();
+    rowTitle(quick,"What do you want to do?","Capabilities and real incidents, without another setup screen",icon("settings",DesignSystem.TEAL,22));
+    gap(quick,13);twoActions(quick,"Tools","settings",()->show(4),
+      "Incidents","activity",this::showCrossAppDiagnostics);
+    wide(homeBody,quick);
     gap(homeBody,20);
     LinearLayout privacy=card();rowTitle(privacy,"Private by design","No account, no subscription. Access is yours to authorize.",icon("shield",DesignSystem.TEAL,24));wide(homeBody,privacy);
     return scroll(homeBody);
@@ -236,7 +243,12 @@ public final class MainActivity extends Activity {
   private View remotePage(){LinearLayout layout=v();layout.setPadding(dp(17),dp(11),dp(17),dp(14));
     LinearLayout title=h();LinearLayout labels=v();labels.addView(eyebrow("REMOTE VIEW"));margin(labels,t("Remote control",21,DesignSystem.TEXT,true),7);title.addView(labels,new LinearLayout.LayoutParams(0,-2,1));
     LinearLayout refresh=h();refresh.setGravity(Gravity.CENTER);refresh.setPadding(dp(11),dp(11),dp(11),dp(11));DesignSystem.clickable(refresh,this,DesignSystem.SURFACE2,DesignSystem.EDGE,13);refresh.addView(icon("refresh",DesignSystem.PURPLE,20));refresh.setContentDescription("Refresh live remote view");refresh.setOnClickListener(w->{if(web!=null&&webStarted&&web.getVisibility()==View.VISIBLE){web.evaluateJavascript("(function(){if(typeof state!==\'undefined\'&&state.page===\'android\'&&typeof discover===\'function\'){discover();}else if(typeof startLive===\'function\'){startLive();}else{location.reload();}})()",null);}else connectRemote(true);});title.addView(refresh);wide(layout,title);
-    remoteConnection=t("Checking Windows connection…",12,DesignSystem.MUTED,false);margin(layout,remoteConnection,10);gap(layout,13);
+    remoteConnection=t("Checking Windows connection…",12,DesignSystem.MUTED,false);margin(layout,remoteConnection,10);gap(layout,10);
+    LinearLayout remoteTabs=h();
+    action(remoteTabs,"PC","monitor",false,()->showRemoteSection("desktop"));
+    action(remoteTabs,"Phone","phone",false,()->showRemoteSection("android"));
+    action(remoteTabs,"Incidents","activity",false,()->showRemoteSection("diagnostics"));
+    wide(layout,remoteTabs);gap(layout,10);
     FrameLayout frame=new FrameLayout(this);frame.setBackground(DesignSystem.shape(this,DesignSystem.SURFACE,DesignSystem.EDGE,21));
     web=new WebView(this);web.setBackgroundColor(DesignSystem.SURFACE);WebSettings settings=web.getSettings();settings.setJavaScriptEnabled(true);settings.setDomStorageEnabled(false);settings.setAllowFileAccess(false);
     settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);settings.setCacheMode(WebSettings.LOAD_NO_CACHE);settings.setBuiltInZoomControls(false);settings.setDisplayZoomControls(false);
@@ -244,9 +256,11 @@ public final class MainActivity extends Activity {
       @Override public boolean shouldOverrideUrlLoading(WebView view,WebResourceRequest request){return !sameOrigin(request.getUrl().toString(),prefs.getString("url",""));}
       @Override public void onPageFinished(WebView view,String url){if(!sameOrigin(url,prefs.getString("url","")))return;
         String token=prefs.getString("token","");
-        String css="header,footer,.headline,.authbar,.notice{display:none!important}.app{padding:7px 9px!important}main{margin:0!important}.tabs{margin:0 0 12px!important}.tabs button{padding:9px 14px!important}.tabs button[data-page=files],.tabs button[data-page=processes],.tabs button[data-page=system]{display:none!important}.sectiontitle{flex-wrap:wrap!important}body{background:#13192b!important}.phone-viewer{min-height:270px!important}";
+        String css="header,footer,.headline,.authbar,.notice,.tabs{display:none!important}.app{padding:7px 9px!important}main{margin:0!important}.tabs{margin:0 0 12px!important}.tabs button{padding:9px 14px!important}.tabs button[data-page=files],.tabs button[data-page=processes],.tabs button[data-page=system]{display:none!important}.sectiontitle{flex-wrap:wrap!important}body{background:#13192b!important}.phone-viewer{min-height:270px!important}";
         String script="(function(){if(!document.getElementById('asterion-embedded')){const st=document.createElement('style');st.id='asterion-embedded';st.textContent="+JSONObject.quote(css)+";document.head.appendChild(st);}const t=document.querySelector('#token');const b=document.querySelector('#connect');if(t&&b){t.value="+JSONObject.quote(token)+";b.click();}})()";
         view.evaluateJavascript(script,null);
+         view.evaluateJavascript("(function(){if(typeof showPage==='function')showPage("+
+           JSONObject.quote(pendingRemoteSection)+");})()",null);
       }
     });frame.addView(web,new FrameLayout.LayoutParams(-1,-1));
     emptyRemote=v();emptyRemote.setGravity(Gravity.CENTER);pad(emptyRemote,24,16);
@@ -746,9 +760,79 @@ public final class MainActivity extends Activity {
     wide(phone,phoneStopAction);
     wide(devicesBody,phone);
 
+    gap(devicesBody,12);LinearLayout toolsShortcut=clickableCard(()->show(4));
+    rowTitle(toolsShortcut,"Tools and capabilities",
+      "AI, voice, app integrations, incidents, files and updates",icon("settings",DesignSystem.TEAL,22));
+    wide(devicesBody,toolsShortcut);
+    gap(devicesBody,12);LinearLayout security=card();
+    rowTitle(security,"Access & privacy","Only connected devices you authorize can control this phone",icon("shield",DesignSystem.TEAL,24));
+    gap(security,12);privacyStatus=t("Access is off until you enable it. Android may request accessibility and screen-sharing permission.",12,DesignSystem.MUTED,false);
+    wide(security,privacyStatus);wide(devicesBody,security);
+
+    gap(devicesBody,24);LinearLayout advanced=clickableCard(()->toggleAdvancedSetup());
+    rowTitle(advanced,"Pair or change computer","One-time setup · saved for later sessions",icon("settings",DesignSystem.PURPLE,21));
+    wide(devicesBody,advanced);gap(devicesBody,10);
+    advancedSetup=card();advancedSetup.setVisibility(View.GONE);
+    wide(advancedSetup,eyebrow("COMPUTER ADDRESS"));gap(advancedSetup,8);
+    serverUrl=input(prefs.getString("url",""),false,"Windows computer · private network address");wide(advancedSetup,serverUrl);
+    gap(advancedSetup,13);wide(advancedSetup,eyebrow("ONE-TIME PAIRING CODE"));gap(advancedSetup,8);
+    serverToken=input("",false,"8-digit code shown by Windows");wide(advancedSetup,serverToken);
+    gap(advancedSetup,13);button(advancedSetup,"Pair this computer","check",true,()->{
+      completePairing(serverUrl.getText().toString().trim(),serverToken.getText().toString().trim());
+      toggleAdvancedSetup();
+    });
+    gap(advancedSetup,13);TextView notice=t("Advanced pairing details stay hidden in everyday use. For connections outside your local network, use your private encrypted VPN; never expose the current HTTP service to the public internet.",11,DesignSystem.MUTED,false);wide(advancedSetup,notice);
+    wide(devicesBody,advancedSetup);
+    // Retained internally for registration; never displayed as a plain-text access credential.
+    localAddress=input(prefs.getString("phoneip",ipAddress()),false,"");
+    return scroll(devicesBody);
+  }
+  /** One navigation surface for Control capabilities.
+   * Existing features are moved here, not cloned or removed.
+   */
+  private View scrollTools(){
+    LinearLayout toolsBody=v();
+    wide(toolsBody,eyebrow("CONTROL CAPABILITIES"));
+    sectionTitle(toolsBody,"Tools & services.",
+      "Actual feature status, useful commands and explicit limitations.");
+    gap(toolsBody,15);
+    LinearLayout intelligence=card();
+    rowTitle(intelligence,"AI development",
+      "Local inference readiness and registered project cycles",
+      icon("activity",DesignSystem.PURPLE,23));
+    gap(intelligence,12);
+    button(intelligence,"Check AI and autonomous cycles","activity",true,
+      this::showWindowsIntelligence);
+    gap(intelligence,9);
+    button(intelligence,"Android continuation status","check",false,
+      this::showCycleStatus);
+    wide(toolsBody,intelligence);
+    gap(toolsBody,12);LinearLayout incidents=card();
+    rowTitle(incidents,"Incident investigation",
+      "Cross-app opt-in evidence and Android's own crash history",
+      icon("activity",DesignSystem.TEAL,23));
+    gap(incidents,10);
+    button(incidents,"Asterion application incidents","activity",true,
+      this::showCrossAppDiagnostics);
+    gap(incidents,8);
+    button(incidents,"Android Control crash history","activity",false,
+      this::showLocalDiagnostics);
+    gap(incidents,8);
+    button(incidents,"Open evidence dashboard","monitor",false,
+      ()->showRemoteSection("diagnostics"));
+    wide(toolsBody,incidents);
+    gap(toolsBody,12);LinearLayout privacyTools=card();
+    rowTitle(privacyTools,"Network & privacy",
+      "Owner-managed WireGuard and local security permissions",
+      icon("shield",DesignSystem.TEAL,23));
+    gap(privacyTools,10);
+    twoActions(privacyTools,"VPN status","shield",this::showVpnDetails,
+      "Security","settings",this::showSecurityChoices);
+    wide(toolsBody,privacyTools);
+
     // Internal relays, checkpoints and observation have authenticated APIs,
     // not duplicate diagnostic switches on this user-facing screen.
-    gap(devicesBody,12);LinearLayout voice=card();
+    gap(toolsBody,12);LinearLayout voice=card();
     rowTitle(voice,"Voice control",
       "Say Asterion followed by your request · works in background while Android permits microphone access",
       icon("activity",DesignSystem.TEAL,22));
@@ -772,53 +856,89 @@ public final class MainActivity extends Activity {
         catch(Exception e){toast("Voice could not stop: "+e.getMessage());}
         updateHealth();
       });
-    wide(voice,voiceStopAction);wide(devicesBody,voice);
+    wide(voice,voiceStopAction);wide(toolsBody,voice);
 
-    gap(devicesBody,12);LinearLayout integrations=card();
+    gap(toolsBody,12);LinearLayout integrations=card();
     rowTitle(integrations,"Asterion app integrations",
       "Native commands · per-app consent · no unrestricted access",icon("shield",DesignSystem.TEAL,22));
     gap(integrations,10);
     button(integrations,"Manage app access","settings",false,this::showAppBridgeApprovals);
-    wide(devicesBody,integrations);
+    wide(toolsBody,integrations);
 
-    gap(devicesBody,12);LinearLayout transfer=card();
+    gap(toolsBody,12);LinearLayout transfer=card();
     rowTitle(transfer,"Direct Wi-Fi file transfer","PC → Phone · Files are saved to Downloads/Asterion Control",icon("download",DesignSystem.TEAL,24));
     gap(transfer,12);button(transfer,"Send a PC file to this phone","share",true,this::promptWifiTransfer);
     transferCancelAction=v();button(transferCancelAction,"Cancel transfer","power",false,this::cancelWifiTransfer);
     wide(transfer,transferCancelAction);transferCancelAction.setVisibility(View.GONE);
     gap(transfer,9);transferFeedback=t("No transfer active. Uses the existing private Wi-Fi connection, never GitHub or ADB.",12,DesignSystem.MUTED,false);
-    transferFeedback.setMaxLines(6);wide(transfer,transferFeedback);wide(devicesBody,transfer);
+    transferFeedback.setMaxLines(6);wide(transfer,transferFeedback);wide(toolsBody,transfer);
 
-    gap(devicesBody,12);LinearLayout updater=card();
+    gap(toolsBody,12);LinearLayout updater=card();
     rowTitle(updater,"Asterion Control updates","Official signed releases · install without losing data",icon("refresh",DesignSystem.TEAL,22));
     gap(updater,12);button(updater,"Check for updates","refresh",true,
       ()->UpdateManager.check(this,this::showUpdateFeedback));
     gap(updater,9);updateFeedback=t("Checks the official release, verifies SHA-256 and requests Android approval before installing.",12,DesignSystem.MUTED,false);
     updateFeedback.setMaxLines(5);wide(updater,updateFeedback);
-    wide(devicesBody,updater);
+    wide(toolsBody,updater);
 
-    gap(devicesBody,12);LinearLayout security=card();
-    rowTitle(security,"Access & privacy","Only connected devices you authorize can control this phone",icon("shield",DesignSystem.TEAL,24));
-    gap(security,12);privacyStatus=t("Access is off until you enable it. Android may request accessibility and screen-sharing permission.",12,DesignSystem.MUTED,false);
-    wide(security,privacyStatus);wide(devicesBody,security);
 
-    gap(devicesBody,24);LinearLayout advanced=clickableCard(()->toggleAdvancedSetup());
-    rowTitle(advanced,"Pair or change computer","One-time setup · saved for later sessions",icon("settings",DesignSystem.PURPLE,21));
-    wide(devicesBody,advanced);gap(devicesBody,10);
-    advancedSetup=card();advancedSetup.setVisibility(View.GONE);
-    wide(advancedSetup,eyebrow("COMPUTER ADDRESS"));gap(advancedSetup,8);
-    serverUrl=input(prefs.getString("url",""),false,"Windows computer · private network address");wide(advancedSetup,serverUrl);
-    gap(advancedSetup,13);wide(advancedSetup,eyebrow("ONE-TIME PAIRING CODE"));gap(advancedSetup,8);
-    serverToken=input("",false,"8-digit code shown by Windows");wide(advancedSetup,serverToken);
-    gap(advancedSetup,13);button(advancedSetup,"Pair this computer","check",true,()->{
-      completePairing(serverUrl.getText().toString().trim(),serverToken.getText().toString().trim());
-      toggleAdvancedSetup();
+    return scroll(toolsBody);
+  }
+
+  private void showWindowsIntelligence(){
+    String host=prefs.getString("url","").replaceAll("/+$","");
+    String token=prefs.getString("token","");
+    if(host.isEmpty()||token.isEmpty()){
+      toast("Windows Control is not paired");return;
+    }
+    io.execute(()->{
+      HttpURLConnection connection=null;
+      String message;
+      try{
+        connection=(HttpURLConnection)new URL(host+
+          "/api/v1/intelligence/capabilities").openConnection();
+        connection.setConnectTimeout(4000);
+        connection.setReadTimeout(8000);
+        connection.setRequestProperty("Authorization","Bearer "+token);
+        int status=connection.getResponseCode();
+        if(status!=200)throw new IllegalStateException("HTTP "+status);
+        byte[] raw=connection.getInputStream().readNBytes(16385);
+        if(raw.length>16384)throw new IllegalStateException("Response too large");
+        JSONObject data=new JSONObject(new String(raw,StandardCharsets.UTF_8));
+        if(!data.optBoolean("ok",false))throw new IllegalStateException("Invalid status");
+        message="Local model configured: "+
+          (data.optBoolean("local_model_configured")?"Yes":"No")+
+          "\\nLocal inference reachability verified: "+
+          (data.optBoolean("local_model_reachable_verified")?"Yes":"No")+
+          "\\nRegistered cycles (recent): "+data.optInt("registered_cycles_visible",0)+
+          "\\nVerified work executor bound: "+
+          (data.optBoolean("work_executor_bound")?"Yes":"No")+
+          "\\nAutomatic development running: "+
+          (data.optBoolean("automatic_project_work_running")?"Yes":"No")+
+          "\\n\\n"+data.optString("reason",
+            "A verified model and executor are required.");
+      }catch(Exception e){
+        message="Intelligence capability unavailable: "+
+          e.getClass().getSimpleName()+
+          ". No autonomous work or inference is claimed.";
+      }finally{if(connection!=null)connection.disconnect();}
+      final String output=message;
+      runOnUiThread(()->{
+        if(destroyed)return;
+        new AlertDialog.Builder(this).setTitle("AI & development readiness")
+          .setMessage(output).setPositiveButton("Close",null).show();
+      });
     });
-    gap(advancedSetup,13);TextView notice=t("Advanced pairing details stay hidden in everyday use. For connections outside your local network, use your private encrypted VPN; never expose the current HTTP service to the public internet.",11,DesignSystem.MUTED,false);wide(advancedSetup,notice);
-    wide(devicesBody,advancedSetup);
-    // Retained internally for registration; never displayed as a plain-text access credential.
-    localAddress=input(prefs.getString("phoneip",ipAddress()),false,"");
-    return scroll(devicesBody);
+  }
+  private void showRemoteSection(String section){
+    if(!"desktop".equals(section)&&!"android".equals(section)
+       &&!"diagnostics".equals(section))return;
+    pendingRemoteSection=section;
+    if(currentTab!=1)show(1);
+    if(web!=null&&webStarted&&web.getVisibility()==View.VISIBLE)
+      web.evaluateJavascript(
+        "(function(){if(typeof showPage==='function')showPage("+
+        JSONObject.quote(section)+");})()",null);
   }
   private void transferStatus(String message){
     if(transferFeedback!=null)transferFeedback.setText(message);
@@ -1161,7 +1281,7 @@ public final class MainActivity extends Activity {
       tabLabels[i].setTextColor(selected?DesignSystem.TEXT:DesignSystem.MUTED);tabIcons[i].tint(selected?DesignSystem.PURPLE:DesignSystem.MUTED);
       if(selected)tabButtons[i].setBackground(DesignSystem.shape(this,0xFF292743,0,15));else tabButtons[i].setBackgroundColor(Color.TRANSPARENT);
     }
-    if(page==1){connectRemote(false);if(!hostRefreshing)checkHost();}if(page==0||page==2||page==3)updateHealth();
+    if(page==1){connectRemote(false);if(!hostRefreshing)checkHost();}if(page==0||page==2||page==3||page==4)updateHealth();
   }
   private void save(){prefs.edit().putString("url",serverUrl.getText().toString().trim())
     .putString("phoneip",localAddress.getText().toString().trim()).apply();updateHealth();}
