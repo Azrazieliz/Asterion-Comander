@@ -62,10 +62,13 @@ class CapabilitySurfaceTests(unittest.TestCase):
                      "Direct Wi-Fi file transfer","Asterion Control updates"):
             self.assertIn(item,tools)
             self.assertNotIn(item,connect)
-        for item in ("AI development","Incident investigation","Network & privacy"):
+        for item in ("On-device AI","Incident investigation","Network & privacy"):
             self.assertIn(item,tools)
+        self.assertIn('this::showPhoneAiChat',tools)
+        self.assertIn('this::showPhoneAiStatus',tools)
         self.assertIn('private void showWindowsIntelligence()',source)
         self.assertIn('"/api/v1/intelligence/capabilities"',source)
+        self.assertIn('OnDeviceLlm.generate(getApplicationContext(),prompt)',source)
 
     def test_embedded_windows_navigation_not_duplicated(self):
         text=JAVA.read_text("utf8")
