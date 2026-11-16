@@ -581,11 +581,37 @@ public final class MainActivity extends Activity {
       }else{
         if(configured)
           dialog.setPositiveButton("Connect",(d,w)->requestVpnConsentAndConnect());
+        else
+          dialog.setPositiveButton("Get free VPN profile",(d,w)->showFreeVpnConfigSetup());
         dialog.setNeutralButton(configured?"Replace configuration":"Import configuration",
           (d,w)->showVpnImportType());
       }
       dialog.show();
     }catch(Exception e){toast("VPN status unavailable: "+e.getClass().getSimpleName());}
+  }
+  private void showFreeVpnConfigSetup(){
+    new AlertDialog.Builder(this)
+      .setTitle("Set up a free WireGuard tunnel")
+      .setMessage("Asterion Control already includes the WireGuard engine, "+
+        "but no VPN server or account is bundled. A third-party peer must "+
+        "supply a valid configuration.\n\n"+
+        "Proton VPN's Free plan currently allows manual WireGuard "+
+        "configurations. Create a free Proton account, open Downloads > "+
+        "WireGuard configuration, and download the generated .conf file. "+
+        "Import its contents into Asterion Control. This does not share "+
+        "your configuration with Control's Windows service.\n\n"+
+        "After importing, Android must separately approve the VPN. "+
+        "A working internet route and exit IP must be tested before "+
+        "calling the VPN connected. No speed, port forwarding, "+
+        "or rotation guarantees are implied.")
+      .setPositiveButton("Open Proton account",(d,w)->{
+        try{
+          startActivity(new Intent(Intent.ACTION_VIEW,
+            Uri.parse("https://account.protonvpn.com")));
+        }catch(Exception e){toast("Could not open Proton setup website");}
+      })
+      .setNeutralButton("Import WireGuard profile",(d,w)->showVpnImportType())
+      .setNegativeButton("Close",null).show();
   }
   private void showVpnImportType(){
     final String[] options={"Private-device split routes (recommended)",
