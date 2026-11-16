@@ -23,7 +23,9 @@ class PartnerOwnerUiTests(unittest.TestCase):
         self.assertIn('process_pss_kb',s)
         self.assertIn('android_historical_exits',s)
         self.assertIn('installed_gguf_count',s)
-        self.assertIn('engine_telemetry_available',s)
+        self.assertIn('stored_queue_counts_verified',s)
+        self.assertIn('stored_work_counts_verified',s)
+        self.assertIn('live_workers_verified',s)
         self.assertIn('Control has not loaded or',s)
         self.assertIn('No result is fabricated',s)
 
