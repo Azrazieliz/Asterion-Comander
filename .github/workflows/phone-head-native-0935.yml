@@ -10,6 +10,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  statuses: write
 concurrency:
   group: control-phone-head-0935
   cancel-in-progress: true
@@ -136,3 +137,40 @@ jobs:
           path: android/app/build/outputs/apk/release/app-release.apk
           retention-days: 2
           if-no-files-found: error
+
+      - name: Phone-head build result as commit status
+        if: always()
+        env:
+          CONTROL_JOB_RESULT: ${{ job.status }}
+          CONTROL_SIGNER_READY: ${{ steps.owner.outputs.signed }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import json,os,urllib.request,urllib.error
+          result=os.getenv("CONTROL_JOB_RESULT","failure")
+          signed=os.getenv("CONTROL_SIGNER_READY","false")
+          state="success" if result=="success" else "failure"
+          if state=="success":
+              summary=("Native/verified GGUF and owner-signed release built" if signed=="true"
+                       else "Native/verified GGUF built; signing certificate unavailable")
+          else:summary="Phone-head Android build failed; inspect run logs"
+          data=json.dumps({
+              "state":state,
+              "description":summary[:140],
+              "context":"asterion/phone-head-0935",
+              "target_url":"https://github.com/"+os.environ["GITHUB_REPOSITORY"]+
+                           "/actions/runs/"+os.environ["GITHUB_RUN_ID"],
+          }).encode()
+          request=urllib.request.Request(
+              "https://api.github.com/repos/"+os.environ["GITHUB_REPOSITORY"]+
+              "/statuses/"+os.environ["GITHUB_SHA"],
+              data=data,
+              headers={"Authorization":"Bearer "+os.environ["GH_TOKEN"],
+                       "Accept":"application/vnd.github+json",
+                       "Content-Type":"application/json",
+                       "X-GitHub-Api-Version":"2022-11-28"},
+              method="POST")
+          with urllib.request.urlopen(request,timeout=20) as response:
+              if response.status!=201:raise SystemExit("GitHub build status not recorded")
+          print("PHONE_HEAD_BUILD_STATUS_RECORDED="+state)
+          PY
