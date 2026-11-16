@@ -86,7 +86,11 @@ from .control_ai_routes import router as control_ai_router
         self.assertEqual(
             sorted(deployer.FILES),
             sorted(set(deployer.FILES)))
-        self.assertNotIn("asterion_remote/phone_bridge.py", deployer.FILES)
+        self.assertIn("asterion_remote/phone_bridge.py", deployer.FILES)
+        adapter=(ROOT/"asterion_remote/phone_bridge.py").read_text("utf8")
+        for endpoint in ("/diagnostics/vpn", "/diagnostics/events",
+                         "/health", "/app-bridge/apps"):
+            self.assertIn(endpoint,adapter)
         self.assertNotIn("android/app/build.gradle", deployer.FILES)
         self.assertNotIn("asterion_remote/native_phone_relay.py", deployer.FILES)
         self.assertTrue(all(
