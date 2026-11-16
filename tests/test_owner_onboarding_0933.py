@@ -56,9 +56,10 @@ class OwnerOnboardingTests(unittest.TestCase):
         for route in ("Settings.ACTION_ACCESSIBILITY_SETTINGS",
                       "Settings.ACTION_USAGE_ACCESS_SETTINGS",
                       "Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES",
-                      "Settings.ACTION_APPLICATION_DETAILS_SETTINGS",
                       "Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS"):
             self.assertIn(route,permissions)
+        self.assertIn("openOwnAppSettings();break;",permissions)
+        self.assertIn("Settings.ACTION_APPLICATION_DETAILS_SETTINGS",s)
         self.assertIn("HUB_MICROPHONE_REQUEST",permissions)
         self.assertIn("HUB_NOTIFICATION_REQUEST",permissions)
         self.assertIn("if(request==HUB_MICROPHONE_REQUEST||request==HUB_NOTIFICATION_REQUEST)",s)
