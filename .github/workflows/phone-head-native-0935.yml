@@ -6,6 +6,7 @@ on:
     paths:
       - 'android/**'
       - 'tests/test_phone_head_native_0935.py'
+      - 'tests/test_android_dialog_choices_0935.py'
       - '.github/workflows/phone-head-native-0935.yml'
   workflow_dispatch:
 permissions:
