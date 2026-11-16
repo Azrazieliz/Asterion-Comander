@@ -18,6 +18,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  statuses: write
 jobs:
   windows-relay:
     runs-on: windows-latest
@@ -46,3 +47,24 @@ jobs:
             }
             Write-Output "POWERSHELL_AST_OK $script"
           }
+
+      - name: Publish independent recovery regression result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_RESULT: ${{ job.status }}
+        shell: pwsh
+        run: |
+          $result=if($env:JOB_RESULT -eq 'success'){'success'}else{'failure'}
+          $body=@{
+            state=$result
+            context='asterion/control-relay-recovery'
+            description=if($result -eq 'success'){'Relay recovery tests and PowerShell parse passed'}else{'Relay recovery test failed; do not deploy'}
+            target_url=('https://github.com/'+$env:GITHUB_REPOSITORY+'/actions/runs/'+$env:GITHUB_RUN_ID)
+          } | ConvertTo-Json -Compress
+          Invoke-RestMethod -Method POST -Uri ('https://api.github.com/repos/'+$env:GITHUB_REPOSITORY+'/statuses/'+$env:GITHUB_SHA) -Headers @{
+            Authorization=('Bearer '+$env:GH_TOKEN)
+            Accept='application/vnd.github+json'
+            'X-GitHub-Api-Version'='2022-11-28'
+          } -ContentType 'application/json' -Body $body -TimeoutSec 25 | Out-Null
+          Write-Output ('CONTROL_RELAY_RECOVERY_TEST='+$result)
