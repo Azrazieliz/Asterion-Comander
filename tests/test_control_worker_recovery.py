@@ -9,6 +9,7 @@ from asterion_remote import github_bridge_git as control
 def prepare(tmp_path, monkeypatch):
     monkeypatch.setattr(control, "ROOT", tmp_path)
     monkeypatch.setattr(control, "git", lambda *args, **kwargs: "")
+    monkeypatch.setattr(control, "preserve_dirty_receipts", lambda: 0)
     monkeypatch.setattr(control, "publish", lambda paths: None)
     monkeypatch.setattr(control, "ensure_agent", lambda key: {"ok": True})
     active = tmp_path / "commands" / "active"
