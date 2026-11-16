@@ -806,6 +806,9 @@ public final class MainActivity extends Activity {
     gap(intelligence,9);
     button(intelligence,"Android continuation status","check",false,
       this::showCycleStatus);
+    gap(intelligence,9);
+    twoActions(intelligence,"Models","activity",()->showWindowsRegistry("models"),
+      "Skills","settings",()->showWindowsRegistry("skills"));
     wide(toolsBody,intelligence);
     gap(toolsBody,12);LinearLayout incidents=card();
     rowTitle(incidents,"Incident investigation",
@@ -863,6 +866,9 @@ public final class MainActivity extends Activity {
       "Native commands · per-app consent · no unrestricted access",icon("shield",DesignSystem.TEAL,22));
     gap(integrations,10);
     button(integrations,"Manage app access","settings",false,this::showAppBridgeApprovals);
+    gap(integrations,9);
+    button(integrations,"Check app diagnostic coverage","activity",false,
+      this::showIntegrationCoverage);
     wide(toolsBody,integrations);
 
     gap(toolsBody,12);LinearLayout transfer=card();
@@ -927,6 +933,110 @@ public final class MainActivity extends Activity {
         if(destroyed)return;
         new AlertDialog.Builder(this).setTitle("AI & development readiness")
           .setMessage(output).setPositiveButton("Close",null).show();
+      });
+    });
+  }
+  private JSONObject readOwnerStatus(String path)throws Exception{
+    String host=prefs.getString("url","").replaceAll("/+$","");
+    String token=prefs.getString("token","");
+    if(host.isEmpty()||token.isEmpty())throw new IllegalStateException("Not paired");
+    // Only predetermined app-owned authenticated paths may reach this method.
+    if(!("/api/v1/diagnostics/coverage".equals(path)||
+          "/api/v1/v2/models".equals(path)||
+          "/api/v1/v2/skills".equals(path)))
+      throw new IllegalArgumentException("Unsupported owner status route");
+    HttpURLConnection conn=null;
+    try{
+      conn=(HttpURLConnection)new URL(host+path).openConnection();
+      conn.setRequestMethod("GET");
+      conn.setConnectTimeout(4000);conn.setReadTimeout(8000);
+      conn.setRequestProperty("Authorization","Bearer "+token);
+      if(conn.getResponseCode()!=200)throw new IllegalStateException(
+        "Windows HTTP "+conn.getResponseCode());
+      byte[] raw=conn.getInputStream().readNBytes(32769);
+      if(raw.length>32768)throw new IllegalStateException("Response too large");
+      JSONObject obj=new JSONObject(new String(raw,StandardCharsets.UTF_8));
+      if(!obj.optBoolean("ok",false))throw new IllegalStateException(
+        "Unverified owner status");
+      return obj;
+    }finally{if(conn!=null)conn.disconnect();}
+  }
+  private void showWindowsRegistry(String kind){
+    if(!"models".equals(kind)&&!"skills".equals(kind))return;
+    io.execute(()->{
+      String message;
+      try{
+        JSONObject response=readOwnerStatus("/api/v1/v2/"+kind);
+        org.json.JSONArray rows=response.optJSONArray("items");
+        int count=rows==null?0:rows.length();
+        StringBuilder summary=new StringBuilder()
+          .append(count).append(" saved ").append(kind).append("\\n");
+        if(count==0)summary.append(
+          "\\nNo locally registered entries. This does not install or train a model.");
+        else for(int i=0;i<Math.min(12,count);i++){
+          JSONObject item=rows.optJSONObject(i);
+          if(item!=null)summary.append("\\n• ")
+            .append(item.optString("id",item.optString("repo","unknown")))
+            .append(" · ").append(item.optString("state","recorded"));
+        }
+        if("models".equals(kind))summary.append(
+          "\\n\\nModel inventory is not evidence of working inference or training.");
+        else summary.append(
+          "\\n\\nOnly owner-approved deterministic skills can be executed.");
+        message=summary.toString();
+      }catch(Exception e){
+        message="Registry unavailable: "+e.getClass().getSimpleName()+
+          ". No missing data or model status is inferred.";
+      }
+      final String result=message;
+      runOnUiThread(()->{
+        if(destroyed)return;
+        new AlertDialog.Builder(this).setTitle(
+          "models".equals(kind)?"Model Laboratory":"Skill Studio")
+          .setMessage(result).setPositiveButton("Close",null).show();
+      });
+    });
+  }
+  private void showIntegrationCoverage(){
+    io.execute(()->{
+      String message;
+      try{
+        JSONObject response=readOwnerStatus("/api/v1/diagnostics/coverage");
+        StringBuilder summary=new StringBuilder();
+        summary.append("Event sources observed: ")
+          .append(response.optInt("recent_event_source_count",0));
+        if(!response.optBoolean("phone_app_catalog_available"))
+          summary.append("\\nPhone app inventory unavailable");
+        if(!response.optBoolean("partner_bridge_catalog_available"))
+          summary.append("\\nNative bridge inventory unavailable");
+        else summary.append("\\nNative opt-in bridge providers: ")
+          .append(response.optInt("native_partner_count",0));
+        org.json.JSONArray apps=response.optJSONArray("apps");
+        if(apps!=null)for(int i=0;i<Math.min(20,apps.length());i++){
+          JSONObject item=apps.optJSONObject(i);
+          if(item==null)continue;
+          summary.append("\\n\\n").append(item.optString("name","App"))
+            .append("\\nBridge: ")
+            .append(item.optBoolean("partner_bridge_discovered")?
+              (item.optBoolean("partner_bridge_approved")?
+                "approved":"requires local approval"):"not discovered")
+            .append(" · Recent diagnostic events: ")
+            .append(item.optBoolean("recent_instrumented_event_observed")?
+              "observed":"not observed");
+        }
+        summary.append("\\n\\nNo observed event is not proof of a healthy or "+
+          "uninstrumented app. Other apps' private logs are inaccessible.");
+        message=summary.toString();
+      }catch(Exception e){
+        message="Integration coverage unavailable: "+
+          e.getClass().getSimpleName()+
+          ". Existing app access and pairing are unchanged.";
+      }
+      final String result=message;
+      runOnUiThread(()->{
+        if(destroyed)return;
+        new AlertDialog.Builder(this).setTitle("Asterion app coverage")
+          .setMessage(result).setPositiveButton("Close",null).show();
       });
     });
   }
