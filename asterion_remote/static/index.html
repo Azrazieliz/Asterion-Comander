@@ -15,21 +15,23 @@
 <div id="android-status" class="device-status" role="status" aria-live="polite">Checking phone connection…</div><div class="phone-wrap"><div class="phone-viewer"><img id="android-image" alt="Live authorized Android display"/><div id="android-empty" class="placeholder"><div class="placeholder-icon">▯</div><strong>Phone not linked</strong><span>Phone screen sharing is paused. Start it in Control and approve Android’s prompt.</span></div><div class="screen-meta"><span class="pulse-dot"></span> ANDROID DISPLAY</div></div><div class="phone-tools"><div class="overline">NAVIGATION</div><div class="rowtools"><button data-android-key="KEYCODE_BACK">‹ &nbsp;Back</button><button data-android-key="KEYCODE_HOME">⌂ &nbsp;Home</button><button data-android-key="KEYCODE_APP_SWITCH">▢ &nbsp;Recent</button></div><div class="inputrow"><input id="android-text" placeholder="Text to enter on Android"><button id="android-type" class="primary">Send →</button></div><div class="rowtools"><button id="android-info">Connection details</button><button id="android-shot" hidden>Refresh view</button><button id="android-ui" hidden>UI tree</button><button id="android-pair" hidden>Pair</button><button id="android-connect" hidden>Connect</button></div><div id="android-detail" class="status-details" hidden></div></div></div>
 <p class="notice">Android screen sharing requires an authorized capture session. Input access is controlled independently by Android.</p></section>
 <section id="diagnostics" class="page" aria-label="Recorded diagnostic evidence">
-<div class="sectiontitle"><div><div class="overline">OBSERVABILITY</div><h3>Incident diagnostics</h3></div><div class="controls"><button id="diagnostic-refresh" class="primary" type="button">Refresh evidence</button></div></div>
-<p class="notice">Read-only view of recorded, opted-in diagnostic events. Historical events never prove current phone state, a queue stall, or the root cause of an HTTP error.</p>
+<div class="sectiontitle"><div><div class="overline">OBSERVABILITY</div><h3>What needs attention</h3></div><div class="controls"><button id="diagnostic-refresh" class="primary" type="button">Refresh evidence</button></div></div>
+<p class="notice">Control shows recorded events only from apps that send them. Open an app below to investigate it. A missing event does not prove the app works.</p>
 <div class="diagnostic-filter">
-<label for="diagnostic-app">App/package filter</label><input id="diagnostic-app" type="text" placeholder="All instrumented apps" maxlength="96" autocomplete="off"/>
-<label for="diagnostic-window">Evidence window</label><select id="diagnostic-window"><option value="60">Last hour</option><option value="1440" selected>Last 24 hours</option><option value="10080">Last 7 days</option></select>
+<label for="diagnostic-app">Investigate app</label><input id="diagnostic-app" type="text" placeholder="All apps with recorded events" maxlength="96" autocomplete="off"/>
+<label for="diagnostic-window">Look back</label><select id="diagnostic-window"><option value="60">Last hour</option><option value="1440" selected>Last 24 hours</option><option value="10080">Last 7 days</option></select>
 </div>
-<div id="diagnostic-state" class="device-status" role="status" aria-live="polite">Connect to the Windows agent to load recorded evidence.</div>
+<div id="diagnostic-state" class="device-status" role="status" aria-live="polite">Connect to Windows to inspect recorded events.</div>
 <div id="diagnostic-metrics" class="diagnostic-metrics"></div>
+<div id="diagnostic-guidance" class="device-status" role="status">Checking which apps have sent diagnostic evidence…</div>
 <div class="diagnostic-grid">
-<div class="diagnostic-panel"><h4>Observed symptoms</h4><div id="diagnostic-findings" class="diagnostic-records"></div></div>
-<div class="diagnostic-panel"><h4>Operations requiring review</h4><div id="diagnostic-operations" class="diagnostic-records"></div></div>
-<div class="diagnostic-panel diagnostic-phone"><h4>Android Control local journal</h4><div id="diagnostic-phone" class="diagnostic-records" aria-live="polite">Recorded phone events are not yet loaded.</div></div>
-<div class="diagnostic-panel diagnostic-phone"><h4>Application integration coverage</h4><div id="diagnostic-coverage" class="diagnostic-records" aria-live="polite">Connect to inspect opted-in partner applications.</div></div>
+<div class="diagnostic-panel"><h4>Problems actually recorded</h4><div id="diagnostic-findings" class="diagnostic-records"></div></div>
+<div class="diagnostic-panel"><h4>Jobs needing a current check</h4><div id="diagnostic-operations" class="diagnostic-records"></div></div>
+<div class="diagnostic-panel diagnostic-phone"><h4>Control's connection history</h4><div id="diagnostic-phone" class="diagnostic-records" aria-live="polite">Connection history is available after pairing.</div></div>
+<div class="diagnostic-panel diagnostic-phone"><h4>Your apps and integration status</h4><div id="diagnostic-coverage" class="diagnostic-records" aria-live="polite">Choose an app to check whether it has a native bridge and recent events.</div></div>
+<div class="diagnostic-panel diagnostic-phone"><h4>Recent relevant events</h4><div id="diagnostic-timeline" class="diagnostic-records"></div></div>
 </div>
-<p class="notice" id="diagnostic-limits">Missing instrumentation is not evidence of no failures. No root-cause claims without supporting traces.</p>
+<p class="notice" id="diagnostic-limits">Only real recorded events are shown. To diagnose failures in an app without instrumentation, that app must implement an approved diagnostic bridge.</p>
 </section>
 <section id="terminal" class="page internal" hidden><button id="terminal-list">Jobs</button><input id="cwd" value="."><button id="terminal-run">Run</button><textarea id="command"></textarea><pre id="terminal-output"></pre><button id="terminal-stop">Stop</button><button id="terminal-refresh">Refresh</button><span id="job-meta"></span><input id="android-command"><button id="android-run-command">Android</button><pre id="android-shell-output"></pre></section>
 <section id="files" class="page internal" hidden><button id="file-refresh">Refresh</button><input id="path" value="."><button id="open-dir">Open</button><button id="file-up">Up</button><button id="file-mkdir">Folder</button><button id="file-new">File</button><input id="file-upload" type="file"><button id="file-search">Search</button><div id="file-list"></div><strong id="file-title">File</strong><button id="file-save">Save</button><button id="file-delete">Delete</button><button id="file-rename">Rename</button><button id="file-download">Download</button><textarea id="file-content"></textarea></section>
