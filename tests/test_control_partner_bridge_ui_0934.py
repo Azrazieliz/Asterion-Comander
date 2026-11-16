@@ -24,10 +24,8 @@ class PartnerOwnerUiTests(unittest.TestCase):
         self.assertIn('android_historical_exits',s)
         self.assertIn('installed_gguf_count',s)
         self.assertIn('engine_telemetry_available',s)
-        self.assertIn('model_loaded_verified', (ROOT/
-            "android/app/src/main/java/com/asterion/control/MainActivity.java").read_text("utf8")
-            + "model_loaded_verified") # Diagnostic never claims model loaded on fallback.
-        self.assertIn('Data', "Data")  # Tests keep read-only UI surface.
+        self.assertIn('Control has not loaded or',s)
+        self.assertIn('No result is fabricated',s)
 
     def test_bridge_requires_local_owner_approval_and_signer_pinning(self):
         s=self.bridge
