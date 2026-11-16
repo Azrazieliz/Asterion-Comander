@@ -18,7 +18,7 @@ try{
 # A live process is NOT proof it has fetched or acknowledged a command.
 # This block must run BEFORE API failure branches that exit this watchdog.
 $bridge=@(Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" -ErrorAction SilentlyContinue |
-  Where-Object {$_.CommandLine -match '(?i)(^|\\s)-m\\s+asterion_remote\\.github_bridge_git(\\s|$)'})
+  Where-Object {$_.CommandLine -match '(?i)(^|\s)-m\s+asterion_remote\.github_bridge_git(\s|$)'})
 $bridgeHealthFile=Join-Path $state 'control-git-bridge-health.json'
 $bridgeRestartFile=Join-Path $state 'control-git-bridge-last-recovery.txt'
 $bridgeLog=Join-Path $state 'control-watchdog-recovery.log'
