@@ -13,6 +13,41 @@ URL='https://github.com/'+REPO+'.git'
 ROOT=Path(os.environ.get('ASTERION_BRIDGE_GIT_WORKTREE',str(Path(os.environ.get('LOCALAPPDATA',str(Path.home()))) / 'AsterionControl' / 'private-bridge-repo')))
 STAMP=ROOT.parent/'git-bridge-migration-v1.done'
 
+# Persistent, sanitized liveness journal. The watchdog must check progress,
+# not merely the existence of a python.exe process. Never write credentials,
+# request arguments, user files, network endpoints or command stdout here.
+HEALTH=ROOT.parent/'control-git-bridge-health.json'
+HEALTH_STATE={'phase':'starting','last_sync_utc':None,'last_publish_utc':None,
+              'inflight_id':None,'pending_count':None,'consecutive_errors':0}
+HEALTH_PHASES={'starting','setup','syncing','idle','processing','publishing',
+               'retrying','startup_error'}
+def _utc_now():
+    from datetime import datetime,timezone
+    return datetime.now(timezone.utc).isoformat(timespec='seconds')
+
+def health(phase,**fields):
+    if phase not in HEALTH_PHASES:
+        raise ValueError('Unsupported transport health phase')
+    allowed={'last_sync_utc','last_publish_utc','inflight_id',
+             'pending_count','consecutive_errors','error_kind'}
+    if set(fields)-allowed:
+        raise ValueError('Unsupported transport health metadata')
+    HEALTH_STATE.update(fields)
+    HEALTH_STATE.update(phase=phase,heartbeat_utc=_utc_now(),
+                        schema=1,transport='private_git',pid=os.getpid())
+    HEALTH.parent.mkdir(parents=True,exist_ok=True)
+    temp=HEALTH.with_suffix('.tmp')
+    try:
+        with temp.open('w',encoding='utf8') as target:
+            json.dump(HEALTH_STATE,target,sort_keys=True,separators=(',',':'))
+            target.flush()
+            os.fsync(target.fileno())
+        os.replace(temp,HEALTH)
+    finally:
+        if temp.exists():
+            temp.unlink()
+
+
 
 def agent_host():
     """Follow the native Control host across private LAN changes."""
@@ -293,9 +328,12 @@ def migrate():
     STAMP.write_text('migrated',encoding='utf8')
 
 def cycle(key):
+    health('syncing',inflight_id=None)
     sync_remote()
+    health('idle',last_sync_utc=_utc_now(),consecutive_errors=0,error_kind=None)
     tasks=entries()
     unfinished=outstanding_jobs()
+    health('idle',pending_count=len(tasks)+len(unfinished))
     if tasks or unfinished:
         ensure_agent(key)
     if unfinished:
@@ -310,6 +348,7 @@ def cycle(key):
     batch=[]
     for request in tasks[:12]:
         identity=request.stem
+        health('processing',inflight_id=identity)
         # This receipt prevents replay after crashes but is not a success claim.
         write_result(identity,{'id':identity,'ok':False,'status':'running'},publish_now=False)
         started=time.monotonic()
@@ -336,28 +375,43 @@ def cycle(key):
                    'elapsed_ms':round((time.monotonic()-started)*1000),
                    'error':str(exc)[:500]}
         write_result(identity,reply,publish_now=False)
+        health('idle',inflight_id=None)
         batch.append(Path('results')/(identity+'.json'))
         print('Asterion Control',identity,reply['status'],flush=True)
     if batch:
+        health('publishing',inflight_id=None)
         publish(batch)
+        health('idle',last_publish_utc=_utc_now(),
+               pending_count=max(0,len(tasks)-len(batch)),inflight_id=None)
     return len(batch)
 
 def main():
-    setup()
-    migrate()
-    secret=local_token()
+    health('starting')
+    try:
+        health('setup')
+        setup()
+        migrate()
+        secret=local_token()
+    except Exception as exc:
+        health('startup_error',error_kind=type(exc).__name__)
+        raise
     print('Asterion Control private Git transport active; no REST quota',flush=True)
     failures=0
     while True:
         try:
             processed=cycle(secret)
             failures=0
-            # A short command burst keeps interactive control responsive;
-            # idle polling remains bounded, without GitHub REST API quotas.
+            # A short command burst keeps interactive control responsive.
             time.sleep(2 if processed else 3)
-        except KeyboardInterrupt:return
+        except KeyboardInterrupt:
+            health('idle',inflight_id=None)
+            return
         except Exception as exc:
             failures+=1
+            # Preserve the current inflight_id when an operation is uncertain:
+            # the watchdog must never restart/replay a side effect blindly.
+            health('retrying',consecutive_errors=failures,
+                   error_kind=type(exc).__name__)
             print('Bridge retry:',type(exc).__name__,str(exc)[:180],flush=True)
             time.sleep(min(45,failures*5))
 
