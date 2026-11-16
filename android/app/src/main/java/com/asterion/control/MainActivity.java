@@ -1960,19 +1960,30 @@ public final class MainActivity extends Activity {
     boolean tracked=trackedApps().contains(pkg);
     String state=bridge?(approved?"Native bridge authorized":
       "Native bridge available — owner approval needed"):
-      "No Asterion native bridge provided by this app";
-    String[] actions={
+      "No Asterion native bridge provided by this installed version";
+    boolean writer=pkg.startsWith("com.asterion.writing.");
+    String[] actions=writer?new String[]{
       tracked?"Remove from my Control apps":"Add to my Control apps",
       bridge?(approved?"Revoke native bridge":"Authorize native bridge"):
-        "Why can't Control connect to this app?",
+        "How to enable this app's bridge",
+      "Read live process and crash evidence",
+      "Check installed Writer models",
+      "Open installed app",
+      "Open its Android app settings",
+      "Choose another app"
+    }:new String[]{
+      tracked?"Remove from my Control apps":"Add to my Control apps",
+      bridge?(approved?"Revoke native bridge":"Authorize native bridge"):
+        "How to enable this app's bridge",
+      "Read live process and crash evidence",
       "Open installed app",
       "Open its Android app settings",
       "Choose another app"
     };
     new AlertDialog.Builder(this).setTitle(label)
       .setMessage(state+"\n"+pkg+"\n\n"+
-        "Adding to My apps creates a working shortcut only. "+
-        "Diagnostics and app actions require that app's own native bridge and authorization.")
+        "Add creates a shortcut immediately. The live app diagnostic tools "+
+        "require an updated, approved provider in the selected app.")
       .setItems(actions,(dlg,which)->{
         if(which==0){
           if(markTrackedApp(pkg,!tracked))
@@ -1983,13 +1994,18 @@ public final class MainActivity extends Activity {
         }else if(which==1){
           if(!bridge){
             new AlertDialog.Builder(this)
-              .setTitle("App integration unavailable")
+              .setTitle("Asterion partner bridge not installed")
               .setMessage(label+" has no exported "+pkg+
-                ".asterion.bridge provider. Control cannot add one "+
-                "without an update to that app. You can add it to My apps "+
-                "to launch it, but that does not enable private logs, "+
-                "downloads, diagnostics, or arbitrary app commands.")
-              .setPositiveButton("My apps", (d,w)->showMyAddedApps())
+                ".asterion.bridge provider. Update THIS app to a build "+
+                "containing the owner-signed v1 bridge, then reopen it "+
+                "from Control's app picker. The shortcut already works "+
+                "for launching but cannot read its private state.")
+              .setPositiveButton("Open app settings",(d,w)->{
+                try{startActivity(new Intent(
+                  Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                  Uri.parse("package:"+pkg)));}
+                catch(Exception e){toast("Settings unavailable");}
+              })
               .setNegativeButton("Back",(d,w)->
                 showAppIntegrationActions(pkg,label,false,false)).show();
           }else{
@@ -1997,9 +2013,9 @@ public final class MainActivity extends Activity {
               .setTitle(approved?"Revoke this app's bridge?":"Authorize this app?")
               .setMessage("Application: "+label+"\n"+
                 (approved?"Revoking Control's local approval will disable "+
-                  "future native calls.":"Control will bind approval to the exact "+
-                  "installed signing certificate. The app must also authorize "+
-                  "each operation individually."))
+                  "future native calls.":"Control pins the exact installed "+
+                  "application certificate. Only explicitly supported "+
+                  "read-only actions can run on the new v1 bridge."))
               .setPositiveButton(approved?"Revoke":"Authorize",(d,w)->{
                 try{
                   AppBridge.approveLocally(this,pkg,!approved);
@@ -2010,7 +2026,18 @@ public final class MainActivity extends Activity {
                 showAppBridgeApprovals();
               }).setNegativeButton("Cancel",null).show();
           }
-        }else if(which==2){
+        }else if(which==2 || (writer&&which==3)){
+          String action=writer&&which==3?"models.status":"diagnostics.summary";
+          if(!bridge||!approved){
+            new AlertDialog.Builder(this).setTitle("Native integration required")
+              .setMessage("This installed app has not exposed and approved "+
+                "the Asterion v1 bridge. Control cannot inspect its private "+
+                "process or model information without the partner's cooperation.")
+              .setPositiveButton("Configure app",(d,w)->
+                showAppIntegrationActions(pkg,label,bridge,approved))
+              .setNegativeButton("Close",null).show();
+          }else showPartnerEvidence(pkg,label,action);
+        }else if(which==(writer?4:3)){
           io.execute(()->{
             try{
               JSONObject outcome=AppCatalog.requestLaunch(this,pkg);
@@ -2022,14 +2049,95 @@ public final class MainActivity extends Activity {
               runOnUiThread(()->toast("App launch rejected"));
             }
           });
-        }else if(which==3){
+        }else if(which==(writer?5:4)){
           try{
             startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
               Uri.parse("package:"+pkg)));
           }catch(Exception e){toast("Android app settings unavailable");}
-        }else if(which==4)showAppBridgeApprovals();
+        }else if(which==(writer?6:5))showAppBridgeApprovals();
       }).setNegativeButton("Close",null).show();
   }
+
+  private void showPartnerEvidence(String pkg,String label,String action){
+    if(!"diagnostics.summary".equals(action)&&!"models.status".equals(action))
+      return;
+    io.execute(()->{
+      String display;
+      try{
+        JSONObject request=new JSONObject()
+          .put("package",pkg)
+          .put("action",action)
+          .put("request_id",java.util.UUID.randomUUID().toString())
+          .put("payload",new JSONObject());
+        JSONObject response=AppBridge.invoke(this,request);
+        JSONObject result=response.optJSONObject("result");
+        JSONObject evidence=result==null?null:result.optJSONObject("evidence");
+        if(!response.optBoolean("ok")||evidence==null)
+          throw new IllegalStateException(response.optString("status","unavailable"));
+        StringBuilder report=new StringBuilder();
+        if("models.status".equals(action)){
+          int count=evidence.optInt("installed_gguf_count",0);
+          report.append("Completed GGUF model files: ").append(count)
+            .append("\nTotal model bytes: ")
+            .append(evidence.optLong("installed_bytes",0))
+            .append("\n\n");
+          org.json.JSONArray models=evidence.optJSONArray("models");
+          if(models!=null)for(int i=0;i<Math.min(models.length(),12);i++){
+            JSONObject model=models.optJSONObject(i);
+            if(model!=null)report.append("• ")
+              .append(model.optString("name","unknown"))
+              .append(" · ").append(model.optLong("bytes",0))
+              .append(" bytes\n");
+          }
+          report.append("\nThese are verified completed files in Writer's "+
+            "private model directory. Control has not loaded or "+
+            "benchmarked them, and cannot infer with them until "+
+            "an explicit approved inference bridge exists.");
+        }else{
+          report.append("Live native bridge response: YES")
+            .append("\nVersion: ").append(evidence.optString("version_name","unknown"))
+            .append("\nApp process memory (PSS): ")
+            .append(evidence.optInt("process_pss_kb",0)).append(" KiB")
+            .append("\nApp process heap used: ")
+            .append(evidence.optLong("process_heap_used_bytes",0)).append(" bytes");
+          org.json.JSONArray exits=evidence.optJSONArray("android_historical_exits");
+          report.append("\n\nAndroid process exits in history: ")
+            .append(exits==null?0:exits.length());
+          if(exits!=null)for(int i=0;i<Math.min(exits.length(),8);i++){
+            JSONObject exit=exits.optJSONObject(i);
+            if(exit==null)continue;
+            report.append("\n• ")
+              .append(localExitMeaning(exit.optInt("reason_code",-1)));
+            long timestamp=exit.optLong("timestamp_ms",0);
+            if(timestamp>0)report.append(" · ").append(
+              android.text.format.DateFormat.format(
+                "dd MMM HH:mm",new java.util.Date(timestamp)));
+          }
+          report.append("\n\nEngine queue and individual request traces: ")
+            .append(evidence.optBoolean("engine_telemetry_available")?
+              "Reported by partner":"Not yet exposed by this partner");
+          report.append("\nThis is real process evidence, not a diagnosis "+
+            "of model quality or third-party sites.");
+        }
+        display=report.toString();
+      }catch(Exception exc){
+        display="Unable to inspect "+label+": "+
+          exc.getClass().getSimpleName()+
+          ". No result is fabricated. Verify the updated partner "+
+          "app is installed and approved.";
+      }
+      final String report=display;
+      runOnUiThread(()->{
+        if(destroyed)return;
+        new AlertDialog.Builder(this)
+          .setTitle("models.status".equals(action)?
+            label+" · Installed models":label+" · Live diagnostics")
+          .setMessage(report)
+          .setPositiveButton("Close",null).show();
+      });
+    });
+  }
+
   private void showMyAddedApps(){
     java.util.Set<String> saved=trackedApps();
     java.util.Map<String,String> installed=AppCatalog.launchable(this);
