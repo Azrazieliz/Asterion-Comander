@@ -13,6 +13,11 @@ app=FastAPI(title="Asterion native phone WSS relay",
             docs_url=None, redoc_url=None, openapi_url=None)
 app.include_router(phone_router)
 
+# Authenticated Windows-local control of the existing phone-outbound WSS.
+# Not an MCP gateway; the listener still binds only to 127.0.0.1:8995.
+from .native_phone_rpc import router as local_rpc_router
+app.include_router(local_rpc_router)
+
 @app.get("/healthz")
 def health():
     return {"service":"asterion-native-phone-wss","ok":True,
