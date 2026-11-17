@@ -87,42 +87,27 @@ if($bridge.Count -eq 0){
     $inflight=if($health){[string]$health.inflight_id}else{''}
     if(-not [string]::IsNullOrWhiteSpace($inflight)){
       Add-Content $bridgeLog ('Bridge stalled with uncertain in-flight action; NOT restarted '+(Get-Date -Format o))
-    }elseif(-not $workerOk){
-      # The native API must recover first; no unsafe relay cycling.
-      Add-Content $bridgeLog ('Bridge stalled while Windows API offline; deferred '+(Get-Date -Format o))
     }else{
-      $jobsKnown=$false
-      $activeJobs=$true
-      $runningJobCount=-1
-      $jobProbeError='none'
-      try {
-        $jobs=Invoke-RestMethod ($url+'/api/v1/commands') -Headers @{
-          Authorization=('Bearer '+$token)
-        } -TimeoutSec 4 -ErrorAction Stop
-        if($null -eq $jobs -or $null -eq $jobs.items){
-          throw 'Native job list missing its items field'
-        }
-        $runningJobCount=@($jobs.items | Where-Object {$_.status -eq 'running'}).Count
-        $activeJobs=($runningJobCount -gt 0)
-        $jobsKnown=$true
-      }catch{
-        $jobProbeError=$_.Exception.GetType().Name
-      }
+      # The Git relay and native Windows job host are separate processes.
+      # Native jobs survive relay restart; accepted jobs reconcile via durable
+      # receipts. Blocking on a full/unavailable native job list prevented
+      # automatic recovery even when the relay had no in-flight operation.
+      # The inflight_id safety guard above is unchanged.
       $cooldown=$true
       $cooldownReason='none'
       if(Test-Path $bridgeRestartFile){
         try {
           $last=[datetimeoffset]::Parse((Get-Content $bridgeRestartFile -Raw).Trim())
-          $cooldown=(([datetimeoffset]::UtcNow-$last).TotalMinutes -ge 20)
+          $cooldown=(([datetimeoffset]::UtcNow-$last).TotalMinutes -ge 10)
           if(-not $cooldown){$cooldownReason='recent_recovery'}
         }catch{
           $cooldown=$false
           $cooldownReason='unreadable_last_recovery'
         }
       }
-      if($jobsKnown -and -not $activeJobs -and $cooldown){
-        # Only the uniquely identified original Git worker may be replaced.
-        # Existing PowerShell mutex-owning supervisor starts its replacement.
+      if($cooldown){
+        # Only the uniquely identified stale Git relay is terminated.
+        # The existing supervisor restarts it; no native jobs are terminated.
         try {
           Stop-Process -Id $current.ProcessId -Force -ErrorAction Stop
           Set-Content -LiteralPath $bridgeRestartFile -Value (Get-Date -Format o) -Encoding ASCII
@@ -132,12 +117,8 @@ if($bridge.Count -eq 0){
           Add-Content $bridgeLog ('Stalled Git bridge restart failed '+(Get-Date -Format o))
         }
       }else{
-        # Report precise, nonsecret safety-gate status; do not leak tokens,
-        # endpoint, command lines, job arguments, or results.
-        Add-Content $bridgeLog ('Stalled Git bridge restart deferred jobsKnown='+$jobsKnown+
-          ' runningJobCount='+$runningJobCount+' cooldown='+$cooldown+
-          ' cooldownReason='+$cooldownReason+' jobProbeError='+$jobProbeError+
-          ' '+(Get-Date -Format o))
+        Add-Content $bridgeLog ('Stalled Git bridge restart deferred cooldown='+
+          $cooldown+' cooldownReason='+$cooldownReason+' '+(Get-Date -Format o))
       }
     }
   }
