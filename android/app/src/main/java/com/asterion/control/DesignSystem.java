@@ -88,6 +88,7 @@ public final class DesignSystem {
         case "arrow":line(c,4,12,20,12);line(c,14,6,20,12);line(c,14,18,20,12);break;
         case "refresh":c.drawArc(4,4,20,20,55,280,false,p);line(c,18,5,20,9);line(c,20,9,16,9);break;
         case "power":c.drawArc(4,4,20,20,-57,296,false,p);line(c,12,2,12,12);break;
+        case "globe":{c.drawCircle(12,12,9,p);c.drawOval(8,3,16,21,p);line(c,3,12,21,12);c.drawArc(3,6,21,18,0,180,false,p);break;}
         case "wifi":{Path path=new Path();path.moveTo(2,8);path.quadTo(12,-1,22,8);path.moveTo(5.5f,12);path.quadTo(12,6,18.5f,12);path.moveTo(9,16);path.quadTo(12,13,15,16);c.drawPath(path,p);p.setStyle(Paint.Style.FILL);c.drawCircle(12,20,1.4f,p);break;}
         case "shield":{Path path=new Path();path.moveTo(12,2);path.lineTo(20,5);path.lineTo(19,13);path.quadTo(17,19,12,22);path.quadTo(7,19,5,13);path.lineTo(4,5);path.close();c.drawPath(path,p);line(c,9,12,11.3f,14.3f);line(c,11.3f,14.3f,16,9.5f);break;}
         case "share":{c.drawRoundRect(5,8,19,22,2,2,p);line(c,12,16,12,2);line(c,7,7,12,2);line(c,17,7,12,2);break;}
