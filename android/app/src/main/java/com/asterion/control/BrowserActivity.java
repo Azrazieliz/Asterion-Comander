@@ -386,7 +386,7 @@ public final class BrowserActivity extends Activity {
                     .setMessage(preview+"\n\n"+text.length()+" characters • DOM extraction\n"+
                         "SHA-256: "+hash)
                     .setPositiveButton("Copy text",(d,w)->copy("Page text",text))
-                    .setNeutralButton("Copy evidence",(d,w)->copy("Page evidence",record.toString(2)))
+                    .setNeutralButton("Copy evidence",(d,w)->copy("Page evidence",record.toString()))
                     .setNegativeButton("Close",null).show();
             }catch(Exception err){notice("Page extraction unavailable: "+err.getClass().getSimpleName());}
         });
