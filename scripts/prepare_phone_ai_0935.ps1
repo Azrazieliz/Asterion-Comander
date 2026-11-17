@@ -7,6 +7,22 @@ $weights=Join-Path $root 'android\app\src\main\assets\models\Qwen3-0.6B-Q4_K_M.g
 $expected='373db06783953f0981572d008f183eb2167b93304f5adbf7c4ce6ed6a91ee437'
 $size=484220288L
 $stage='D:\AsterionControlModelStage'
+# Pinned 484 MB GGUF, llama.cpp source, NDK native build, and temporary
+# compiler outputs must fit without risking the owner's other projects.
+# A hard preflight avoids half-filled disks and abandoned model downloads.
+$stageRoot=[System.IO.Path]::GetPathRoot($stage)
+$sourceRoot=[System.IO.Path]::GetPathRoot($root)
+$stageDrive=[System.IO.DriveInfo]::new($stageRoot)
+$sourceDrive=[System.IO.DriveInfo]::new($sourceRoot)
+$requiredFree=4GB
+if($stageDrive.AvailableFreeSpace -lt $requiredFree -or
+   $sourceDrive.AvailableFreeSpace -lt $requiredFree){
+ throw ('RELEASE_BLOCKED: insufficient verified disk space for native model preparation. '+
+        'Required free: >=4 GiB on build and stage drives; source_free_GiB='+
+        [math]::Round($sourceDrive.AvailableFreeSpace/1GB,2)+
+        ' stage_free_GiB='+[math]::Round($stageDrive.AvailableFreeSpace/1GB,2)+
+        '. Existing user files were not modified.')
+}
 $ndk=Join-Path $env:LOCALAPPDATA 'Android\Sdk\ndk\27.2.12479018'
 if(-not(Test-Path (Join-Path $ndk 'build\cmake\android.toolchain.cmake'))){
  throw 'Original Android NDK 27.2 not present'
