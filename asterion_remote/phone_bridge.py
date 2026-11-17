@@ -62,6 +62,50 @@ def load() -> dict | None:
             return p if len(p.get('token','')) >= 32 else None
         except (ValueError, OSError, KeyError, HTTPException): return None
 
+# The phone maintains an existing outbound authenticated WSS connection on
+# both Wi-Fi and cellular. Prefer it for normal RPC; use private LAN only when
+# the loopback WSS relay has verifiably NOT dispatched a command.
+# This does not create a new public phone listener or an MCP gateway.
+def _request_via_outbound_wss(path: str, method: str, payload: dict | None,
+                               timeout: float, token: str) -> httpx.Response | None:
+    import base64
+    envelope = {'path': path, 'method': method, 'payload': payload,
+                'timeout_seconds': min(22.0, max(0.5, timeout))}
+    try:
+        resp = _phone_http.post('http://127.0.0.1:8995/phone/rpc', json=envelope,
+                                headers={'Authorization': 'Bearer ' + token},
+                                timeout=min(25.0, timeout + 2.0))
+    except httpx.ConnectError:
+        return None  # No local relay: the phone action was not dispatched.
+    except httpx.HTTPError as exc:
+        if method == 'GET': return None  # Idempotent reads may use direct LAN.
+        raise HTTPException(503, 'Phone command outcome unknown over native WSS: '
+                            + type(exc).__name__) from exc
+    if resp.status_code in (404, 503):
+        try: detail = resp.json().get('detail', {})
+        except ValueError: detail = {}
+        if isinstance(detail, dict) and detail.get('dispatched') is False:
+            return None
+    if resp.status_code >= 400:
+        try: detail = resp.json().get('detail', {})
+        except ValueError: detail = {}
+        reason = detail.get('state', 'native_rpc_failure') if isinstance(detail, dict) else 'native_rpc_failure'
+        # Never silently replay a POST after the phone may have received it.
+        raise HTTPException(503, 'Native phone RPC ' + str(reason))
+    try:
+        item = resp.json()
+        if item['kind'] == 'json':
+            return httpx.Response(200, json=item['value'])
+        if item['kind'] == 'image/jpeg':
+            raw = base64.b64decode(item['data'], validate=True)
+            if len(raw) > 8_000_000:
+                raise ValueError('Image exceeds limit')
+            return httpx.Response(200, content=raw, headers={'content-type': 'image/jpeg'})
+    except (ValueError, KeyError, TypeError) as exc:
+        raise HTTPException(502, 'Invalid authenticated native phone RPC response') from exc
+    raise HTTPException(502, 'Unsupported native phone response')
+
+
 def request(path: str, method: str='GET', payload: dict | None=None, timeout: float=5.0) -> httpx.Response:
     if path not in {'/health', '/ui', '/input', '/screen', '/continuation/status', '/continuation/queue', '/continuation/dispatch', '/observation/status', '/observation/events', '/observation/frame', '/voice/status', '/voice/question', '/voice/ack', '/voice/enable', '/voice/stop', '/voice/settings', '/cycles/status', '/cycles/start', '/cycles/pause', '/cycles/resume', '/cycles/stop', '/cycles/confirm-new-chat', '/network/status', '/github-bridge/status', '/performance/status', '/performance/mode', '/performance/optimize', '/diagnostics/logcat', '/diagnostics/exit-history', '/diagnostics/events', '/diagnostics/security', '/diagnostics/permissions', '/diagnostics/vpn', '/apps', '/apps/launch', '/app-bridge/apps', '/app-bridge/invoke', '/app-bridge/operation', '/continuation/ack', '/continuation/cancel', '/chat/new' } and not re.fullmatch(r'/observation/frame/frame-[0-9]{10,15}\.jpg',path):
         raise HTTPException(400, 'Unsupported phone API call')
@@ -71,6 +115,9 @@ def request(path: str, method: str='GET', payload: dict | None=None, timeout: fl
     if not p: raise HTTPException(503, 'Phone agent not registered')
     started=time.perf_counter()
     headers={'Authorization':'Bearer '+p['token']}
+    native = _request_via_outbound_wss(path, method, payload, timeout, p['token'])
+    if native is not None:
+        return native
     # Retrying a GET is safe; POST may already have executed on the phone.
     # A transport-level failure of a POST is an UNKNOWN OUTCOME, not permission
     # to repeat a tap, install, delete, or ChatGPT Send.
