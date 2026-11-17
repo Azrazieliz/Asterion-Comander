@@ -449,19 +449,23 @@ public final class MainActivity extends Activity {
   /** Phone-head diagnostics: query the installed Android partner catalog
    * directly. Windows event analysis is optional, never a prerequisite.
    */
+  /** Owner-facing app health, not an API/command matrix.
+   * Every visible status reflects actual installed package/provider/approval.
+   * Engine health is not inferred from a successful bridge discovery.
+   */
   private void showCrossAppDiagnostics(){
     io.execute(()->{
       try{
         java.util.Map<String,String> installed=AppCatalog.launchable(this);
-        JSONObject discovery=AppBridge.list(this);
-        org.json.JSONArray providers=discovery.getJSONArray("apps");
-        java.util.Map<String,Boolean> available=new java.util.HashMap<>();
+        org.json.JSONArray providers=AppBridge.list(this).getJSONArray("apps");
+        java.util.Map<String,Boolean> approved=new java.util.HashMap<>();
         for(int i=0;i<providers.length();i++){
           JSONObject item=providers.getJSONObject(i);
-          available.put(item.getString("package"),item.optBoolean("approved"));
+          approved.put(item.getString("package"),item.optBoolean("approved",false));
         }
         java.util.List<String> packages=new ArrayList<>();
-        java.util.List<String> titles=new ArrayList<>();
+        java.util.List<String> labels=new ArrayList<>();
+        int ready=0,needsApproval=0,observed=0;
         for(java.util.Map.Entry<String,String> app:installed.entrySet()){
           String pkg=app.getKey(),label=app.getValue();
           if(!(label.toLowerCase(Locale.ROOT).startsWith("asterion")||
@@ -469,36 +473,101 @@ public final class MainActivity extends Activity {
                pkg.startsWith("com.azrael.pixivdumpsync")||
                pkg.equals("com.ailm.android")))continue;
           if(pkg.equals(getPackageName()))continue;
-          packages.add(pkg);
-          String bridge=available.containsKey(pkg)?
-            (available.get(pkg)?"Approved · read live evidence":
-             "Bridge available · tap to authorize"):
-            "No native bridge in installed build";
-          titles.add(label+"\n"+bridge);
+          packages.add(pkg);labels.add(label);
+          if(!approved.containsKey(pkg))observed++;
+          else if(Boolean.TRUE.equals(approved.get(pkg)))ready++;
+          else needsApproval++;
         }
+        final int integrated=ready,pending=needsApproval,external=observed;
         runOnUiThread(()->{
           if(destroyed)return;
-          new AlertDialog.Builder(this)
-            .setTitle("Phone diagnostics · "+available.size()+" bridges found")
-            .setItems(titles.toArray(new String[0]),(d,index)->{
-              String pkg=packages.get(index);
-              showAppIntegrationActions(pkg,installed.get(pkg),
-                available.containsKey(pkg),
-                Boolean.TRUE.equals(available.get(pkg)));
-            })
-            .setPositiveButton("Windows event archive",(d,w)->
-              showRemoteSection("diagnostics"))
-            .setNegativeButton("Close",null).show();
+          LinearLayout page=v();pad(page,15,12);
+          LinearLayout overview=card();
+          rowTitle(overview,"Application health",
+            "Installed apps, actual access and diagnostic coverage",
+            icon("activity",DesignSystem.TEAL,24));
+          gap(overview,12);
+          TextView totals=t(integrated+" approved   ·   "+
+            pending+" need access   ·   "+external+" observation only",
+            12,DesignSystem.TEXT,true);
+          wide(overview,totals);gap(overview,7);
+          wide(overview,t("A connected app bridge does not prove its engine is healthy. "+
+            "Open an app to inspect its real permissions, incidents and supported actions.",
+            11,DesignSystem.MUTED,false));
+          wide(page,overview);gap(page,12);
+          EditText search=input("",false,"Find an Asterion app");
+          wide(page,search);gap(page,10);
+          ScrollView scroll=new ScrollView(this);
+          scroll.setFillViewport(false);
+          scroll.setVerticalScrollBarEnabled(false);
+          LinearLayout entries=v();entries.setPadding(0,0,0,dp(10));
+          scroll.addView(entries);
+          page.addView(scroll,new LinearLayout.LayoutParams(-1,dp(370)));
+          final AlertDialog dialog=new AlertDialog.Builder(this)
+            .setTitle("Asterion apps & diagnostics")
+            .setView(page)
+            .setPositiveButton("Windows incidents",(d,w)->showRemoteSection("diagnostics"))
+            .setNegativeButton("Close",null)
+            .setNeutralButton("Refresh",(d,w)->showCrossAppDiagnostics())
+            .create();
+          Runnable render=()->{
+            entries.removeAllViews();
+            String filter=search.getText().toString().trim().toLowerCase(Locale.ROOT);
+            int shown=0;
+            for(int n=0;n<packages.size();n++){
+              String pkg=packages.get(n),label=labels.get(n);
+              if(!filter.isEmpty()&&!label.toLowerCase(Locale.ROOT).contains(filter)
+                  &&!pkg.toLowerCase(Locale.ROOT).contains(filter))continue;
+              boolean available=approved.containsKey(pkg);
+              boolean authorized=Boolean.TRUE.equals(approved.get(pkg));
+              String headline=authorized?"Bridge approved":available?
+                "Permission needed":"Observation only";
+              String description=authorized?
+                "Native access approved; engine result still requires verification":
+                available?"Authorize access to use this app's own capabilities":
+                "No signed partner bridge in this installed version";
+              LinearLayout item=clickableCard(()->{
+                dialog.dismiss();
+                showAppIntegrationActions(pkg,label,available,authorized);
+              });
+              LinearLayout top=h();
+              LinearLayout copy=v();
+              copy.addView(t(label,15,DesignSystem.TEXT,true));
+              margin(copy,t(headline,11,authorized?DesignSystem.TEAL:
+                available?DesignSystem.WARNING:DesignSystem.MUTED,true),6);
+              top.addView(copy,new LinearLayout.LayoutParams(0,-2,1));
+              top.addView(icon("arrow",DesignSystem.MUTED,18));
+              wide(item,top);gap(item,9);
+              wide(item,t(description,11,DesignSystem.MUTED,false));
+              wide(entries,item);gap(entries,8);
+              shown++;
+              if(shown>=80)break;
+            }
+            if(shown==0){
+              LinearLayout empty=card();
+              wide(empty,t(packages.isEmpty()?"No Asterion apps discovered":
+                "No apps match this search",13,DesignSystem.MUTED,false));
+              wide(entries,empty);
+            }
+          };
+          search.addTextChangedListener(new android.text.TextWatcher(){
+            @Override public void beforeTextChanged(CharSequence x,int start,int count,int after){}
+            @Override public void onTextChanged(CharSequence x,int start,int before,int count){
+              render.run();
+            }
+            @Override public void afterTextChanged(android.text.Editable x){}
+          });
+          render.run();
+          dialog.show();
         });
       }catch(Exception e){
         runOnUiThread(()->{
           if(destroyed)return;
           new AlertDialog.Builder(this)
-            .setTitle("Phone diagnostic discovery unavailable")
-            .setMessage("Asterion Control could not read the native app "+
-              "catalog: "+e.getClass().getSimpleName()+
-              ". It does not mean the partner applications are healthy "+
-              "or missing.")
+            .setTitle("Application health unavailable")
+            .setMessage("Installed-app discovery could not complete ("+
+              e.getClass().getSimpleName()+"). This does not indicate that "+
+              "other Asterion applications are healthy or missing.")
             .setPositiveButton("Close",null).show();
         });
       }
