@@ -50,18 +50,18 @@ def plan(target: Path) -> dict[Path, bytes]:
                 raise RuntimeError("Production phone bridge differs from audited baseline; manual three-way merge required")
         elif name.endswith("/app.py"):
             original = original_path.read_bytes().decode("utf-8")
-            newline = "\\r\\n" if "\\r\\n" in original else "\\n"
+            newline = "\r\n" if "\r\n" in original else "\n"
             if APP_IMPORT in original or APP_ROUTE in original:
                 if APP_IMPORT in original and APP_ROUTE in original: code = original
                 else: raise RuntimeError("Partially installed Browser API hook")
             else:
                 if APP_ANCHOR not in original or APP_ROUTE_ANCHOR not in original:
                     raise RuntimeError("Production API lacks safe Browser insertion anchors")
-                code = original.replace(APP_ANCHOR, APP_ANCHOR+"\n"+APP_IMPORT, 1)
-                code = code.replace(APP_ROUTE_ANCHOR, APP_ROUTE_ANCHOR+"\n"+APP_ROUTE, 1)
+                code = original.replace(APP_ANCHOR, APP_ANCHOR+newline+APP_IMPORT, 1)
+                code = code.replace(APP_ROUTE_ANCHOR, APP_ROUTE_ANCHOR+newline+APP_ROUTE, 1)
         elif name.endswith("/native_phone_relay.py"):
             original = original_path.read_bytes().decode("utf-8")
-            newline = "\\r\\n" if "\\r\\n" in original else "\\n"
+            newline = "\r\n" if "\r\n" in original else "\n"
             if RELAY_IMPORT in original or RELAY_ROUTE in original:
                 if RELAY_IMPORT in original and RELAY_ROUTE in original: code=original
                 else: raise RuntimeError("Partially installed native relay hook")
@@ -69,8 +69,8 @@ def plan(target: Path) -> dict[Path, bytes]:
                 if RELAY_ANCHOR not in original:
                     raise RuntimeError("Existing native relay lacks required route insertion anchor")
                 code = original.replace(RELAY_ANCHOR, RELAY_ANCHOR+
-                    "\n\n# Trusted Windows-local RPC onto the existing outbound phone WebSocket.\n"+
-                    RELAY_IMPORT+"\n"+RELAY_ROUTE, 1)
+                    newline+newline+"# Trusted Windows-local RPC onto the existing outbound phone WebSocket."+newline+
+                    RELAY_IMPORT+newline+RELAY_ROUTE, 1)
         elif original_path.exists() and original_path.read_text("utf-8") != code:
             raise RuntimeError("Existing production-only module would be overwritten: "+name)
         ast.parse(code, filename=name)
