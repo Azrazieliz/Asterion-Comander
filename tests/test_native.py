@@ -41,11 +41,15 @@ def test_phone_agent_mock_registration_and_proxy(tmp_path,monkeypatch):
             assert headers['Authorization']=='Bearer '+'K'*40
             assert url=='http://192.168.1.7:8973/health'
             return FakeResponse()
-        def request(self,method,url,json,headers):
+        def post(self,url,json,headers,timeout):
+            assert url=='http://127.0.0.1:8995/phone/rpc'
+            return type('NoSession',(),{'status_code':503,'json':lambda self:{'detail':{'state':'no_session','dispatched':False}}})()
+        def request(self,method,url,json,headers,timeout=None):
             assert url.startswith('http://192.168.1.7:8973/')
             assert headers['Authorization']=='Bearer '+'K'*40
             return FakeResponse()
     monkeypatch.setattr(phone_bridge.httpx,'Client',FakeHttp)
+    monkeypatch.setattr(phone_bridge,'_phone_http',FakeHttp())
     with TestClient(app) as c:
         reg=c.post('/api/v1/phone/register',headers=AUTH,json={'base_url':'http://192.168.1.7:8973','token':'K'*40})
         assert reg.status_code==200,reg.text
