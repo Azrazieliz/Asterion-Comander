@@ -79,7 +79,8 @@ def test_redirect_must_validate_public_destination(monkeypatch):
         return browser.Fetched(302, b"", {"location": "https://127.0.0.1/health"})
     monkeypatch.setattr(browser, "_fetch", fake_fetch)
     monkeypatch.setattr(browser.socket, "getaddrinfo",
-                        lambda *a,**kw:[(socket.AF_INET,socket.SOCK_STREAM,6,"",("8.8.8.8",443))])
+        lambda host,*a,**kw:[(socket.AF_INET,socket.SOCK_STREAM,6,"",
+            ("127.0.0.1" if host=="127.0.0.1" else "8.8.8.8",443))])
     with pytest.raises(HTTPException) as exc:
         browser.capture_public("https://public.example/source")
     assert exc.value.status_code == 403
