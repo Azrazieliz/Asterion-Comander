@@ -7,4 +7,7 @@ Set fso = CreateObject("Scripting.FileSystemObject")
 root = fso.GetParentFolderName(WScript.ScriptFullName)
 task = fso.BuildPath(root, "control_repair_watchdog.ps1")
 command = "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & task & """"
-sh.Run command, 0, True
+' Preserve the watchdog script exit code in Task Scheduler diagnostics.
+Dim exitCode
+exitCode = sh.Run(command, 0, True)
+WScript.Quit exitCode
