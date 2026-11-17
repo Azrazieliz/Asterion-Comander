@@ -231,6 +231,8 @@ public final class MainActivity extends Activity {
     twoActions(quick,"Add app","devices",this::showAppBridgeApprovals,
       "Tools","settings",()->show(4));
     gap(quick,9);
+    button(quick,"Asterion Browser","globe",false,()->startActivity(new Intent(this,BrowserActivity.class)));
+    gap(quick,9);
     twoActions(quick,"Diagnose","activity",this::showCrossAppDiagnostics,
       "Permissions","shield",this::showPermissionsHub);
     wide(homeBody,quick);
