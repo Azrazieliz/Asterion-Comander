@@ -584,7 +584,7 @@ class DesktopInput(BaseModel):
     to_y: int = 0
     seconds: float = Field(default=0.4, ge=0, le=5)
     amount: int = Field(default=0, ge=-100, le=100)
-    text: str = Field(default='', max_length=2000)
+    text: str = Field(default='', max_length=131072)
     keys: list[str] = Field(default_factory=list, max_length=6)
 
 
@@ -614,7 +614,9 @@ def desktop_input(data: DesktopInput):
             elif data.action == 'mouse_down': pg.mouseDown(x, y)
             elif data.action == 'mouse_up': pg.mouseUp(x, y)
         elif data.action == 'scroll': pg.scroll(data.amount)
-        elif data.action == 'type': pg.write(data.text, interval=0.005)
+        elif data.action == 'type':
+            from .windows_text_input import insert_text
+            return {'ok': True, **insert_text(data.text)}
         elif data.action in ('press', 'hotkey'):
             if not data.keys or any(not re.fullmatch(r'[a-zA-Z0-9_]+', k) for k in data.keys):
                 raise HTTPException(422, 'Invalid key name')
