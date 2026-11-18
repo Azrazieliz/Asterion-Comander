@@ -160,7 +160,16 @@ public final class MainActivity extends Activity {
       AgentService.rotateToken(this);
       prefs.edit().putBoolean("agent_key_rotated_v06",true).apply();
     }
-    root=v();root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,new int[]{0xFF10162A,0xFF090D1C,0xFF070A14}));setContentView(root);
+    root=v();root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,new int[]{0xFF10162A,0xFF090D1C,0xFF070A14}));
+    // Android 15+ forces edge-to-edge. Honor live system-bar insets instead
+    // of covering the brand/header or burying navigation behind Samsung's bar.
+    root.setOnApplyWindowInsetsListener((view,insets)->{
+      int top=Math.max(0,insets.getSystemWindowInsetTop());
+      int bottom=Math.max(0,insets.getSystemWindowInsetBottom());
+      root.setPadding(0,top,0,bottom);
+      return insets;
+    });
+    setContentView(root);
     buildHeader();stage=new FrameLayout(this);root.addView(stage,new LinearLayout.LayoutParams(-1,0,1));
     pages[0]=scrollHome();pages[1]=remotePage();pages[2]=scrollHealth();pages[3]=scrollDevices();pages[4]=scrollTools();
     for(View page:pages){page.setVisibility(View.GONE);stage.addView(page,new FrameLayout.LayoutParams(-1,-1));}
