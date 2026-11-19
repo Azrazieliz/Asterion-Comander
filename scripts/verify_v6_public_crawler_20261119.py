@@ -1,5 +1,8 @@
 """Real M5 Windows crawler test, including robots/SSRF failure classification."""
 import json
+import sys
+from pathlib import Path
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from fastapi import HTTPException
 from asterion_remote.browser_crawler import capture_public
 SOURCES=["https://example.org/","https://www.iana.org/domains/reserved",
