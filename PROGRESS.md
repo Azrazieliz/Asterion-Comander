@@ -1,3 +1,11 @@
+# 2026-11-19 — Current phone-status receipt: native WSS healthy on Wi-Fi, cellular still untested
+
+- `control-nov19-p1-phone-status-0842` returned `status:complete, ok:true`: Samsung `SM-S948B` Android 17 `paired:true, reachable:true`; native remote `connected:true`, `validated:true`, `network:wifi`, `transport:direct_wss`, outbound-only TLS, `requires_home_wifi:false`. This is **actual current read-only phone-status execution via existing fallback worker**, not a cellular test.
+- Phone reports battery 90%, no thermal pressure, available RAM ~4.38 GB and free phone storage ~85.9 GB; these figures apply to that read-only snapshot only. The Windows build volumes previously measured ~225 MB/784 MB free; **phone storage cannot be assumed Windows build storage**.
+- This verifies the current Wi-Fi-based private bridge can return phone status. It does **not** establish that Wi-Fi disabled + mobile data works, that native AI uses WSS directly, that cross-app diagnostics are sufficient, or that reliable unattended self-healing has been achieved.
+
+---
+
 # 2026-11-19 — Fresh read-only P−1 bridge probes returned
 
 - Existing worker processed two new Nov19 **read-only** commands, both `complete`/`ok:true`: `control-nov19-p1-pc-status-0839` returned Windows Control `0.8.0` on `LAPTOP-1LI4VRCJ` with files/commands/process/desktop/native Android capabilities. This verifies the **GitHub fallback worker accepted/processed these two current queries**, not that its reliability is fixed.
