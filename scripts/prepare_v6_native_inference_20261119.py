@@ -137,22 +137,40 @@ def cmd(label:str,args:list[str],cwd:Path,timeout:int=900)->None:
 
 
 def fetch_runtime():
-    if (LLAMA/".git").is_dir():
+    origin=LLAMA/"include/llama.h"
+    exists=(LLAMA/".git").is_dir()
+    if exists:
         git=["git","-C",str(LLAMA)]
-        actual=subprocess.run(git+["rev-parse","HEAD"],capture_output=True,text=True,check=True,timeout=20).stdout.strip()
-        if actual.startswith(LLAMA_REV):
+        probe=subprocess.run(git+["rev-parse","HEAD"],capture_output=True,text=True,
+                             timeout=20,check=False)
+        actual=probe.stdout.strip() if probe.returncode==0 else ""
+        if actual.startswith(LLAMA_REV) and origin.is_file():
             emit("runtime_sha_verified",llama_commit=actual,already_present=True)
             return
-        raise RuntimeError("Existing pinned source checkout mismatches expected revision")
-    LLAMA.parent.mkdir(parents=True,exist_ok=True)
-    cmd("llama_git_init",["git","init",str(LLAMA)],ROOT,60)
-    cmd("llama_git_remote",["git","-C",str(LLAMA),"remote","add","origin",LLAMA_GIT],ROOT,30)
-    emit("runtime_fetch_started",source=LLAMA_GIT,requested_commit=LLAMA_REV)
-    cmd("llama_git_fetch",["git","-C",str(LLAMA),"fetch","--depth","1","origin",LLAMA_REV],ROOT,900)
+        if actual:
+            raise RuntimeError("A different runtime commit already occupies the pinned checkout")
+    else:
+        LLAMA.parent.mkdir(parents=True,exist_ok=True)
+        cmd("llama_git_init",["git","init",str(LLAMA)],ROOT,60)
+        cmd("llama_git_remote",["git","-C",str(LLAMA),"remote","add","origin",LLAMA_GIT],ROOT,30)
+    # git fetch cannot resolve a short SHA as a remote ref. Fetch an immutable
+    # 40-digit commit ID independently confirmed against GitHub's commit API.
+    import httpx
+    response=httpx.get("https://api.github.com/repos/ggml-org/llama.cpp/commits/"+LLAMA_REV,
+                      headers={"Accept":"application/vnd.github+json",
+                               "User-Agent":"AsterionControlV6PinnedNativeBuild"},
+                      timeout=25,follow_redirects=True)
+    response.raise_for_status()
+    full=response.json().get("sha","")
+    if len(full)!=40 or not full.startswith(LLAMA_REV):
+        raise RuntimeError("Pinned upstream llama.cpp revision cannot be authenticated")
+    emit("runtime_fetch_started",source=LLAMA_GIT,requested_commit=full)
+    cmd("llama_git_fetch",["git","-C",str(LLAMA),"fetch","--depth","1","origin",full],ROOT,900)
     cmd("llama_git_checkout",["git","-C",str(LLAMA),"checkout","--detach","FETCH_HEAD"],ROOT,60)
-    actual=subprocess.run(["git","-C",str(LLAMA),"rev-parse","HEAD"],capture_output=True,text=True,check=True,timeout=30).stdout.strip()
-    if not actual.startswith(LLAMA_REV):raise RuntimeError("Runtime pinned commit was not verified")
-    if not (LLAMA/"include/llama.h").is_file():raise RuntimeError("Actual llama.cpp header absent")
+    actual=subprocess.run(["git","-C",str(LLAMA),"rev-parse","HEAD"],capture_output=True,
+                          text=True,check=True,timeout=30).stdout.strip()
+    if actual!=full:raise RuntimeError("Runtime pinned full commit mismatch")
+    if not origin.is_file():raise RuntimeError("Actual llama.cpp header absent")
     emit("runtime_sha_verified",llama_commit=actual,source=LLAMA_GIT,already_present=False)
 
 
