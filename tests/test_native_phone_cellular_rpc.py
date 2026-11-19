@@ -152,3 +152,37 @@ def test_no_session_allows_private_lan_fallback(monkeypatch, tmp_path):
     monkeypatch.setattr(phone_bridge, "_phone_http", NoSession())
     assert phone_bridge.request("/health").json()["ok"] is True
     assert seen == ["native-no-session", "private-lan"]
+
+
+def test_wss_roundtrip_probe_never_falls_back_to_wifi(monkeypatch, tmp_path):
+    monkeypatch.setattr(phone_bridge, "STATE", tmp_path / "pair.json")
+    phone_bridge.STATE.write_text(json.dumps({"base_url":"http://192.168.5.8:8973",
+                                              "token":TOKEN}))
+    attempted=[]
+    monkeypatch.setattr(phone_bridge, "_request_via_outbound_wss",
+                        lambda *a, **kw: attempted.append("wss") or None)
+    class NoLan:
+        def request(self, *args, **kwargs):
+            pytest.fail("Native WSS-only verification must not use private LAN")
+    monkeypatch.setattr(phone_bridge, "_phone_http", NoLan())
+    assert phone_bridge.probe_native_wss_roundtrip() == {
+        "verified": False, "reason": "native_wss_unavailable"}
+    assert attempted == ["wss"]
+
+
+def test_wss_roundtrip_probe_requires_real_native_network_response(monkeypatch, tmp_path):
+    monkeypatch.setattr(phone_bridge, "STATE", tmp_path / "pair.json")
+    phone_bridge.STATE.write_text(json.dumps({"base_url":"http://192.168.5.8:8973",
+                                              "token":TOKEN}))
+    monkeypatch.setattr(phone_bridge, "_request_via_outbound_wss",
+                        lambda *args, **kwargs: httpx.Response(
+                            200, json={"network":"cellular","connected":True}))
+    verified=phone_bridge.probe_native_wss_roundtrip()
+    assert verified["verified"] is True
+    assert verified["network"] == "cellular"
+    assert verified["transport"] == "native_wss"
+    assert verified["roundtrip_ms"] >= 0
+    assert verified["observed_unix_ms"] > 0
+    monkeypatch.setattr(phone_bridge, "_request_via_outbound_wss",
+                        lambda *args, **kwargs: httpx.Response(200, json={"ok":True}))
+    assert phone_bridge.probe_native_wss_roundtrip()["verified"] is False
