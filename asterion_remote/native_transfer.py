@@ -48,6 +48,77 @@ def _post(client: httpx.Client,base: str,token: str,path: str,body: dict):
     response.raise_for_status()
     return response.json()
 
+def finalize_verified_android_transfer(
+    *, client: httpx.Client, base: str, token: str,
+    transfer_id: str, checksum: str, size: int,
+    publish_state, cancel: threading.Event,
+    max_wait_seconds: float = 900.0,
+) -> dict:
+    """One finalization request, then read-only reconciliation until Android ACK.
+
+    The old Android finished synchronously; new TransferStore ACKs "verifying"
+    immediately while a background worker hashes and publishes into MediaStore.
+    Never re-send a finalization after uncertain transport. A timeout is
+    reconciled by GET status, not another POST.
+    """
+    headers={"Authorization":"Bearer "+token}
+    issued=time.monotonic()
+    envelope=None
+    try:
+        envelope=_post(client,base,token,"/transfer/finish/"+transfer_id,{})
+    except (httpx.TimeoutException,httpx.TransportError):
+        publish_state("outcome_unknown")
+        # Android might have received the command; ONLY safe reads below.
+    except httpx.HTTPStatusError as ex:
+        code=ex.response.status_code
+        raise RuntimeError(f"android_finish_http_{code}") from ex
+    if envelope is not None and envelope.get("ok") is True:
+        receipt=envelope
+    else:
+        receipt=None
+        while time.monotonic()-issued<max_wait_seconds:
+            if cancel.is_set():
+                raise RuntimeError("android_publication_cancel_ambiguous")
+            time.sleep(1)
+            try:
+                probe=client.get(base+"/transfer/status/"+transfer_id,
+                                 headers=headers)
+                probe.raise_for_status()
+            except (httpx.TransportError,httpx.TimeoutException):
+                publish_state("outcome_unknown")
+                continue
+            except httpx.HTTPStatusError as ex:
+                code=ex.response.status_code
+                raise RuntimeError(f"android_transfer_receipt_http_{code}") from ex
+            state=probe.json()
+            if state.get("sha256")!=checksum or int(state.get("size",-1))!=size:
+                raise RuntimeError("android_transfer_identity_changed")
+            phase=state.get("phase")
+            if phase=="completed":
+                receipt=state.get("result")
+                break
+            if phase=="failed":
+                error=state.get("error_code","android_publication_failed")
+                if not isinstance(error,str) or len(error)>100:
+                    error="android_publication_failed"
+                raise RuntimeError(error)
+            if phase not in ("verifying","publishing","receiving"):
+                raise RuntimeError("android_unknown_publication_phase")
+            publish_state(phase)
+        else:
+            raise RuntimeError("android_publication_outcome_unknown")
+    if not isinstance(receipt,dict) or receipt.get("sha256")!=checksum or \
+       int(receipt.get("size",-1))!=size or receipt.get("ok") is not True:
+        raise RuntimeError("android_verified_publication_receipt_mismatch")
+    if not isinstance(receipt.get("location"),str) or not \
+       receipt["location"].startswith("Downloads/Asterion Control/"):
+        raise RuntimeError("android_unexpected_publication_location")
+    if not isinstance(receipt.get("uri"),str) or not \
+       receipt["uri"].startswith("content://"):
+        raise RuntimeError("android_download_uri_not_verified")
+    return receipt
+
+
 def _copy(key: str, path: Path, name: str, paired: dict, cancel: threading.Event):
     transfer_id=None
     headers={"Authorization":"Bearer "+paired["token"]}
@@ -131,9 +202,12 @@ def _copy(key: str, path: Path, name: str, paired: dict, cancel: threading.Event
                                 continue
                     _update(key,bytes_sent=offset)
             _update(key,state="verifying")
-            done=_post(client,base,paired["token"],"/transfer/finish/"+transfer_id,{})
-            if done.get("sha256")!=checksum or done.get("size")!=size or not done.get("ok"):
-                raise RuntimeError("Android checksum/size receipt mismatch")
+            done=finalize_verified_android_transfer(
+                client=client,base=base,token=paired["token"],
+                transfer_id=transfer_id,checksum=checksum,size=size,
+                publish_state=lambda phase: _update(key,state=phase),
+                cancel=cancel,
+            )
             _update(key,state="completed",result={
                 "name":done["name"],"size":done["size"],"sha256":done["sha256"],
                 "location":done["location"],"android_uri":done["uri"],
@@ -144,7 +218,9 @@ def _copy(key: str, path: Path, name: str, paired: dict, cancel: threading.Event
         # Keep partial bytes until explicit cancellation or Android TTL cleanup;
         # the same SHA/name can resume without a second media publication.
         unknown=isinstance(e,(httpx.TransportError,httpx.TimeoutException)) or \
-            "outcome uncertain" in str(e).lower()
+            "outcome uncertain" in str(e).lower() or \
+            "outcome_unknown" in str(e).lower() or \
+            "cancel_ambiguous" in str(e).lower()
         label="cancelled" if aborted else ("outcome_unknown" if unknown else "failed")
         _update(key,state=label,error=type(e).__name__+": "+str(e)[:160])
         if transfer_id and aborted:
