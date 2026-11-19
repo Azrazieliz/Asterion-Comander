@@ -1,3 +1,5 @@
+> **EXECUTION TRACKING (2026-11-19):** [Complete M0–M13 roadmap](CONTROL_V6_FULL_IMPLEMENTATION_ROADMAP_20261119.md), [implementation handoff](CONTROL_V6_IMPLEMENTATION_HANDOFF_20261119.md) and [master issue #3 with 14 milestones](https://github.com/Azrazieliz/Asterion-Comander/issues/3) are canonical follow-through for this approved contract. Creating them does **not** mean feature implementation is complete.
+
 # ASTERION CONTROL V6 — Owner corrections, supersession ledger and acceptance contract
 Date: 2026-11-19
 Status: OWNER-APPROVED PRODUCT REQUIREMENTS / DOCUMENTATION RECONCILIATION. **No claim of working implementation, packaging, service reload or on-device acceptance.**
