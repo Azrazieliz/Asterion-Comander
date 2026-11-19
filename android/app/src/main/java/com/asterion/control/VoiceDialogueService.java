@@ -149,7 +149,9 @@ public final class VoiceDialogueService extends Service {
       }
       if(!SpeechRecognizer.isRecognitionAvailable(this)&&
         !(Build.VERSION.SDK_INT>=31&&SpeechRecognizer.isOnDeviceRecognitionAvailable(this))){
-        state("failed","No speech recognition service installed");return;
+        state("ambient_retry","Android speech recognition service is unavailable");
+        scheduleAmbient(30000L);
+        return;
       }
       String id="ambient-"+System.currentTimeMillis();
       questionId=id;question="";transcript="";consumed=true;
@@ -307,7 +309,7 @@ public final class VoiceDialogueService extends Service {
         pendingLocalTest=false;
         ui.post(this::localVoiceTest);
       }
-      if(speakerReady&&ambientEnabled)scheduleAmbient(500L);
+      if(ambientEnabled&&active==this)scheduleAmbient(500L);
       if(speakerReady&&pendingOwnerTalk&&active==this){
         pendingOwnerTalk=false;
         ui.post(()->{
@@ -364,7 +366,9 @@ public final class VoiceDialogueService extends Service {
       getSharedPreferences("voice_style",MODE_PRIVATE).edit()
         .putBoolean(ALWAYS_ON_PREF,true).apply();
       if(ambientWakeRefresh==null)updateAmbientWake();
-      if(speakerReady)scheduleAmbient(400L);
+      // Wake recognition needs the microphone, NOT a working TTS engine.
+      // Previously a missing/unavailable speaker silently disabled hotword.
+      scheduleAmbient(400L);
     }
     if(intent!=null&&"TALK".equals(intent.getAction())){
       pendingOwnerTalk=true;
@@ -407,10 +411,8 @@ public final class VoiceDialogueService extends Service {
     if(active!=this)return;
     ambientEnabled=true;
     if(ambientWakeRefresh==null)updateAmbientWake();
-    if(speakerReady){
-      state("ambient_starting","Listening for Asterion");
-      scheduleAmbient(250L);
-    }else state("initializing","Waiting for Android speech engine");
+    state("ambient_starting","Listening for Asterion");
+    scheduleAmbient(250L);
   }
   static JSONObject stopFromOwnerApi(Context owner)throws Exception{
     boolean wasRunning=active!=null;
@@ -663,7 +665,17 @@ public final class VoiceDialogueService extends Service {
           onChatWindowVisible();
         }
       }
-      @Override public void onPartialResults(Bundle results){}
+      @Override public void onPartialResults(Bundle results){
+        if(!ambientCapture||!id.equals(questionId)||
+           !backend.equals(recognizerBackend))return;
+        ArrayList<String> partial=results.getStringArrayList(
+          SpeechRecognizer.RESULTS_RECOGNITION);
+        if(partial==null||partial.isEmpty())return;
+        // Preview only. Dispatch exclusively from final recognition to avoid
+        // sending duplicate or incomplete owner instructions.
+        if(WAKE_REQUEST.matcher(partial.get(0).trim()).matches())
+          state("ambient_listening","Asterion wake phrase heard; awaiting final recognition");
+      }
       @Override public void onEvent(int type,Bundle params){}
     });
     Intent request=new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
@@ -671,6 +683,7 @@ public final class VoiceDialogueService extends Service {
         RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
     request.putExtra(RecognizerIntent.EXTRA_LANGUAGE,locale);
     request.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS,1);
+    request.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS,true);
     if(offline)request.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE,true);
     state("listening","");
     listener.startListening(request);
