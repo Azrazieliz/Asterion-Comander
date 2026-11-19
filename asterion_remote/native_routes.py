@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from .security import require_token
-from .phone_bridge import PairPhone, PhoneInput, register, request, load, probe_native_wss_roundtrip
+from .phone_bridge import PairPhone, PhoneInput, register, request, load, probe_native_wss_roundtrip, request_native_only
 from .native_transfer import TransferRequest, start_transfer, transfer_status, cancel_transfer
 
 router = APIRouter(prefix='/api/v1', dependencies=[Depends(require_token)])
@@ -51,6 +51,36 @@ def app_bridge_capabilities(data:AppCapabilityRead):
     # Read the approved actual partner's own versioned action contract.
     # No engine in Control and no invented actions.
     return request('/app-bridge/capabilities','POST',data.model_dump(),timeout=8).json()
+
+class NativeAiSubmit(BaseModel):
+    request_id: str = Field(min_length=8,max_length=100)
+    prompt: str = Field(min_length=1,max_length=1800)
+
+class NativeAiTicket(BaseModel):
+    request_id: str = Field(min_length=8,max_length=100)
+
+@router.get('/phone/ai/model/status')
+def native_ai_model_status():
+    # No optimistic inference claims: this queries the original Android model
+    # library and private GGUF's actual runtime state over authenticated WSS.
+    return request_native_only('/ai/model/status').json()
+
+@router.post('/phone/ai/jobs/submit')
+def native_ai_submit(data:NativeAiSubmit):
+    # Background job returns a receipt before decoding. No per-token HTTP/WSS
+    # timeout and no duplicated inference server.
+    return request_native_only('/ai/jobs/submit','POST',
+                               data.model_dump(),timeout=8).json()
+
+@router.post('/phone/ai/jobs/status')
+def native_ai_job_status(data:NativeAiTicket):
+    return request_native_only('/ai/jobs/status','POST',
+                               data.model_dump(),timeout=8).json()
+
+@router.post('/phone/ai/jobs/cancel')
+def native_ai_job_cancel(data:NativeAiTicket):
+    return request_native_only('/ai/jobs/cancel','POST',
+                               data.model_dump(),timeout=8).json()
 
 @router.post('/phone/intent/dispatch')
 def phone_direct_intent(data:NativeIntentRequest):
