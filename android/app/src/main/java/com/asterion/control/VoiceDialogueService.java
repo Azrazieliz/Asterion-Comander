@@ -79,6 +79,10 @@ public final class VoiceDialogueService extends Service {
   private volatile String pendingOwnerSpeech="";
   private final AtomicBoolean voiceRequestDispatching=new AtomicBoolean(false);
   private volatile long lastVoiceDispatchAt=0L;
+  private volatile long lastChatForegroundRequestAt=0L;
+  private volatile int ownerDispatchRetryCount=0;
+  private Runnable ownerDispatchRetry;
+  private static final int MAX_OWNER_DISPATCH_RETRIES=20;
   private BroadcastReceiver unlockedReceiver;
   static final String ALWAYS_ON_PREF="voice_always_on_enabled";
   static final String MUSIC_SAFE_MIGRATION_PREF="voice_music_safe_migrated_v923";
@@ -740,6 +744,24 @@ public final class VoiceDialogueService extends Service {
       finally{voiceRequestDispatching.set(false);}
     });
   }
+  private void retryOwnerVoiceWhenChatReady(){
+    if(ownerDispatchRetry!=null)ui.removeCallbacks(ownerDispatchRetry);
+    if(active!=this||pendingOwnerSpeech.isEmpty()||
+       ownerDispatchRetryCount>=MAX_OWNER_DISPATCH_RETRIES){
+      if(!pendingOwnerSpeech.isEmpty()){
+        lastVoiceDispatch="awaiting_manual_chat_foreground";
+        state("awaiting_device","Spoken command saved; return to ChatGPT to continue");
+        refreshVoiceNotification();
+      }
+      return;
+    }
+    ownerDispatchRetryCount++;
+    ownerDispatchRetry=()->{
+      ownerDispatchRetry=null;
+      if(active==this&&!pendingOwnerSpeech.isEmpty())onChatWindowVisible();
+    };
+    ui.postDelayed(ownerDispatchRetry,1000L);
+  }
   private void refreshVoiceNotification(){
     try{
       NotificationManager manager=getSystemService(NotificationManager.class);
@@ -764,9 +786,16 @@ public final class VoiceDialogueService extends Service {
       refreshVoiceNotification();return;
     }
     if(!"com.openai.chatgpt".equals(access.currentPackage())){
-      JSONObject outcome=access.requestChatForeground();
-      lastVoiceDispatch="waiting_for_chatgpt_foreground";
-      state("awaiting_device",outcome.optString("reason","Waiting for ChatGPT writing bar"));
+      // Ask Android to foreground ChatGPT only once per 20s. Retry the
+      // FOREGROUND READ, not the start activity. No owner text is sent yet.
+      long now=android.os.SystemClock.elapsedRealtime();
+      if(now-lastChatForegroundRequestAt>20000L){
+        lastChatForegroundRequestAt=now;
+        JSONObject outcome=access.requestChatForeground();
+        lastVoiceDispatch="waiting_for_chatgpt_foreground";
+        state("awaiting_device",outcome.optString("reason","Waiting for ChatGPT writing bar"));
+      }
+      retryOwnerVoiceWhenChatReady();
       refreshVoiceNotification();
       return;
     }
@@ -774,6 +803,7 @@ public final class VoiceDialogueService extends Service {
     if(!focused.optBoolean("ready",false)){
       lastVoiceDispatch="waiting_for_visible_keyboard";
       state("awaiting_device","Waiting for visible ChatGPT writing bar and keyboard");
+      retryOwnerVoiceWhenChatReady();
       return;
     }
     String message="ASTERION CONTROL — OWNER VOICE REQUEST\n"+
@@ -781,6 +811,8 @@ public final class VoiceDialogueService extends Service {
       "Execute the authorized request using Asterion Control. "+
       "Use the speaker endpoint for a spoken reply, and ask a "+
       "microphone question only if a response is required.";
+    if(ownerDispatchRetry!=null)ui.removeCallbacks(ownerDispatchRetry);
+    ownerDispatchRetry=null;ownerDispatchRetryCount=0;
     JSONObject result=access.sendChatMessage(message);
     if(result.optBoolean("sent",false)){
       pendingOwnerSpeech="";pendingRestored=false;PendingVoiceStore.clear(this);
@@ -843,6 +875,7 @@ public final class VoiceDialogueService extends Service {
       .put("ambient_recognizer_failures",ambientErrors)
       .put("background_cpu_wake_held",ambientWakeLock!=null&&ambientWakeLock.isHeld())
       .put("last_voice_dispatch",lastVoiceDispatch)
+      .put("chat_foreground_retries",ownerDispatchRetryCount)
       .put("voice_request_awaiting_send",!pendingOwnerSpeech.isEmpty())
       .put("pending_voice_recovered",pendingRestored)
       .put("pending_voice_encrypted",PendingVoiceStore.hasSaved(this))
@@ -872,6 +905,8 @@ public final class VoiceDialogueService extends Service {
       releaseCpuForExchange();
     });
     ambientEnabled=false;cancelAmbient();stopAmbientWake();
+    if(ownerDispatchRetry!=null)ui.removeCallbacks(ownerDispatchRetry);
+    ownerDispatchRetry=null;
     voiceControlWorker.shutdownNow();
     super.onDestroy();
   }
