@@ -7,7 +7,7 @@ $root=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 # Use D: project-owned scratch/cache because the original Windows C: volume
 # reached only 359,952,384 free bytes during genuine native model compilation.
 # Leave original user's Gradle cache/keystore untouched; no destructive cleanup.
-if(-not $root.StartsWith('D:\\',[System.StringComparison]::OrdinalIgnoreCase)){
+if(-not $root.StartsWith('D:\',[System.StringComparison]::OrdinalIgnoreCase)){
   throw 'Owner-safe isolated D: build workspace is required'
 }
 $env:GRADLE_USER_HOME=Join-Path $root '_v6_gradle_user_home'
