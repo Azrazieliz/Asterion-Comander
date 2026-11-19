@@ -269,7 +269,17 @@ def recover_unpublished():
     Any unfinished local "running" receipt is handled by reconcile_jobs()
     and is marked uncertain without replaying a potentially executed action.
     """
-    changes=git('status','--porcelain','--untracked-files=all','--','results')
+    # Do not use git(): it calls .strip(), which removes the first leading
+    # status-column space in porcelain output. A single modified result then
+    # becomes "M results/...", and slicing row[3:] silently drops the "r".
+    # That strands a completed receipt after a failed publish/restart.
+    probe=subprocess.run(
+        ['git','status','--porcelain=v1','--untracked-files=all','--','results'],
+        cwd=ROOT,text=True,capture_output=True,timeout=60,check=False)
+    if probe.returncode:
+        raise RuntimeError('Unable to inspect unpublished result receipts: '+
+                           (probe.stderr or probe.stdout)[-300:])
+    changes=probe.stdout
     ready=[]
     for row in changes.splitlines():
         path=row[3:]
