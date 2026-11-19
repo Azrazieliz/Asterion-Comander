@@ -83,8 +83,14 @@ def test_failed_publication_recovers_finished_result_without_reexecution(tmp_pat
     (results/"uncertain-inflight.json").write_text(
         '{"id":"uncertain-inflight","status":"running","ok":false}',encoding="utf8")
     (results/"not-a-command.txt").write_text("ignored",encoding="utf8")
-    monkeypatch.setattr(bridge,"git",lambda *args:
-        "?? results/finished-unique.json\n?? results/uncertain-inflight.json\n?? results/not-a-command.txt")
+    # Raw porcelain must be mocked at subprocess.run, not at git(): the
+    # production recovery uses raw output to preserve Git's XY columns.
+    from types import SimpleNamespace
+    monkeypatch.setattr(bridge.subprocess,"run",lambda *a,**kw:
+        SimpleNamespace(returncode=0,stdout=(
+            "?? results/finished-unique.json\n"
+            "?? results/uncertain-inflight.json\n"
+            "?? results/not-a-command.txt\n"),stderr=""))
     published=[]
     monkeypatch.setattr(bridge,"publish",lambda paths: published.extend(paths))
     assert bridge.recover_unpublished()==1
@@ -102,3 +108,24 @@ def test_pending_receipt_prevents_command_replay(tmp_path, monkeypatch):
                         {"id":"unique-write-intent","status":"running"},
                         publish_now=False)
     assert bridge.entries()==[]
+
+
+def test_recovery_rejects_mismatched_identity_and_nonterminal_receipts(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(bridge,"ROOT",tmp_path)
+    folder=tmp_path/"results"
+    folder.mkdir()
+    for name,record in {
+        "wrong-id":{"id":"other-id","status":"complete","ok":True},
+        "unknown-state":{"id":"unknown-state","status":"ready","ok":True},
+        "accepted-one":{"id":"accepted-one","status":"accepted","ok":True},
+        "valid-terminal":{"id":"valid-terminal","status":"complete","ok":True},
+    }.items():
+        (folder/(name+".json")).write_text(json.dumps(record),encoding="utf8")
+    lines="".join(" M results/"+p.stem+".json\\n" for p in sorted(folder.glob("*.json")))
+    monkeypatch.setattr(bridge.subprocess,"run",lambda *a,**kw:
+        SimpleNamespace(returncode=0,stdout=lines,stderr=""))
+    published=[]
+    monkeypatch.setattr(bridge,"publish",lambda paths:published.extend(paths))
+    assert bridge.recover_unpublished()==1
+    assert published==[Path("results/valid-terminal.json")]
