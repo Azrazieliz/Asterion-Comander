@@ -1,3 +1,12 @@
+# 2026-11-19 — P−1 read-only follow-up receipts discovered
+
+- Found **previously unreported actual receipts** in the existing GitHub bridge for Nov 18, not new live Nov 19 measurements: `control-repair-disk-watchdog-20261118-0140` completed with `ok:true`, exit 0. It recorded Windows C:226 MB, D:748 MB available, a scheduled task named `Asterion Control Self-Healing Worker` with state Ready / result 0, repeated watchdog launcher messages `Git bridge missing`, and at that moment `WSS_HEALTH=True PHONE_CONNECTED=True`. This **does not certify continuing transport health**.
+- The later `control-clean-own-scratch-and-recover-20261118-0145` returned `ok:true`, exit 0 and `OWN_GENERATED_BUILD_REMOVED=True`; D free space moved 748 → 784 MB, C remained ~225 MB. It also returned `WATCHDOG_TASK_NOT_ENABLED_OR_MISSING`, which is **in tension** with the first command's scheduled-task report. Reconcile exact task identity and observed watchdog execution; do not mark it repaired. No owner files are reported removed by this receipt.
+- Submitted two **read-only fresh Nov 19** bridge health checks, `control-nov19-p1-pc-status-0839` and `control-nov19-p1-phone-bridge-0839`. Result files were not present on first check; accepted remote execution, current WSS, true cellular routing and durable self-heal are **not yet verified**.
+- These outcomes strengthen the urgency of the newly approved **R01, R02 and R08**. Do not interpret a prior `ok:true` as multi-day resilience or release acceptance.
+
+---
+
 # 2026-11-19 — Owner approves R01–R08, R10; corrects AI name, downloads, real VPN and blockers
 
 - **Binding V6 update:** [docs/CONTROL_V6_OWNER_CORRECTIONS_20261119.md](docs/CONTROL_V6_OWNER_CORRECTIONS_20261119.md) amended in place. Corrected product/native assistant name to **Asterion Control** (former nickname was a typing error) and Browser goal to broadly **DOWNLOAD** available files, not digitize/convert everything.
