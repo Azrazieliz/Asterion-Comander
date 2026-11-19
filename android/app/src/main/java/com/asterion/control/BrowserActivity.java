@@ -6,6 +6,7 @@ import android.app.DownloadManager;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
@@ -23,6 +24,7 @@ import android.webkit.CookieManager;
 import android.webkit.SslErrorHandler;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -43,6 +45,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /** Asterion Browser: actual on-device multi-tab WebView browser, not a crawler mock.
  *
@@ -62,6 +65,8 @@ public final class BrowserActivity extends Activity {
     private TextView status, counter, back, forward;
     private ProgressBar progress;
     private int active = -1;
+    private BrowserProtection protection;
+    private SharedPreferences browserPrefs;
 
     private int dp(int value) { return DesignSystem.dp(this, value); }
     private TextView label(String text, int size, int color, boolean bold) {
@@ -88,6 +93,11 @@ public final class BrowserActivity extends Activity {
 
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
+        protection=new BrowserProtection(this);
+        browserPrefs=getSharedPreferences("asterion_browser_session_v1",Context.MODE_PRIVATE);
+        protection.refresh(false,(updated,reason)->{
+            if(!isFinishing()&&status!=null)refreshToolbar();
+        });
         // Must be set before any WebView exists in this dedicated :asterion_browser process.
         if (Build.VERSION.SDK_INT >= 28) WebView.setDataDirectorySuffix("asterion_browser");
         getWindow().setStatusBarColor(DesignSystem.BG);
@@ -106,6 +116,8 @@ public final class BrowserActivity extends Activity {
         add(titles, label("ASTERION", 15, DesignSystem.TEXT, true));
         add(titles, label("BROWSER", 10, DesignSystem.TEAL, true));
         heading.addView(titles, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView shield=control("Shield",this::showProtectionDetails);
+        heading.addView(shield);
         counter = control("0 tabs", this::newTab);
         heading.addView(counter);
         add(root, heading);
@@ -159,6 +171,7 @@ public final class BrowserActivity extends Activity {
         nav.addView(forward, new LinearLayout.LayoutParams(0, dp(45), 1));
         tool(nav, "Reload", () -> { BrowserTab tab = current(); if(tab!=null) tab.web.reload(); });
         tool(nav, "Extract", this::extractVisiblePage);
+        tool(nav, "Saved", this::showSavedPages);
         tool(nav, "+ Tab", this::newTab);
         add(root, nav);
 
@@ -177,6 +190,7 @@ public final class BrowserActivity extends Activity {
                     Math.max(0, saved.getInt("current",0))));
             }
         }
+        if(tabs.isEmpty() && saved==null) restorePersistedTabs();
         if(tabs.isEmpty()) newTab();
     }
 
@@ -224,22 +238,53 @@ public final class BrowserActivity extends Activity {
         s.setBuiltInZoomControls(true);
         s.setDisplayZoomControls(false);
         BrowserTab tab = new BrowserTab(view);
+        tab.pageUrl=url;
         view.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView web, WebResourceRequest request) {
                 String scheme = request.getUrl().getScheme();
-                return scheme == null || (!scheme.equalsIgnoreCase("http") &&
-                        !scheme.equalsIgnoreCase("https"));
+                if(scheme == null || (!scheme.equalsIgnoreCase("http") &&
+                        !scheme.equalsIgnoreCase("https")))return true;
+                // Prevent automatic advertising/popunder navigation, never all
+                // cross-origin redirects (legitimate OAuth would be broken).
+                if(request.isForMainFrame()&&!request.hasGesture() &&
+                   protection.blocks(request.getUrl().toString(),tab.pageUrl)) {
+                    tab.blocked.incrementAndGet();
+                    return true;
+                }
+                return false;
+            }
+            @Override public WebResourceResponse shouldInterceptRequest(
+                    WebView web,WebResourceRequest request) {
+                WebResourceResponse denied=protection.intercept(request,tab.pageUrl);
+                if(denied!=null)tab.blocked.incrementAndGet();
+                return denied;
+            }
+            @Override public void onPageStarted(WebView web,String url,
+                    android.graphics.Bitmap icon) {
+                tab.pageUrl=url;
+                tab.blocked.set(0);
+                if(current()==tab)refreshToolbar();
             }
             @Override public void onReceivedSslError(WebView web, SslErrorHandler handler, SslError error) {
                 handler.cancel();
                 if(current()==tab) notice("Certificate verification failed; page blocked");
             }
             @Override public void onPageFinished(WebView web, String url) {
+                tab.pageUrl=url;
+                CookieManager.getInstance().flush();
+                rememberPage(url,tab.title);
                 if(current()==tab) refreshToolbar();
                 refreshTabs();
             }
         });
         view.setWebChromeClient(new WebChromeClient() {
+            @Override public boolean onCreateWindow(WebView web,boolean isDialog,
+                    boolean isUserGesture,android.os.Message resultMsg) {
+                // No surprise advertising windows or background tabs.
+                tab.popups.incrementAndGet();
+                if(current()==tab)notice("Unrequested popup blocked");
+                return false;
+            }
             @Override public void onProgressChanged(WebView web, int amount) {
                 if(current()==tab) {
                     progress.setProgress(amount);
@@ -323,8 +368,11 @@ public final class BrowserActivity extends Activity {
         back.setAlpha(tab.web.canGoBack()?1f:0.4f);
         forward.setAlpha(tab.web.canGoForward()?1f:0.4f);
         if(url!=null) {
-            try { status.setText("Browsing • " + Uri.parse(url).getHost()); }
-            catch(Exception ignored) { status.setText("Browsing"); }
+            try {
+                status.setText("Browsing • "+Uri.parse(url).getHost()+
+                    " • "+tab.blocked.get()+" requests blocked"+
+                    (protection.isEnabled()?"":" • Shield off"));
+            }catch(Exception ignored){status.setText("Browsing");}
         }
     }
     private void navigate(String value) {
@@ -391,6 +439,155 @@ public final class BrowserActivity extends Activity {
             }catch(Exception err){notice("Page extraction unavailable: "+err.getClass().getSimpleName());}
         });
     }
+    /** Persist tab paths without query strings that can contain login tokens. */
+    private static String safeSessionUrl(String value){
+        try{
+            Uri url=Uri.parse(value);
+            String scheme=url.getScheme();
+            if(!"https".equalsIgnoreCase(scheme)&&
+               !"http".equalsIgnoreCase(scheme))return START;
+            Uri.Builder builder=url.buildUpon().clearQuery().fragment(null);
+            String result=builder.build().toString();
+            return result.length()>1200?START:result;
+        }catch(Exception failure){return START;}
+    }
+    private void persistTabs(){
+        JSONArray saved=new JSONArray();
+        for(BrowserTab tab:tabs)
+            saved.put(safeSessionUrl(tab.web.getUrl()==null?START:tab.web.getUrl()));
+        browserPrefs.edit().putString("tabs",saved.toString())
+            .putInt("active",active).apply();
+    }
+    private void restorePersistedTabs(){
+        try{
+            JSONArray stored=new JSONArray(browserPrefs.getString("tabs","[]"));
+            for(int i=0;i<stored.length()&&tabs.size()<MAX_TABS;i++){
+                String url=safeAddress(stored.optString(i,START));
+                addTab(url);
+            }
+            if(!tabs.isEmpty())
+                showTab(Math.max(0,Math.min(tabs.size()-1,
+                    browserPrefs.getInt("active",0))));
+        }catch(Exception ignored){}
+    }
+    private void rememberPage(String url,String title){
+        String safe=safeSessionUrl(url);
+        if(safe.equals(START)||safe.isEmpty())return;
+        try{
+            JSONArray old=new JSONArray(browserPrefs.getString("history","[]"));
+            JSONArray now=new JSONArray();
+            JSONObject fresh=new JSONObject().put("url",safe)
+                .put("title",title).put("at",System.currentTimeMillis());
+            now.put(fresh);
+            for(int i=0;i<old.length()&&now.length()<180;i++){
+                JSONObject entry=old.optJSONObject(i);
+                if(entry!=null&&!safe.equals(entry.optString("url")))now.put(entry);
+            }
+            browserPrefs.edit().putString("history",now.toString()).apply();
+        }catch(Exception ignored){}
+    }
+    private void bookmarkCurrent(){
+        BrowserTab tab=current();
+        if(tab==null)return;
+        String url=safeSessionUrl(tab.web.getUrl());
+        if(url.equals(START))return;
+        try{
+            JSONArray previous=new JSONArray(browserPrefs.getString("bookmarks","[]"));
+            JSONArray next=new JSONArray();
+            next.put(new JSONObject().put("url",url).put("title",tab.title));
+            for(int i=0;i<previous.length()&&next.length()<100;i++){
+                JSONObject e=previous.optJSONObject(i);
+                if(e!=null&&!url.equals(e.optString("url")))next.put(e);
+            }
+            browserPrefs.edit().putString("bookmarks",next.toString()).apply();
+            notice("Bookmark saved");
+        }catch(Exception error){notice("Unable to save bookmark");}
+    }
+    private void showSavedPages(){
+        String[] choices={"Open bookmarks","Open history","Bookmark this page",
+            "Android downloads","Clear browsing history"};
+        new AlertDialog.Builder(this).setTitle("Browser library")
+            .setItems(choices,(d,which)->{
+                if(which==0)showEntryList("bookmarks","Saved bookmarks");
+                else if(which==1)showEntryList("history","Recent history");
+                else if(which==2)bookmarkCurrent();
+                else if(which==3){
+                    try{startActivity(new Intent(DownloadManager.ACTION_VIEW_DOWNLOADS));}
+                    catch(Exception error){notice("Android Downloads unavailable");}
+                }else if(which==4){
+                    new AlertDialog.Builder(this).setTitle("Clear browser history?")
+                        .setMessage("This clears only Asterion Browser's navigation history. Saved bookmarks and signed Control sessions are preserved.")
+                        .setPositiveButton("Clear",(ok,n)->browserPrefs.edit()
+                            .remove("history").apply())
+                        .setNegativeButton("Cancel",null).show();
+                }
+            }).show();
+    }
+    private void showEntryList(String key,String heading){
+        try{
+            JSONArray entries=new JSONArray(browserPrefs.getString(key,"[]"));
+            int n=Math.min(50,entries.length());
+            if(n==0){notice("No saved pages");return;}
+            String[] titles=new String[n];
+            String[] urls=new String[n];
+            for(int i=0;i<n;i++){
+                JSONObject entry=entries.optJSONObject(i);
+                urls[i]=entry==null?START:entry.optString("url",START);
+                titles[i]=entry==null?"Page":entry.optString("title","Page");
+                if(titles[i].isEmpty())titles[i]=urls[i];
+                if(titles[i].length()>65)titles[i]=titles[i].substring(0,65)+"…";
+            }
+            new AlertDialog.Builder(this).setTitle(heading)
+                .setItems(titles,(dialog,which)->{
+                    BrowserTab tab=current();
+                    if(tab!=null)tab.web.loadUrl(safeAddress(urls[which]));
+                }).setNegativeButton("Close",null).show();
+        }catch(Exception ignored){notice("Saved pages unavailable");}
+    }
+    private void showProtectionDetails(){
+        BrowserTab tab=current();
+        String url=tab==null?START:tab.web.getUrl();
+        if(url==null)url=START;
+        final String currentUrl=url;
+        int blocked=tab==null?0:tab.blocked.get();
+        int popups=tab==null?0:tab.popups.get();
+        boolean siteAllowed=protection.isAllowedSite(currentUrl);
+        String details="Status: "+(protection.isEnabled()?"Enabled":"Disabled")+
+            "\nReal supported filter domains: "+protection.domainRules()+
+            "\nOfficial subscriptions loaded: "+protection.subscriptionsLoaded()+
+            "\nRequests blocked on this tab: "+blocked+
+            "\nPopups blocked: "+popups+
+            "\nThis site excepted: "+siteAllowed+
+            "\nLast updated: "+(protection.lastUpdated()>0?
+                  new java.util.Date(protection.lastUpdated()).toString():"Not downloaded")+
+            "\n\nEasyList and EasyPrivacy resource rules apply only where Android WebView exposes an interceptable request. In-stream and opaque service-worker advertising may remain.";
+        final String[] options={"Update real filters",
+            protection.isEnabled()?"Turn shield off":"Turn shield on",
+            siteAllowed?"Protect this site":"Allow this site"};
+        new AlertDialog.Builder(this).setTitle("Browser shields")
+            .setMessage(details).setPositiveButton("Settings",(dialog,which)->
+                new AlertDialog.Builder(this).setTitle("Shields")
+                    .setItems(options,(d,index)->{
+                        if(index==0){
+                            protection.refresh(true,(ok,msg)->{
+                                notice(msg);
+                                refreshToolbar();
+                            });
+                            notice("Refreshing original filter lists");
+                        }else if(index==1){
+                            protection.setEnabled(!protection.isEnabled());
+                            refreshToolbar();
+                        }else{
+                            try{
+                                protection.allowSite(currentUrl,!siteAllowed);
+                                BrowserTab selected=current();
+                                if(selected!=null)selected.web.reload();
+                            }catch(Exception error){notice("Site exception unavailable");}
+                        }
+                    }).show())
+            .setNegativeButton("Close",null).show();
+    }
+
     private void copy(String label,String value) {
         ClipboardManager cb=(ClipboardManager)getSystemService(Context.CLIPBOARD_SERVICE);
         if(cb!=null){cb.setPrimaryClip(ClipData.newPlainText(label,value));notice("Copied "+label);}
@@ -399,6 +596,11 @@ public final class BrowserActivity extends Activity {
         BrowserTab tab=current();
         if(tab!=null&&tab.web.canGoBack())tab.web.goBack();
         else super.onBackPressed();
+    }
+    @Override protected void onStop() {
+        persistTabs();
+        CookieManager.getInstance().flush();
+        super.onStop();
     }
     @Override protected void onSaveInstanceState(Bundle out) {
         super.onSaveInstanceState(out);
@@ -419,6 +621,9 @@ public final class BrowserActivity extends Activity {
     }
     private static final class BrowserTab {
         final WebView web;
+        volatile String pageUrl="";
+        final AtomicInteger blocked=new AtomicInteger(0);
+        final AtomicInteger popups=new AtomicInteger(0);
         String title="New tab";
         BrowserTab(WebView view){web=view;}
     }
