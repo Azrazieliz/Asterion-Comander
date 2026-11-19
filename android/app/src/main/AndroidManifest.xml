@@ -22,7 +22,7 @@
           <action android:name="android.speech.RecognitionService"/>
         </intent>
     </queries>
-    <application android:allowBackup="false" android:label="Asterion Control" android:icon="@drawable/ic_asterion" android:roundIcon="@drawable/ic_asterion" android:usesCleartextTraffic="true" android:theme="@style/AsterionTheme" android:supportsRtl="true">
+    <application android:name=".ControlApplication" android:allowBackup="false" android:label="Asterion Control" android:icon="@drawable/ic_asterion" android:roundIcon="@drawable/ic_asterion" android:usesCleartextTraffic="true" android:theme="@style/AsterionTheme" android:supportsRtl="true">
       <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="unspecified">
         <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
       </activity>
