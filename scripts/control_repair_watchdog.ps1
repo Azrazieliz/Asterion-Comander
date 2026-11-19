@@ -194,6 +194,89 @@ if(Test-Path $nativeFlag){
 }
 # Private Git bridge liveness is checked above, before native API recovery exits.
 
+# R01: a native relay may report connected while its running process
+# predates its installed RPC route (HTTP 404 despite /healthz healthy).
+# Use only the owner's guarded reload, not another gateway or pairing.
+if($nativeRelayOk){
+  $rpcStatus=0
+  try{
+    $rpcProbe=Invoke-WebRequest 'http://127.0.0.1:8995/phone/rpc' -Method Get -UseBasicParsing -TimeoutSec 2
+    $rpcStatus=[int]$rpcProbe.StatusCode
+  }catch{
+    if($_.Exception.Response){$rpcStatus=[int]$_.Exception.Response.StatusCode}
+  }
+  if($rpcStatus -eq 404){
+    $reload=Join-Path $PSScriptRoot 'reload_native_wss_after_idle_20261119.ps1'
+    $attempt=Join-Path $state 'v6-native-route-recovery-attempt.txt'
+    $cooldown=$true
+    if(Test-Path $attempt){
+      try{
+        $last=[datetimeoffset]::Parse((Get-Content -LiteralPath $attempt -Raw).Trim())
+        $cooldown=(([datetimeoffset]::UtcNow-$last).TotalMinutes -ge 10)
+      }catch{$cooldown=$false}
+    }
+    $already=@(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {$_.Name -match '^powershell(?:\.exe)?
+# Only intervene after two real phone-side handshake rejections while the phone
+# remains reachable. Never alter Android permissions, keys, pairing or other services.
+$nativeFailuresFile=Join-Path $state 'native-wss-handshake-failures.txt'
+$nativeLastRestartFile=Join-Path $state 'native-wss-last-restart.txt'
+try{
+  $phone=Invoke-RestMethod ($url+'/api/v1/phone') -Headers @{Authorization=('Bearer '+$token)} -TimeoutSec 3
+  $direct=$phone.info.remote_transport.direct_mcp
+  $rejected=[bool]($nativeRelayOk -and $phone.reachable -and $direct -and
+    -not $direct.connected -and $direct.last_stage -eq 'wss_upgrade' -and
+    $direct.last_error_detail -match 'WSS handshake rejected|WSS upgrade HTTP (400|403|502)')
+  $failures=0
+  if($rejected){
+    if(Test-Path $nativeFailuresFile){
+      [void][int]::TryParse((Get-Content $nativeFailuresFile -Raw).Trim(),[ref]$failures)
+    }
+    $failures=[math]::Min(99,$failures+1)
+    $lastRestart=[datetime]::MinValue
+    if(Test-Path $nativeLastRestartFile){
+      [void][datetime]::TryParse((Get-Content $nativeLastRestartFile -Raw).Trim(),[ref]$lastRestart)
+    }
+    $cooldownOk=((Get-Date)-$lastRestart).TotalMinutes -ge 10
+    if($failures -ge 2 -and $cooldownOk){
+      $local=Invoke-RestMethod 'http://127.0.0.1:8995/healthz' -TimeoutSec 3
+      if($local.ok -and -not $local.phone_connected){
+        $socket=@(Get-NetTCPConnection -State Listen -LocalPort 8995 -ErrorAction SilentlyContinue)
+        if($socket.Count -eq 1){
+          $owner=Get-CimInstance Win32_Process -Filter ('ProcessId='+$socket[0].OwningProcess) -ErrorAction SilentlyContinue
+          if($owner -and $owner.CommandLine -like '*asterion_remote.native_phone_relay:app*'){
+            Stop-Process -Id $owner.ProcessId -Force -ErrorAction Stop
+            Start-Sleep -Milliseconds 400
+            $python=Join-Path $root '.venv\Scripts\python.exe'
+            if(Test-Path $python){
+              Start-Process -FilePath $python -ArgumentList @('-m','uvicorn',
+                'asterion_remote.native_phone_relay:app','--host','127.0.0.1','--port','8995') `
+                -WorkingDirectory $root -WindowStyle Hidden `
+                -RedirectStandardOutput (Join-Path $state 'native-wss.stdout.log') `
+                -RedirectStandardError (Join-Path $state 'native-wss.stderr.log')|Out-Null
+              Set-Content -LiteralPath $nativeLastRestartFile -Value (Get-Date -Format o) -Encoding ASCII
+              Add-Content (Join-Path $state 'control-watchdog-recovery.log') ('Native WSS handshake relay restart '+(Get-Date -Format o))
+            }
+          }
+        }
+      }
+      $failures=0
+    }
+  }
+  Set-Content -LiteralPath $nativeFailuresFile -Value ([string]$failures) -NoNewline -Encoding ASCII
+}catch{
+  # A failed health probe is not permission to reset credentials or the phone.
+}
+
+exit 0
+ -and $_.CommandLine -match 'reload_native_wss_after_idle_20261119\.ps1'})
+    if($cooldown -and $already.Count -eq 0 -and (Test-Path -LiteralPath $reload)){
+      Set-Content -LiteralPath $attempt -Value (Get-Date -Format o) -Encoding ASCII
+      Start-Process powershell.exe -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',('"'+$reload+'"'),'-Apply') -WorkingDirectory $root -WindowStyle Hidden | Out-Null
+      Add-Content $bridgeLog ('Native RPC route 404; owner-relay guarded reload invoked '+(Get-Date -Format o))
+    }
+  }
+}
+
 # Native WSS recovery: a running process alone is not proof of a usable phone link.
 # Only intervene after two real phone-side handshake rejections while the phone
 # remains reachable. Never alter Android permissions, keys, pairing or other services.
