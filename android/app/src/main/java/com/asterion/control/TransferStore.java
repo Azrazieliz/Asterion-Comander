@@ -129,7 +129,16 @@ final class TransferStore {
   synchronized JSONObject finish(String id)throws Exception {
     Job job=get(id);
     if(job.written!=job.size)throw new IllegalArgumentException("File transfer incomplete");
-    String actual=hex(job.digest.digest());
+    // Re-hash the staged file rather than consuming MessageDigest.digest().
+    // If MediaStore publication fails (or exceeds a caller's timeout),
+    // an owner retry must NOT compare against the digest of empty bytes and
+    // destructively discard an otherwise completely received APK.
+    MessageDigest verify=MessageDigest.getInstance("SHA-256");
+    try(InputStream source=new FileInputStream(job.path)){
+      byte[] block=new byte[256*1024];int read;
+      while((read=source.read(block))!=-1)verify.update(block,0,read);
+    }
+    String actual=hex(verify.digest());
     if(!MessageDigest.isEqual(actual.getBytes(java.nio.charset.StandardCharsets.US_ASCII),
          job.expected.getBytes(java.nio.charset.StandardCharsets.US_ASCII))){
       jobs.remove(id);job.path.delete();throw new IllegalArgumentException("SHA-256 mismatch; discarded");
@@ -137,7 +146,10 @@ final class TransferStore {
     ContentValues values=new ContentValues();
     values.put(MediaStore.MediaColumns.DISPLAY_NAME,job.name);
     values.put(MediaStore.MediaColumns.MIME_TYPE,
-      job.name.toLowerCase(Locale.ROOT).endsWith(".txt")?"text/plain":"application/octet-stream");
+      job.name.toLowerCase(Locale.ROOT).endsWith(".apk")?
+        "application/vnd.android.package-archive":
+        job.name.toLowerCase(Locale.ROOT).endsWith(".txt")?
+          "text/plain":"application/octet-stream");
     values.put(MediaStore.MediaColumns.RELATIVE_PATH,Environment.DIRECTORY_DOWNLOADS+"/Asterion Control/");
     values.put(MediaStore.MediaColumns.IS_PENDING,1);
     Uri uri=null;
