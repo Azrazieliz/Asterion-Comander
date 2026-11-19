@@ -30,6 +30,7 @@ from .control_v2_routes import router as control_v2_router
 from .control_ai_routes import router as control_ai_router
 from .recovery import router as recovery_router
 from .browser_crawler import router as browser_crawler_router
+from .owner_apk_delivery import router as owner_apk_delivery_router
 from .pairing import router as pairing_router, start_discovery, stop_discovery, create_code
 from .live_stream import install_stream
 from .control_services import ScriptRun, BatchRequest, script_command, script_list, host_health
@@ -54,6 +55,7 @@ app.include_router(control_v2_router)
 app.include_router(control_ai_router)
 app.include_router(recovery_router)
 app.include_router(browser_crawler_router)
+app.include_router(owner_apk_delivery_router)
 app.include_router(pairing_router)
 
 
