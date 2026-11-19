@@ -19,6 +19,8 @@ import java.util.Base64;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /** Authenticated, chunked Wi-Fi receive. Android owns the files; no ADB is used. */
 final class TransferStore {
@@ -27,12 +29,24 @@ final class TransferStore {
   private final Context app;
   private final Map<String, Job> jobs = new HashMap<>();
   private final SecureRandom random = new SecureRandom();
+  // Dedicated original TransferStore commit worker. An APK ~505 MB must not
+  // occupy a network request for re-hashing + MediaStore publication.
+  private final ExecutorService publisher=Executors.newSingleThreadExecutor(r->{
+    Thread thread=new Thread(r,"asterion-android-transfer-publisher");
+    thread.setDaemon(false);
+    return thread;
+  });
 
   private static final class Job {
     String id, name, expected;
     File path;
     long size, written, created;
     MessageDigest digest;
+    String phase="receiving";
+    String failureCode="";
+    JSONObject finalReceipt=null;
+    long completedAt=0;
+    boolean commitStarted=false;
   }
 
   TransferStore(Context context){app=context.getApplicationContext();}
@@ -44,8 +58,15 @@ final class TransferStore {
   private void cleanup(){
     long now=System.currentTimeMillis();
     jobs.entrySet().removeIf(e->{
-      if(now-e.getValue().created>3600000L){
-        e.getValue().path.delete();return true;
+      Job j=e.getValue();
+      if("publishing".equals(j.phase)||"verifying".equals(j.phase))
+        return false;
+      // Keep final SHA receipts 24h to reconcile a lost HTTP response and
+      // avoid duplicate MediaStore downloads. Pending files retain 1h TTL.
+      long expiry="completed".equals(j.phase)?86400000L:3600000L;
+      if(now-j.created>expiry){
+        if(j.path!=null&&j.path.exists())j.path.delete();
+        return true;
       }
       return false;
     });
@@ -79,6 +100,7 @@ final class TransferStore {
         return new JSONObject().put("id",existing.id)
           .put("received",existing.written).put("size",size)
           .put("sha256",digest).put("resumed",true)
+          .put("phase",existing.phase)
           .put("chunk_max",CHUNK_MAX)
           .put("stored_location","Downloads/Asterion Control");
       }
@@ -102,6 +124,8 @@ final class TransferStore {
 
   synchronized JSONObject append(String id,long offset,InputStream in,int length)throws Exception {
     Job job=get(id);
+    if(!"receiving".equals(job.phase))
+      throw new IllegalStateException("Transfer is not accepting additional chunks");
     if(offset!=job.written)throw new IllegalArgumentException("Unexpected chunk offset");
     if(length<1||length>CHUNK_MAX||job.written+length>job.size)
       throw new IllegalArgumentException("Invalid chunk size");
@@ -120,64 +144,157 @@ final class TransferStore {
 
   synchronized JSONObject status(String id)throws Exception {
     Job job=get(id);
-    return new JSONObject().put("id",job.id).put("received",job.written)
-      .put("size",job.size).put("sha256",job.expected)
-      .put("name",job.name).put("phase","receiving")
-      .put("last_progress_ms",job.created).put("chunk_max",CHUNK_MAX);
+    JSONObject response=new JSONObject().put("id",job.id)
+      .put("received",job.written).put("size",job.size)
+      .put("sha256",job.expected).put("name",job.name)
+      .put("phase",job.phase).put("last_progress_ms",job.created)
+      .put("chunk_max",CHUNK_MAX);
+    if("completed".equals(job.phase)&&job.finalReceipt!=null){
+      response.put("result",job.finalReceipt);
+      response.put("verified",true);
+    }
+    if("failed".equals(job.phase))
+      response.put("error_code",job.failureCode);
+    return response;
   }
 
+  /**
+   * Idempotent, quick-ACK publication. No 500MB hashing/copying while an HTTP
+   * handler waits (the previous 30s caller timeout lost genuine finalization
+   * outcomes). Repeated finish returns the same job state and never creates a
+   * second Android Downloads item. Source remains staged on failure.
+   */
   synchronized JSONObject finish(String id)throws Exception {
     Job job=get(id);
-    if(job.written!=job.size)throw new IllegalArgumentException("File transfer incomplete");
-    // Re-hash the staged file rather than consuming MessageDigest.digest().
-    // If MediaStore publication fails (or exceeds a caller's timeout),
-    // an owner retry must NOT compare against the digest of empty bytes and
-    // destructively discard an otherwise completely received APK.
-    MessageDigest verify=MessageDigest.getInstance("SHA-256");
-    try(InputStream source=new FileInputStream(job.path)){
-      byte[] block=new byte[256*1024];int read;
-      while((read=source.read(block))!=-1)verify.update(block,0,read);
-    }
-    String actual=hex(verify.digest());
-    if(!MessageDigest.isEqual(actual.getBytes(java.nio.charset.StandardCharsets.US_ASCII),
-         job.expected.getBytes(java.nio.charset.StandardCharsets.US_ASCII))){
-      jobs.remove(id);job.path.delete();throw new IllegalArgumentException("SHA-256 mismatch; discarded");
-    }
-    ContentValues values=new ContentValues();
-    values.put(MediaStore.MediaColumns.DISPLAY_NAME,job.name);
-    values.put(MediaStore.MediaColumns.MIME_TYPE,
-      job.name.toLowerCase(Locale.ROOT).endsWith(".apk")?
-        "application/vnd.android.package-archive":
+    if(job.written!=job.size)
+      throw new IllegalArgumentException("File transfer incomplete");
+    if("completed".equals(job.phase)&&job.finalReceipt!=null)
+      return status(id);
+    if(job.commitStarted||"verifying".equals(job.phase)||
+       "publishing".equals(job.phase))
+      return status(id);
+    if("failed".equals(job.phase))
+      return status(id); // No blind replay of uncertain MediaStore publication.
+    if(!"receiving".equals(job.phase))
+      throw new IllegalStateException("Transfer has an invalid phase");
+    job.phase="verifying";
+    job.commitStarted=true;
+    job.created=System.currentTimeMillis();
+    publisher.submit(()->commitInBackground(job));
+    return status(id);
+  }
+
+  private void commitInBackground(Job job){
+    String failure="unknown_publication_failure";
+    Uri uri=null;
+    boolean published=false;
+    try{
+      // Re-hash stable private staging; MessageDigest.digest() consumes state
+      // and cannot safely be reused after an ambiguous final HTTP response.
+      MessageDigest digest=MessageDigest.getInstance("SHA-256");
+      long bytes=0;
+      try(InputStream source=new FileInputStream(job.path)){
+        byte[] block=new byte[256*1024];int n;
+        while((n=source.read(block))!=-1){
+          digest.update(block,0,n);
+          bytes+=n;
+        }
+      }
+      String actual=hex(digest.digest());
+      if(bytes!=job.size||!MessageDigest.isEqual(
+          actual.getBytes(java.nio.charset.StandardCharsets.US_ASCII),
+          job.expected.getBytes(java.nio.charset.StandardCharsets.US_ASCII))){
+        failure="staged_sha256_or_size_mismatch";
+        return;
+      }
+      synchronized(this){
+        job.phase="publishing";
+        job.created=System.currentTimeMillis();
+      }
+      ContentValues values=new ContentValues();
+      values.put(MediaStore.MediaColumns.DISPLAY_NAME,job.name);
+      values.put(MediaStore.MediaColumns.MIME_TYPE,
+        job.name.toLowerCase(Locale.ROOT).endsWith(".apk")?
+          "application/vnd.android.package-archive":
         job.name.toLowerCase(Locale.ROOT).endsWith(".txt")?
           "text/plain":"application/octet-stream");
-    values.put(MediaStore.MediaColumns.RELATIVE_PATH,Environment.DIRECTORY_DOWNLOADS+"/Asterion Control/");
-    values.put(MediaStore.MediaColumns.IS_PENDING,1);
-    Uri uri=null;
-    try{
+      values.put(MediaStore.MediaColumns.RELATIVE_PATH,
+        Environment.DIRECTORY_DOWNLOADS+"/Asterion Control/");
+      values.put(MediaStore.MediaColumns.IS_PENDING,1);
       uri=app.getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI,values);
-      if(uri==null)throw new IllegalStateException("Android Downloads could not be opened");
+      if(uri==null){
+        failure="downloads_insert_denied";
+        return;
+      }
+      long count=0;
       try(InputStream source=new FileInputStream(job.path);
           OutputStream dest=app.getContentResolver().openOutputStream(uri,"w")){
-        if(dest==null)throw new IllegalStateException("Android Downloads write denied");
-        byte[] buffer=new byte[131072];int n;long count=0;
-        while((n=source.read(buffer))!=-1){dest.write(buffer,0,n);count+=n;}
-        if(count!=job.size)throw new IllegalStateException("Transferred file size changed");
+        if(dest==null){
+          failure="downloads_write_denied";
+          return;
+        }
+        byte[] block=new byte[256*1024];int n;
+        while((n=source.read(block))!=-1){
+          dest.write(block,0,n);count+=n;
+          if(count>job.size){
+            failure="publication_size_mismatch";
+            return;
+          }
+        }
       }
-      ContentValues show=new ContentValues();show.put(MediaStore.MediaColumns.IS_PENDING,0);
-      app.getContentResolver().update(uri,show,null,null);
-      jobs.remove(id);job.path.delete();
-      return new JSONObject().put("ok",true).put("name",job.name)
-        .put("size",job.size).put("sha256",actual)
+      if(count!=job.size){
+        failure="publication_size_mismatch";
+        return;
+      }
+      ContentValues release=new ContentValues();
+      release.put(MediaStore.MediaColumns.IS_PENDING,0);
+      if(app.getContentResolver().update(uri,release,null,null)!=1){
+        failure="downloads_commit_denied";
+        return;
+      }
+      published=true;
+      JSONObject receipt=new JSONObject().put("ok",true)
+        .put("name",job.name).put("size",job.size)
+        .put("sha256",actual)
         .put("location","Downloads/Asterion Control/"+job.name)
         .put("uri",uri.toString());
+      synchronized(this){
+        job.finalReceipt=receipt;
+        job.phase="completed";
+        job.completedAt=System.currentTimeMillis();
+        job.created=job.completedAt;
+      }
+      // Only after final Android MediaStore ACK is private staging deleted.
+      job.path.delete();
     }catch(Exception problem){
-      if(uri!=null)try{app.getContentResolver().delete(uri,null,null);}catch(Exception ignored){}
-      throw problem;
+      // A source file may be private. Never log exception messages, paths,
+      // content, credentials or partial APK bytes.
+      failure="publication_"+problem.getClass().getSimpleName();
+    }finally{
+      if(!published&&uri!=null){
+        try{app.getContentResolver().delete(uri,null,null);}
+        catch(Exception ignored){}
+      }
+      synchronized(this){
+        if(!published){
+          job.phase="failed";
+          job.failureCode=failure;
+          job.created=System.currentTimeMillis();
+        }
+        job.commitStarted=false;
+      }
     }
   }
+
   synchronized JSONObject cancel(String id)throws Exception {
-    Job job=jobs.remove(id);
-    if(job!=null)job.path.delete();
-    return new JSONObject().put("cancelled",job!=null);
+    Job job=jobs.get(id);
+    if(job==null)return new JSONObject().put("cancelled",false);
+    if(job.commitStarted||"verifying".equals(job.phase)||
+       "publishing".equals(job.phase)||"completed".equals(job.phase))
+      return new JSONObject().put("cancelled",false)
+        .put("reason","finalization_in_progress_or_completed");
+    jobs.remove(id);
+    if(job.path!=null)job.path.delete();
+    return new JSONObject().put("cancelled",true);
   }
 }
