@@ -46,7 +46,9 @@ def test_watchdog_never_interrupts_uncertain_phone_action():
     source=(ROOT/"scripts/control_repair_watchdog.ps1").read_text("utf8")
     assert "$bridge.Count -eq 1" in source
     assert "IsNullOrWhiteSpace($inflight)" in source
-    assert "$jobsKnown -and -not $activeJobs -and $cooldown" in source
+    assert "if($cooldown)" in source
+    assert "$syncAgeSeconds -ge 600" in source
+    assert "$jobsKnown -and -not $activeJobs" not in source
     assert "control-git-bridge-last-recovery.txt" in source
     assert "Stop-Process -Id $current.ProcessId -Force" in source
     assert "Stop-Process -Id $bridge[0].ProcessId -Force" not in source
