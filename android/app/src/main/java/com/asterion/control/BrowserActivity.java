@@ -61,6 +61,32 @@ import java.util.concurrent.atomic.AtomicInteger;
  * future capabilities; this Activity does not claim those are already delivered.
  */
 public final class BrowserActivity extends Activity {
+    // Only the real foreground WebView URL can authorize vault Autofill.
+    // The OS AssistStructure's webDomain alone is not trusted.
+    private static volatile BrowserActivity activeBrowser;
+    static String verifiedActiveHttpsOrigin(){
+        BrowserActivity browser=activeBrowser;
+        if(browser==null||browser.isFinishing())return null;
+        final String[] value={null};
+        Runnable read=()->{
+            try{
+                if(activeBrowser!=browser)return;
+                BrowserTab tab=browser.current();
+                if(tab==null)return;
+                value[0]=ControlPasswordVault.exactOrigin(tab.web.getUrl());
+            }catch(Exception invalid){value[0]=null;}
+        };
+        if(Looper.myLooper()==Looper.getMainLooper())read.run();
+        else{
+            java.util.concurrent.CountDownLatch done=new java.util.concurrent.CountDownLatch(1);
+            new Handler(Looper.getMainLooper()).post(()->{
+                try{read.run();}finally{done.countDown();}
+            });
+            try{if(!done.await(1500,java.util.concurrent.TimeUnit.MILLISECONDS))return null;}
+            catch(InterruptedException interrupted){Thread.currentThread().interrupt();return null;}
+        }
+        return value[0];
+    }
     private static final int MAX_TABS = 8;
     private static final String START = "https://duckduckgo.com/";
     private final List<BrowserTab> tabs = new ArrayList<>();
@@ -807,7 +833,12 @@ public final class BrowserActivity extends Activity {
         if(tab!=null&&tab.web.canGoBack())tab.web.goBack();
         else super.onBackPressed();
     }
+    @Override protected void onStart(){
+        super.onStart();
+        activeBrowser=this;
+    }
     @Override protected void onStop() {
+        if(activeBrowser==this)activeBrowser=null;
         persistTabs();
         CookieManager.getInstance().flush();
         super.onStop();
