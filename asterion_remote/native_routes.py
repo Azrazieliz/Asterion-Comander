@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from .security import require_token
-from .phone_bridge import PairPhone, PhoneInput, register, request, load
+from .phone_bridge import PairPhone, PhoneInput, register, request, load, probe_native_wss_roundtrip
 from .native_transfer import TransferRequest, start_transfer, transfer_status, cancel_transfer
 
 router = APIRouter(prefix='/api/v1', dependencies=[Depends(require_token)])
@@ -304,7 +304,12 @@ def phone_continuation_cancel():
 
 @router.get('/phone/bridge/status')
 def phone_bridge_status():
-    return request('/github-bridge/status').json()
+    status = request('/github-bridge/status').json()
+    # The Android status may contain an old successful handshake. Expose an
+    # independent *current* authenticated Windows-to-phone WSS-only receipt.
+    # Keep the prior response fields for compatible installed clients.
+    status['windows_native_roundtrip'] = probe_native_wss_roundtrip()
+    return status
 
 @router.post('/phone/chat/new')
 def phone_chat_new():
