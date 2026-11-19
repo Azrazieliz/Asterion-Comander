@@ -1008,7 +1008,19 @@ public final class MainActivity extends Activity {
     if(!direct)detail+="\nWindows: "+workerPhoneState+"\n"+
       ConnectionDiagnostics.lastFailure(this);
     if(connectionIssue!=null)connectionIssue.setText(detail);
-    if(homeConnectionIssue!=null)homeConnectionIssue.setText(detail);
+    // Home communicates the primary state, not a permanent incident log.
+    // Screen/Permissions/Incidents own capture, OS approval and stack traces.
+    String homeSummary=direct?
+      "Secure Windows link connected · "+path:
+      !wanted?"Phone access off · Enable it from Connections":
+      !AgentService.running?"Phone control service stopped · Open Connections":
+      "Windows link reconnecting · Open Connections for details";
+    if(homeConnectionIssue!=null){
+      homeConnectionIssue.setText(homeSummary);
+      homeConnectionIssue.setMaxLines(2);
+      homeConnectionIssue.setTextColor(direct?DesignSystem.TEAL:
+          wanted?DesignSystem.WARNING:DesignSystem.MUTED);
+    }
   }
   private void fullRepair(boolean force){
     if(fullRepairInProgress){setPairingFeedback("Recovery already in progress. The existing job is being checked.");return;}
