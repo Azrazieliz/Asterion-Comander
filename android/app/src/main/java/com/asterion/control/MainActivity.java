@@ -897,21 +897,33 @@ public final class MainActivity extends Activity {
     updateConnectionIssue();
   }
   private void updateConnectionIssue(){
-    String issue;
+    boolean direct=false;
+    String path="unknown";
+    try{
+      direct=PhoneDirectMcp.status().optBoolean("connected",false);
+      path=TransportConnectivity.report(this).optString("network","unknown");
+    }catch(Exception ignored){}
     boolean wanted=getSharedPreferences("agent",MODE_PRIVATE)
       .getBoolean(AgentService.PREF_REMOTE_ENABLED,false);
-    if(prefs.getString("url","").isEmpty()||prefs.getString("token","").isEmpty())
-      issue="Not paired with a Windows worker";
-    else if(!wanted)issue="Phone remote access is disabled";
-    else if(!AgentService.running)issue="Android phone agent stopped";
-    else if(!AgentService.listenerReady)issue="Phone control listener not accepting connections";
-    else if(ControlAccessibilityService.active==null)issue="Android Accessibility input is not authorized";
-    else if(!CaptureService.active)issue="Native screen sharing stopped; Android approval required";
-    else if(CaptureService.latestAtMs==0L||System.currentTimeMillis()-CaptureService.latestAtMs>5000L)
-      issue="Screen sharing started but frames are stale";
-    else issue="Phone listener, input and screen capture are active";
-    String detail=issue+"\nWindows link: "+workerPhoneState+
-      "\n"+ConnectionDiagnostics.lastFailure(this);
+    String issue;
+    if(direct){
+      // A native phone-outbound authenticated WSS is NOT a broken Windows
+      // connection because optional private-LAN screen sharing is unavailable.
+      issue="Secure Asterion link connected over "+path;
+      if(ControlAccessibilityService.active==null)
+        issue+="\nRemote touch requires Android Accessibility consent";
+      if(!CaptureService.active)
+        issue+="\nScreen streaming is off (Android approval required)";
+    }else if(!wanted)issue="Phone control agent is disabled";
+    else if(!AgentService.running)issue="Android Control agent is stopped";
+    else if(prefs.getString("url","").isEmpty()||prefs.getString("token","").isEmpty())
+      issue="Windows private-LAN pairing is not configured";
+    else if(!AgentService.listenerReady)
+      issue="Private-LAN listener is unavailable; native WSS recovering";
+    else issue="Private-LAN phone listener active; checking Windows";
+    String detail=issue;
+    if(!direct)detail+="\nWindows: "+workerPhoneState+"\n"+
+      ConnectionDiagnostics.lastFailure(this);
     if(connectionIssue!=null)connectionIssue.setText(detail);
     if(homeConnectionIssue!=null)homeConnectionIssue.setText(detail);
   }
@@ -1949,6 +1961,22 @@ public final class MainActivity extends Activity {
   private String thermalName(int level){switch(level){case PowerManager.THERMAL_STATUS_NONE:return "Nominal";case PowerManager.THERMAL_STATUS_LIGHT:return "Light";case PowerManager.THERMAL_STATUS_MODERATE:return "Moderate";case PowerManager.THERMAL_STATUS_SEVERE:return "Severe";case PowerManager.THERMAL_STATUS_CRITICAL:return "Critical";case PowerManager.THERMAL_STATUS_EMERGENCY:return "Emergency";case PowerManager.THERMAL_STATUS_SHUTDOWN:return "Shutdown";default:return "Unavailable";}}
   private String networkName(){try{ConnectivityManager cm=(ConnectivityManager)getSystemService(CONNECTIVITY_SERVICE);Network n=cm.getActiveNetwork();NetworkCapabilities cap=cm.getNetworkCapabilities(n);if(cap==null)return "Offline";if(cap.hasTransport(NetworkCapabilities.TRANSPORT_WIFI))return "Wi-Fi connected";if(cap.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR))return "Mobile data";if(cap.hasTransport(NetworkCapabilities.TRANSPORT_VPN))return "VPN connected";if(cap.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))return "Ethernet";return "Connected";}catch(Exception e){return "Unavailable";}}
   private void checkHost(){
+    // The Windows HTTP dashboard is LAN-scoped. Do not issue an unreachable
+    // LAN probe or generate a fake outage on an authenticated cellular WSS.
+    try{
+      JSONObject nativeStatus=PhoneDirectMcp.status();
+      JSONObject networkStatus=TransportConnectivity.report(this);
+      if(nativeStatus.optBoolean("connected") &&
+          "cellular".equals(networkStatus.optString("network"))){
+        workerPhoneState="Phone's authenticated WSS connected on cellular";
+        if(pcConnection!=null)pcConnection.setText("Connected · cellular secure control");
+        if(hostHealth!=null)hostHealth.setText(
+          "Native remote actions available. Windows desktop video requires a supported stream route.");
+        if(remoteConnection!=null)remoteConnection.setText("Secure native link active");
+        updateConnectionIssue();
+        return;
+      }
+    }catch(Exception ignored){}
     String url=prefs.getString("url","").replaceAll("/+$",""),token=prefs.getString("token","");
     if(url.isEmpty()||token.isEmpty()){
       workerPhoneState="Windows not paired";
@@ -2752,8 +2780,24 @@ public final class MainActivity extends Activity {
       }
       String ip=localIpForPeer(raw);
       if(ip.equals("Unavailable")){
-        ConnectionDiagnostics.failure(this,"no_private_route","Phone has no private network route to Windows");
-        runOnUiThread(()->{toast("Phone has no private network route to Windows");updateConnectionIssue();});return;
+        try{
+          if(PhoneDirectMcp.status().optBoolean("connected",false)){
+            ConnectionDiagnostics.success(this);
+            runOnUiThread(()->{
+              workerPhoneState="Native authenticated WSS active; private LAN registration not required";
+              setPairingFeedback("Direct Asterion connection active over mobile network");
+              updateConnectionIssue();
+            });
+            return;
+          }
+        }catch(Exception ignored){}
+        ConnectionDiagnostics.failure(this,"no_private_route",
+          "Private-LAN registration unavailable; native WSS not verified");
+        runOnUiThread(()->{
+          workerPhoneState="Private LAN unavailable; awaiting direct relay reconnection";
+          updateConnectionIssue();
+        });
+        return;
       }
       String bearer=prefs.getString("token","");
       for(int attempt=0;attempt<4;attempt++){
