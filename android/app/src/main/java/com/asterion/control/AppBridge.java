@@ -85,6 +85,67 @@ final class AppBridge {
       .put("approval","on_device_only")
       .put("notes","An empty list means partner repositories have not yet installed the v1 bridge");
   }
+  /** Signed specialist-defined capability pack, read-only and versioned.
+   * Capabilities are declarative. Control NEVER reconstructs specialist engines
+   * or speculatively invokes an action not explicitly advertised by that app.
+   * Legacy providers missing this contract remain visible but not routable.
+   */
+  static JSONObject capabilities(Context ctx,String pkg)throws Exception{
+    provider(ctx,pkg);
+    String expected=prefs(ctx).getString("approved:"+pkg,"");
+    if(expected.isEmpty()||!expected.equals(signer(ctx,pkg)))
+      throw new SecurityException("Partner is not locally approved or signing identity changed");
+    Bundle arg=new Bundle();
+    arg.putInt("protocol_version",1);
+    Bundle response;
+    try{
+      Future<Bundle> task=CALLS.submit(()->ctx.getContentResolver().call(
+        Uri.parse("content://"+authority(pkg)),"asterion.v1.capabilities",null,arg));
+      try{response=task.get(4,TimeUnit.SECONDS);}
+      catch(TimeoutException timeout){
+        task.cancel(true);
+        return new JSONObject().put("ok",false).put("package",pkg)
+            .put("capabilities_available",false).put("reason","signed_partner_capability_timeout");
+      }
+    }catch(Exception failure){
+      return new JSONObject().put("ok",false).put("package",pkg)
+          .put("capabilities_available",false)
+          .put("reason","signed_partner_did_not_publish_capabilities");
+    }
+    if(response==null)
+      return new JSONObject().put("ok",false).put("package",pkg)
+          .put("capabilities_available",false).put("reason","no_partner_capabilities");
+    String raw=response.getString("result_json","");
+    if(raw.length()>8192)throw new IllegalStateException("Partner capability pack too large");
+    JSONObject pack;
+    try{pack=new JSONObject(raw);}
+    catch(Exception invalid){
+      return new JSONObject().put("ok",false).put("package",pkg)
+          .put("capabilities_available",false).put("reason","invalid_partner_capabilities");
+    }
+    int version=pack.optInt("pack_version",0);
+    JSONArray offered=pack.optJSONArray("actions");
+    if(version<1||version>1000||offered==null||offered.length()>80)
+      return new JSONObject().put("ok",false).put("package",pkg)
+          .put("capabilities_available",false).put("reason","unsupported_partner_pack");
+    JSONArray vetted=new JSONArray();
+    for(int i=0;i<offered.length();i++){
+      JSONObject entry=offered.optJSONObject(i);
+      if(entry==null)continue;
+      String action=entry.optString("name","");
+      String intent=entry.optString("intent","");
+      if(!ACTION.matcher(action).matches()||!ACTION.matcher(intent).matches())continue;
+      vetted.put(new JSONObject().put("name",action).put("intent",intent));
+    }
+    return new JSONObject().put("ok",true).put("package",pkg)
+        .put("protocol","asterion.v1")
+        .put("capabilities_available",true)
+        .put("owner_approved",true)
+        .put("pack_version",version)
+        .put("actions",vetted)
+        .put("actions_count",vetted.length());
+  }
+
   static JSONObject approveLocally(Context ctx,String pkg,boolean approve)throws Exception{
     // This function is intentionally NOT accessible through network or MCP commands.
     if(MainActivity.foregroundActivity()==null)throw new SecurityException("Local owner screen required");
