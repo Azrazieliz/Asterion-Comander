@@ -41,6 +41,11 @@ final class PhoneDirectMcp {
   private static volatile Network socketNetwork;
   private static volatile Context appContext;
   private static volatile long lastSuccess=0;
+  private static volatile long lastWireResponseMs=0;
+  private static volatile long lastPongMs=0;
+  private static volatile long outstandingPingAtMs=0;
+  private static final long HEALTHY_WSS_WINDOW_MS=65000L;
+  private static final long HEARTBEAT_GRACE_MS=35000L;
   private static Thread worker;
   private PhoneDirectMcp(){}
 
@@ -69,8 +74,15 @@ final class PhoneDirectMcp {
     if(thread!=null)thread.interrupt();
   }
   static JSONObject status()throws Exception{
+    long age=System.currentTimeMillis()-lastWireResponseMs;
+    boolean fresh=connected&&lastWireResponseMs>0&&
+      age>=0&&age<=HEALTHY_WSS_WINDOW_MS;
     return new JSONObject().put("transport","direct_wss")
-      .put("connected",connected).put("phase",phase)
+      .put("connected",fresh).put("socket_open",connected).put("phase",phase)
+      .put("wire_last_authenticated_frame_ms",lastWireResponseMs)
+      .put("last_heartbeat_pong_ms",lastPongMs)
+      .put("last_unanswered_ping_ms",outstandingPingAtMs)
+      .put("heartbeat_recent",fresh)
       .put("last_success_ms",lastSuccess).put("last_error",lastError)
       .put("last_stage",lastStage).put("last_error_detail",lastErrorDetail)
       .put("requires_github",false).put("phone_outbound_tls",true);
@@ -242,18 +254,39 @@ final class PhoneDirectMcp {
       lastStage="tls_handshake";sock.startHandshake();
       lastStage="wss_upgrade";handshake(sock,pairedToken);
       connected=true;phase="connected";lastStage="connected";lastError="";lastErrorDetail="";lastSuccess=System.currentTimeMillis();
+      lastWireResponseMs=lastSuccess;
+      lastPongMs=0;
+      outstandingPingAtMs=0;
       ControlEventJournal.write(owner,"transport_connected","wss_upgrade","connected","authenticated",0);
       InputStream in=sock.getInputStream();OutputStream out=sock.getOutputStream();
       while(!stop){
         Frame frame;
         try{frame=readFrame(in);}
         catch(SocketTimeoutException timeout){
-          writeMasked(out,9,new byte[0]);continue;
+          long now=System.currentTimeMillis();
+          if(outstandingPingAtMs>0 &&
+             now-outstandingPingAtMs>HEARTBEAT_GRACE_MS)
+            throw new IOException("Authenticated WSS heartbeat was not acknowledged");
+          if(outstandingPingAtMs==0){
+            outstandingPingAtMs=now;
+            writeMasked(out,9,new byte[0]);
+          }
+          continue;
         }
         if(frame.opcode==8)break;
-        if(frame.opcode==9){writeMasked(out,10,frame.payload);continue;}
-        if(frame.opcode==10)continue;
+        if(frame.opcode==9){
+          lastWireResponseMs=System.currentTimeMillis();
+          writeMasked(out,10,frame.payload);continue;
+        }
+        if(frame.opcode==10){
+          lastPongMs=System.currentTimeMillis();
+          lastWireResponseMs=lastPongMs;
+          outstandingPingAtMs=0;
+          continue;
+        }
         if(frame.opcode!=1)throw new IllegalArgumentException("Unknown WebSocket frame type");
+        lastWireResponseMs=System.currentTimeMillis();
+        outstandingPingAtMs=0;
         JSONObject event=new JSONObject(new String(frame.payload,StandardCharsets.UTF_8));
         String id=event.optString("id","");
         JSONObject rpc=event.optJSONObject("rpc");
