@@ -3,6 +3,7 @@ package com.asterion.control;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.DownloadManager;
+import android.database.Cursor;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
@@ -15,6 +16,8 @@ import android.net.http.SslError;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Settings;
 import android.text.InputType;
 import android.view.Gravity;
@@ -46,6 +49,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /** Asterion Browser: actual on-device multi-tab WebView browser, not a crawler mock.
@@ -410,11 +414,130 @@ public final class BrowserActivity extends Activity {
                     if(cookie!=null&&!cookie.isBlank())req.addRequestHeader("Cookie",cookie);
                     DownloadManager manager=(DownloadManager)getSystemService(DOWNLOAD_SERVICE);
                     if(manager==null)throw new IllegalStateException("Android download service unavailable");
-                    manager.enqueue(req);
+                    long downloadId=manager.enqueue(req);
+                    rememberDownload(downloadId,host);
                     notice("Download queued in Android Downloads");
                 }catch(Exception e){notice("Download failed: "+e.getClass().getSimpleName());}
-            }).setNegativeButton("Cancel", null).show();
+            }).setNeutralButton("Downloader", (dialog,which)->
+                sendToSpecialistDownloader(url))
+              .setNegativeButton("Cancel", null).show();
     }
+    private void sendToSpecialistDownloader(String url){
+        // This explicitly delegates B06: no Downloader extraction, segmented
+        // transfer or retry engine runs inside the Control Browser process.
+        notice("Checking signed Downloader capability");
+        new Thread(()->{
+            try{
+                JSONObject request=new JSONObject()
+                    .put("intent","download")
+                    .put("request_id","browser-"+UUID.randomUUID().toString())
+                    .put("payload",new JSONObject().put("url",url));
+                JSONObject receipt=AppIntentFastPath.route(
+                    getApplicationContext(),request);
+                runOnUiThread(()->{
+                    if(receipt.optBoolean("routed",false)){
+                        String state=receipt.optString("status","outcome_unknown");
+                        notice("Downloader operation: "+state);
+                    }else{
+                        notice("No approved signed Downloader action: "+
+                            receipt.optString("status","unavailable"));
+                    }
+                });
+            }catch(Exception error){
+                runOnUiThread(()->notice("Downloader handoff unavailable: "+
+                    error.getClass().getSimpleName()));
+            }
+        },"asterion-browser-signed-downloader-handoff").start();
+    }
+    private void rememberDownload(long id,String host){
+        try{
+            JSONArray previous=new JSONArray(browserPrefs.getString("downloads","[]"));
+            JSONArray next=new JSONArray();
+            next.put(new JSONObject().put("id",id).put("host",host)
+                .put("queued_ms",System.currentTimeMillis()));
+            for(int i=0;i<previous.length()&&next.length()<40;i++){
+                JSONObject item=previous.optJSONObject(i);
+                if(item!=null&&item.optLong("id",-1)!=id)next.put(item);
+            }
+            browserPrefs.edit().putString("downloads",next.toString()).apply();
+        }catch(Exception ignored){}
+    }
+    private void showDownloadProgress(){
+        DownloadManager manager=(DownloadManager)getSystemService(DOWNLOAD_SERVICE);
+        if(manager==null){notice("Android Download Manager unavailable");return;}
+        LinearLayout pane=DesignSystem.vertical(this);
+        pane.setPadding(dp(18),dp(16),dp(18),dp(14));
+        TextView info=label("Checking Android Downloads...",12,DesignSystem.TEXT,false);
+        add(pane,info);
+        AlertDialog dialog=new AlertDialog.Builder(this)
+            .setTitle("Browser downloads")
+            .setView(pane)
+            .setNeutralButton("System Downloads",(d,w)->{
+                try{startActivity(new Intent(DownloadManager.ACTION_VIEW_DOWNLOADS));}
+                catch(Exception error){notice("Android Downloads unavailable");}
+            })
+            .setPositiveButton("Close",null).create();
+        Handler updater=new Handler(Looper.getMainLooper());
+        final Runnable[] runner=new Runnable[1];
+        runner[0]=()->{
+            if(!dialog.isShowing())return;
+            try{
+                JSONArray saved=new JSONArray(browserPrefs.getString("downloads","[]"));
+                List<Long> ids=new ArrayList<>();
+                List<String> hosts=new ArrayList<>();
+                for(int i=0;i<saved.length()&&i<40;i++){
+                    JSONObject entry=saved.optJSONObject(i);
+                    if(entry!=null&&entry.optLong("id",0)>0){
+                        ids.add(entry.optLong("id"));
+                        hosts.add(entry.optString("host","Download"));
+                    }
+                }
+                if(ids.isEmpty()){info.setText("No browser downloads queued.");}
+                else{
+                    long[] filters=new long[ids.size()];
+                    for(int i=0;i<ids.size();i++)filters[i]=ids.get(i);
+                    StringBuilder rows=new StringBuilder();
+                    int displayed=0;
+                    try(Cursor cursor=manager.query(
+                            new DownloadManager.Query().setFilterById(filters))){
+                        if(cursor!=null)while(cursor.moveToNext()){
+                            long id=cursor.getLong(cursor.getColumnIndexOrThrow(
+                                DownloadManager.COLUMN_ID));
+                            int ix=ids.indexOf(id);
+                            if(ix<0)continue;
+                            int status=cursor.getInt(cursor.getColumnIndexOrThrow(
+                                DownloadManager.COLUMN_STATUS));
+                            long received=cursor.getLong(cursor.getColumnIndexOrThrow(
+                                DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR));
+                            long total=cursor.getLong(cursor.getColumnIndexOrThrow(
+                                DownloadManager.COLUMN_TOTAL_SIZE_BYTES));
+                            String state=status==DownloadManager.STATUS_SUCCESSFUL?"Completed":
+                                status==DownloadManager.STATUS_FAILED?"Failed":
+                                status==DownloadManager.STATUS_RUNNING?"Downloading":
+                                status==DownloadManager.STATUS_PAUSED?"Paused":"Pending";
+                            if(rows.length()>0)rows.append("\n\n");
+                            rows.append(hosts.get(ix)).append(" • ").append(state);
+                            if(total>0){
+                                rows.append("\n").append(received/1024).append(" / ")
+                                    .append(total/1024).append(" KB");
+                                if(status==DownloadManager.STATUS_RUNNING)
+                                    rows.append(" • ").append(received*100/total).append("%");
+                            }
+                            displayed++;
+                        }
+                    }
+                    if(displayed==0)rows.append("No matching Android download receipts.");
+                    info.setText(rows.toString());
+                }
+            }catch(Exception failure){info.setText("Android download status unavailable: "+
+                failure.getClass().getSimpleName());}
+            updater.postDelayed(runner[0],1100);
+        };
+        dialog.setOnDismissListener(d->updater.removeCallbacks(runner[0]));
+        dialog.show();
+        updater.post(runner[0]);
+    }
+
     private void extractVisiblePage() {
         BrowserTab tab=current();
         if(tab==null)return;
@@ -515,8 +638,7 @@ public final class BrowserActivity extends Activity {
                 else if(which==1)showEntryList("history","Recent history");
                 else if(which==2)bookmarkCurrent();
                 else if(which==3){
-                    try{startActivity(new Intent(DownloadManager.ACTION_VIEW_DOWNLOADS));}
-                    catch(Exception error){notice("Android Downloads unavailable");}
+                    showDownloadProgress();
                 }else if(which==4){
                     new AlertDialog.Builder(this).setTitle("Clear browser history?")
                         .setMessage("This clears only Asterion Browser's navigation history. Saved bookmarks and signed Control sessions are preserved.")
