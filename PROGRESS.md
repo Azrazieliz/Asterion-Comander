@@ -1,3 +1,25 @@
+# 2026-11-19 — Control V6 source-only regression and fresh paired-device evidence (evening)
+
+**Owner release hold remains operative. No APK was built, signed, transferred or installed in this pass.** Original signer, Windows worker, native WSS, Android pairing, phone data and other Asterion apps remain untouched.
+
+**Fresh live receipts through the original private GitHub fallback and existing Windows/Android worker:**
+- `v6-20261119-2012-chat-pc-status-01`: `complete/ok:true`; original Windows worker v0.8.0 responds.
+- `v6-20261119-2012-chat-phone-status-01`: `complete/ok:true`; Samsung SM-S948B Android 17 paired/reachable, actual installed `com.asterion.control` version **0.9.36**, private native WSS authenticated **over Wi-Fi**, screen capture inactive. No cellular Wi-Fi-off or fresh app upgrade acceptance.
+- `v6-20261119-2012-chat-bridge-status-01`: `complete/ok:true`; authenticated native WSS round trip **189.9 ms** (worker/relay observation, **not** end-to-end ChatGPT latency).
+- `v6-20261119-2020-worker-baseline-reliability-01`: original scheduled task `Asterion Control Self-Healing Worker` exists, `Ready`, hidden `wscript.exe` launcher and task result 0; original source checkout and branch match. Does **not** prove repeated fault recovery or soak.
+- `v6-20261119-2042-pc-health-readonly-01`: C: free **2,546,438,144 bytes** / 98% used; D: free **91,457,314,816 bytes**; RAM available ~2.27 GB. Use isolated D: for tests/staging; no owner-file cleanup authorized/performed.
+- `v6-20261119-2042-phone-diagnostic-events-readonly-01`: actual own-process Control journal shows repeated intermittent WSS disconnect/reconnect events (IOException, EOFException, SocketException); full root cause/24h soak remain open.
+- `v6-20261119-2042-phone-exit-history-readonly-01`: own-process Android ApplicationExitInfo contains multiple historical Browser subprocess exits, including code 4; do not infer cause without full trace analysis.
+- `v6-20261119-2042-phone-permission-matrix-readonly-01`: accessibility and notifications granted; screen capture off, usage stats not granted, Control VPN **not active**, Android consent still mandatory; other app-private logs inaccessible without signed providers.
+
+**New source implementation:** `VoiceWakeWords.java` pure English deterministic wake parser, `VoiceDialogueService.java` integration and `VoiceWakeWordsTest.java` JVM regression; guard bare/repeated “Asterion” from being forwarded as owner command/search, support bounded spoken follow-up and avoid false prefix matching. Commits `0a357082`, `308a7218`, `d86c8a90`. Verified by real original Windows worker command `v6-20261119-2035-voice-jvm-regression-01`, exit 0: **38 assertions passed**. Neither actual microphone recognition nor root cause of historical DuckDuckGo navigation has been accepted on the current installed Android build.
+
+**Regression lock repaired without restoring a retired implementation:** `tests/test_mobile_voice_cycles.py` previously asserted the phone had no scheduler, contrary to the newer owner-approved opt-in `ContinuationCycle.tick()` supervisor. Updated to require its gated supervisor and no legacy cycleWorker, commit `988c4b51`. First 54-test selection was obstructed by unowned inaccessible C: pytest temp fixtures (8 errors) and this stale assertion (1 fail); retry with fresh isolated D: `--basetemp`, original Windows worker `v6-20261119-2040-p0-regression-dtemp-01`, exit 0: **54 passed, 1 warning, 8 subtests passed** in 2.67 sec. Selected bridge-watchdog, VPN route, native AI WSS, cellular RPC source, phone voice/cycles, and native transfer tests. Source-only evidence, not live cellular, model quality, VPN exit, real voice or Android integrated acceptance.
+
+**Remaining release gates OPEN:** recurring transport root-cause/automatic recovery under fault and soak, mobile-data Wi-Fi-off real WSS/action, verified signed specialist operations (Core/Downloader/3D/etc), optimized local AI actual phone inference + tool/memory, full Browser/filter/crawler/download/UI acceptance, B06/B09/password+sessions, genuinely provisioned and Android-consented VPN with changed exit IP/rotation/throughput and Tor, independent security and development engines, premium UI all screens, English wake/voice real phone, and final original-owner-signed installed acceptance. All M0–M13 applicable acceptance criteria remain open; do not infer DONE from these commits/tests.
+
+---
+
 # 2026-11-19 — OWNER RELEASE HOLD: NO MORE EARLY APK BUILDS OR TRANSFERS
 
 **Binding owner correction:** Complete the actual V6 implementation and source-level behavior first. **Do not** produce another signed integration APK, push a large phone transfer, attempt installation, claim a release, or ask the owner to retest intermediate builds while M0–M13 functionality is incomplete. Follow previously approved roadmap/owner corrections. A source-only regression test is permitted. When real requirements are complete and pre-release validation is meaningful, produce **one final owner-signed build** and perform full on-device acceptance, including unavoidable OS consent.
