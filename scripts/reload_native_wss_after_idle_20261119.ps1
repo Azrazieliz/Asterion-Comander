@@ -2,6 +2,8 @@
 # Never changes pairing, SSH, tokens, Android data, Gateway retirement or worker.
 param([switch]$Apply)
 $ErrorActionPreference='Stop'
+# Run only as detached maintenance after originating native pc_command exits.
+if($Apply){Start-Sleep -Seconds 8}
 $root='D:\AsterionControlRelease'
 $state=Join-Path $env:LOCALAPPDATA 'AsterionControl'
 $report=Join-Path $state 'v6-native-wss-reload.json'
