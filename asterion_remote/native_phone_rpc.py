@@ -30,6 +30,8 @@ ROUTES: dict[tuple[str, str], str] = {
     ("GET", "/apps"): "control_phone_apps",
     ("POST", "/apps/launch"): "control_phone_app_launch",
     ("GET", "/app-bridge/apps"): "control_phone_app_bridges",
+    ("POST", "/app-bridge/capabilities"): "control_phone_app_capabilities",
+    ("POST", "/intent/dispatch"): "control_phone_intent_dispatch",
     ("POST", "/app-bridge/invoke"): "control_phone_app_invoke",
     ("POST", "/app-bridge/operation"): "control_phone_app_operation",
     ("GET", "/diagnostics/logcat"): "control_phone_own_logcat",
