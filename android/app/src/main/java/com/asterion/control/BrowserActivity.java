@@ -15,6 +15,7 @@ import android.net.http.SslError;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.provider.Settings;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.KeyEvent;
@@ -118,6 +119,8 @@ public final class BrowserActivity extends Activity {
         heading.addView(titles, new LinearLayout.LayoutParams(0, -2, 1));
         TextView shield=control("Shield",this::showProtectionDetails);
         heading.addView(shield);
+        TextView vaultButton=control("Vault",this::showVault);
+        heading.addView(vaultButton);
         counter = control("0 tabs", this::newTab);
         heading.addView(counter);
         add(root, heading);
@@ -586,6 +589,91 @@ public final class BrowserActivity extends Activity {
                         }
                     }).show())
             .setNegativeButton("Close",null).show();
+    }
+
+    /** Password vault is a purely local native screen, never AI or JavaScript. */
+    private void showVault(){
+        BrowserTab tab=current();
+        if(tab==null){notice("Open an HTTPS website first");return;}
+        String url=tab.web.getUrl();
+        final String origin;
+        try{origin=ControlPasswordVault.exactOrigin(url);}
+        catch(Exception error){
+            new AlertDialog.Builder(this).setTitle("Encrypted password vault")
+                .setMessage("Passwords can only be saved and filled for a verified HTTPS origin. Open a secure login page.")
+                .setPositiveButton("Close",null).show();
+            return;
+        }
+        try{
+            List<ControlPasswordVault.Entry> accounts=
+                ControlPasswordVault.accounts(this,origin);
+            String[] actions=new String[accounts.size()+2];
+            for(int i=0;i<accounts.size();i++)
+                actions[i]="Saved account • "+accounts.get(i).username;
+            actions[accounts.size()]="Add HTTPS login";
+            actions[accounts.size()+1]="Enable Android Autofill";
+            new AlertDialog.Builder(this).setTitle("Encrypted Vault • "+origin)
+                .setMessage("One Android Keystore-encrypted vault. Existing authorized website cookies are kept. Passwords are never sent to AI, Windows or logs.")
+                .setItems(actions,(d,choice)->{
+                    if(choice<accounts.size()){
+                        ControlPasswordVault.Entry item=accounts.get(choice);
+                        new AlertDialog.Builder(this).setTitle("Remove saved account?")
+                            .setMessage("Delete the saved login for "+item.username+
+                                " on "+origin+"? This does not sign out an existing website session.")
+                            .setPositiveButton("Remove",(confirm,which)->{
+                                try{
+                                    if(ControlPasswordVault.delete(this,origin,item.username))
+                                        notice("Account removed from encrypted vault");
+                                }catch(Exception failure){notice("Unable to delete this login");}
+                            })
+                            .setNegativeButton("Cancel",null).show();
+                    }else if(choice==accounts.size())addVaultAccount(origin);
+                    else enableSystemAutofill();
+                }).setNegativeButton("Close",null).show();
+        }catch(Exception failure){
+            notice("Encrypted vault unavailable: "+failure.getClass().getSimpleName());
+        }
+    }
+    private void addVaultAccount(String origin){
+        LinearLayout form=DesignSystem.vertical(this);
+        form.setPadding(dp(24),dp(8),dp(24),dp(8));
+        EditText username=new EditText(this);
+        username.setSingleLine(true);
+        username.setHint("Username or email");
+        username.setInputType(InputType.TYPE_CLASS_TEXT |
+            InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
+        add(form,username);
+        EditText password=new EditText(this);
+        password.setSingleLine(true);
+        password.setHint("Password");
+        password.setInputType(InputType.TYPE_CLASS_TEXT |
+            InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        add(form,password);
+        new AlertDialog.Builder(this).setTitle("Save login • "+origin)
+            .setView(form)
+            .setPositiveButton("Save",(d,which)->{
+                try{
+                    ControlPasswordVault.save(this,origin,
+                        username.getText().toString(),password.getText().toString());
+                    notice("Encrypted login saved for this site");
+                }catch(Exception failure){
+                    notice("Unable to save login: "+failure.getClass().getSimpleName());
+                }finally{
+                    password.setText("");
+                    username.setText("");
+                }
+            }).setNegativeButton("Cancel",(d,which)->{
+                password.setText("");
+            }).show();
+    }
+    private void enableSystemAutofill(){
+        try{
+            Intent request=new Intent(Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE);
+            request.setData(Uri.parse("package:"+getPackageName()));
+            startActivity(request);
+        }catch(Exception error){
+            notice("Android Autofill settings are unavailable on this device");
+        }
     }
 
     private void copy(String label,String value) {
