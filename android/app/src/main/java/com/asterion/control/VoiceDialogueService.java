@@ -190,6 +190,7 @@ public final class VoiceDialogueService extends Service {
       }
     }
     if(!command.isEmpty()){
+      ownerDispatchRetryCount=0;
       pendingOwnerSpeech=command;
       try{PendingVoiceStore.save(this,command);}
       catch(Exception saveFailure){
@@ -760,7 +761,8 @@ public final class VoiceDialogueService extends Service {
       ownerDispatchRetry=null;
       if(active==this&&!pendingOwnerSpeech.isEmpty())onChatWindowVisible();
     };
-    ui.postDelayed(ownerDispatchRetry,1000L);
+    // onChatWindowVisible rate-limits 1100ms; retry strictly after it.
+    ui.postDelayed(ownerDispatchRetry,1400L);
   }
   private void refreshVoiceNotification(){
     try{
@@ -789,7 +791,8 @@ public final class VoiceDialogueService extends Service {
       // Ask Android to foreground ChatGPT only once per 20s. Retry the
       // FOREGROUND READ, not the start activity. No owner text is sent yet.
       long now=android.os.SystemClock.elapsedRealtime();
-      if(now-lastChatForegroundRequestAt>20000L){
+      if(lastChatForegroundRequestAt==0L||
+         now-lastChatForegroundRequestAt>20000L){
         lastChatForegroundRequestAt=now;
         JSONObject outcome=access.requestChatForeground();
         lastVoiceDispatch="waiting_for_chatgpt_foreground";
