@@ -1,3 +1,5 @@
+> **LATEST OWNER OVERRIDE · 2026-11-19:** [V6 owner corrections](CONTROL_V6_OWNER_CORRECTIONS_20261119.md) raise actual Control resilience, direct WSS and diagnostics to P−1; require maximally device-optimized Asterion Cute, genuine full Browser/crawlers, turnkey integrated VPN implementation to the extent real Android and free providers allow, and premium UI everywhere. Preserve this V5 report's specific geo-policy, Rounder reuse and stricter 50k/200k/2k/1k benchmark recommendation. Voice-only English supersedes older French/English speech requirement.
+
 # ASTERION CONTROL V5 — Usage-based VPN geography, non-duplicating integrations and rigorous local-AI training
 Date: 2026-11-15
 Status: RESEARCH + DESIGN ONLY / STRICT NO-CODING HOLD.
