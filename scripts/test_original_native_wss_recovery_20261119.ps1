@@ -2,6 +2,8 @@
 # No new gateway, ADB, credentials, Android changes, re-pairing or second engine.
 param([ValidateRange(1,3)][int]$Trials=2,[switch]$Apply)
 $ErrorActionPreference='Stop'
+# The originating native command must exit before the idleness check.
+Start-Sleep -Seconds 10
 $root='D:\AsterionControlRelease'
 $state=Join-Path $env:LOCALAPPDATA 'AsterionControl'
 $report=Join-Path $state 'v6-native-wss-fault-trials.json'
