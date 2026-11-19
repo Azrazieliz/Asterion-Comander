@@ -1966,13 +1966,15 @@ public final class MainActivity extends Activity {
     try{
       JSONObject nativeStatus=PhoneDirectMcp.status();
       JSONObject networkStatus=TransportConnectivity.report(this);
-      if(nativeStatus.optBoolean("connected") &&
-          "cellular".equals(networkStatus.optString("network"))){
-        workerPhoneState="Phone's authenticated WSS connected on cellular";
-        if(pcConnection!=null)pcConnection.setText("Connected · cellular secure control");
+      if(nativeStatus.optBoolean("connected")&&
+          networkStatus.optBoolean("validated",false)){
+        String bearerNetwork=networkStatus.optString("network","internet");
+        workerPhoneState="Windows authenticated native link connected · "+bearerNetwork;
+        if(pcConnection!=null)pcConnection.setText("Connected · secure "+bearerNetwork+" link");
         if(hostHealth!=null)hostHealth.setText(
-          "Native remote actions available. Windows desktop video requires a supported stream route.");
-        if(remoteConnection!=null)remoteConnection.setText("Secure native link active");
+          "Encrypted Windows control is connected. Live remote desktop requires its own screen stream.");
+        if(remoteConnection!=null)remoteConnection.setText(
+          "Native Windows link connected · "+bearerNetwork);
         updateConnectionIssue();
         return;
       }
@@ -2768,6 +2770,18 @@ public final class MainActivity extends Activity {
     }
   }
   private void registerPhone(){
+    // Native authenticated phone-outbound WSS already registers this device.
+    // The optional Windows-to-phone LAN callback is not mandatory on mobile
+    // data and must never overwrite a healthy WSS with a false outage.
+    try{
+      JSONObject direct=PhoneDirectMcp.status();
+      if(direct.optBoolean("connected")){
+        workerPhoneState="Windows reachable through authenticated native WSS";
+        setPairingFeedback("Connected securely through the existing Android relay");
+        updateConnectionIssue();
+        return;
+      }
+    }catch(Exception ignored){}
     if(!AgentService.running){
       ConnectionDiagnostics.failure(this,"agent_not_running","Android phone agent is not running");
       setPairingFeedback("Enable phone access to register this device");updateConnectionIssue();return;
