@@ -88,7 +88,7 @@ public final class BrowserActivity extends Activity {
         return value[0];
     }
     private static final int MAX_TABS = 8;
-    private static final String START = "https://duckduckgo.com/";
+    private static final String START = "about:blank";
     private final List<BrowserTab> tabs = new ArrayList<>();
     private LinearLayout root, tabStrip;
     private FrameLayout viewport;
@@ -147,11 +147,7 @@ public final class BrowserActivity extends Activity {
         add(titles, label("ASTERION", 15, DesignSystem.TEXT, true));
         add(titles, label("BROWSER", 10, DesignSystem.TEAL, true));
         heading.addView(titles, new LinearLayout.LayoutParams(0, -2, 1));
-        TextView shield=control("Shield",this::showProtectionDetails);
-        heading.addView(shield);
-        TextView vaultButton=control("Vault",this::showVault);
-        heading.addView(vaultButton);
-        counter = control("0 tabs", this::newTab);
+        counter = control("Tabs", this::newTab);
         heading.addView(counter);
         add(root, heading);
 
@@ -203,9 +199,8 @@ public final class BrowserActivity extends Activity {
         nav.addView(back, new LinearLayout.LayoutParams(0, dp(45), 1));
         nav.addView(forward, new LinearLayout.LayoutParams(0, dp(45), 1));
         tool(nav, "Reload", () -> { BrowserTab tab = current(); if(tab!=null) tab.web.reload(); });
-        tool(nav, "Extract", this::extractVisiblePage);
-        tool(nav, "Saved", this::showSavedPages);
         tool(nav, "+ Tab", this::newTab);
+        tool(nav, "More", this::showBrowserMenu);
         add(root, nav);
 
         status = label("Ready", 11, DesignSystem.MUTED, false);
@@ -227,7 +222,7 @@ public final class BrowserActivity extends Activity {
         if(tabs.isEmpty()) newTab();
     }
 
-    private static String safeAddress(String raw) {
+    private String safeAddress(String raw) {
         String value = raw == null ? "" : raw.trim();
         if(value.isEmpty()) return START;
         // Reject WebView-local and privilege-bearing schemes, including javascript:, file:, data:.
@@ -235,7 +230,7 @@ public final class BrowserActivity extends Activity {
                 !value.startsWith("https://") && !value.startsWith("http://")) return START;
         if(!value.startsWith("https://") && !value.startsWith("http://")) {
             if(value.contains(" ") || !value.contains(".")) {
-                return "https://duckduckgo.com/?q=" +
+                return searchPrefix() +
                     URLEncoder.encode(value, StandardCharsets.UTF_8);
             }
             value = "https://" + value;
@@ -338,15 +333,20 @@ public final class BrowserActivity extends Activity {
         if(index<0||index>=tabs.size()) return;
         BrowserTab before=current();
         if(before!=null) {
-            viewport.removeView(before.web);
+            if(before.web.getParent()==viewport)viewport.removeView(before.web);
             before.web.onPause();
         }
+        viewport.removeAllViews();
         active=index;
         BrowserTab selected=current();
-        if(selected.web.getParent()!=null)
-            ((android.view.ViewGroup)selected.web.getParent()).removeView(selected.web);
-        viewport.addView(selected.web, new FrameLayout.LayoutParams(-1,-1));
-        selected.web.onResume();
+        if(START.equals(selected.pageUrl)||START.equals(selected.web.getUrl())){
+            viewport.addView(createNativeHome(),new FrameLayout.LayoutParams(-1,-1));
+        }else{
+            if(selected.web.getParent()!=null)
+                ((android.view.ViewGroup)selected.web.getParent()).removeView(selected.web);
+            viewport.addView(selected.web,new FrameLayout.LayoutParams(-1,-1));
+            selected.web.onResume();
+        }
         refreshToolbar();
         refreshTabs();
     }
@@ -395,24 +395,39 @@ public final class BrowserActivity extends Activity {
         BrowserTab tab=current();
         if(tab==null) return;
         String url=tab.web.getUrl();
-        if(url!=null && !address.hasFocus()) address.setText(url);
+        if(url!=null && !address.hasFocus()) address.setText(START.equals(url)?"":url);
         back.setEnabled(tab.web.canGoBack());
         forward.setEnabled(tab.web.canGoForward());
         back.setAlpha(tab.web.canGoBack()?1f:0.4f);
         forward.setAlpha(tab.web.canGoForward()?1f:0.4f);
         if(url!=null) {
-            try {
-                status.setText("Browsing • "+Uri.parse(url).getHost()+
+            if(START.equals(url)){
+                status.setText("Asterion home • "+providerName()+" search • "+
+                    (protection.isEnabled()?"Shields enabled":"Shields disabled"));
+            }else try {
+                status.setText(Uri.parse(url).getHost()+
                     " • "+tab.blocked.get()+" requests blocked"+
                     (protection.isEnabled()?"":" • Shield off"));
-            }catch(Exception ignored){status.setText("Browsing");}
+            }catch(Exception ignored){status.setText("Browser");}
         }
     }
     private void navigate(String value) {
         BrowserTab tab=current();
         if(tab==null) return;
         String url=safeAddress(value);
-        tab.web.loadUrl(url);
+        tab.pageUrl=url;
+        if(START.equals(url)){
+            showTab(active);
+        }else{
+            if(tab.web.getParent()!=viewport){
+                viewport.removeAllViews();
+                if(tab.web.getParent()!=null)
+                    ((android.view.ViewGroup)tab.web.getParent()).removeView(tab.web);
+                viewport.addView(tab.web,new FrameLayout.LayoutParams(-1,-1));
+                tab.web.onResume();
+            }
+            tab.web.loadUrl(url);
+        }
         address.clearFocus();
     }
     private void confirmDownload(String url, String agent, String mime, long length) {
@@ -592,6 +607,121 @@ public final class BrowserActivity extends Activity {
         });
     }
     /** Persist tab paths without query strings that can contain login tokens. */
+    private String providerName(){
+        String name=browserPrefs.getString("search_provider","Google");
+        switch(name){
+            case "Brave":case "Bing":case "DuckDuckGo":case "Google":return name;
+            default:return "Google";
+        }
+    }
+    private String searchPrefix(){
+        switch(providerName()){
+            case "Brave":return "https://search.brave.com/search?q=";
+            case "Bing":return "https://www.bing.com/search?q=";
+            case "DuckDuckGo":return "https://duckduckgo.com/?q=";
+            default:return "https://www.google.com/search?q=";
+        }
+    }
+    private void chooseSearchProvider(){
+        final String[] names={"Google","Brave","Bing","DuckDuckGo"};
+        new AlertDialog.Builder(this).setTitle("Search engine")
+            .setSingleChoiceItems(names,java.util.Arrays.asList(names)
+                .indexOf(providerName()),(dialog,which)->{
+                if(which<0||which>=names.length)return;
+                browserPrefs.edit().putString("search_provider",names[which]).apply();
+                dialog.dismiss();
+                refreshToolbar();
+                if(current()!=null&&START.equals(current().pageUrl))showTab(active);
+            }).setNegativeButton("Cancel",null).show();
+    }
+    private void showBrowserMenu(){
+        String[] actions={
+            "Home","Search engine • "+providerName(),
+            "Shields and trackers","Encrypted vault",
+            "Bookmarks and history","Extract page evidence",
+            "Android downloads","Desktop site"};
+        new AlertDialog.Builder(this).setTitle("Asterion Browser")
+            .setItems(actions,(d,choice)->{
+                switch(choice){
+                    case 0:navigate("");break;
+                    case 1:chooseSearchProvider();break;
+                    case 2:showProtectionDetails();break;
+                    case 3:showVault();break;
+                    case 4:showSavedPages();break;
+                    case 5:extractVisiblePage();break;
+                    case 6:showDownloadProgress();break;
+                    case 7:{
+                        BrowserTab t=current();
+                        if(t==null)break;
+                        WebSettings settings=t.web.getSettings();
+                        boolean desktop=!settings.getUseWideViewPort();
+                        settings.setUseWideViewPort(desktop);
+                        settings.setLoadWithOverviewMode(desktop);
+                        notice(desktop?"Desktop viewport enabled":"Mobile viewport enabled");
+                        if(!START.equals(t.pageUrl))t.web.reload();
+                        break;
+                    }
+                }
+            }).setNegativeButton("Close",null).show();
+    }
+    private View createNativeHome(){
+        ScrollView scroll=new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(DesignSystem.BG);
+        LinearLayout body=DesignSystem.vertical(this);
+        body.setPadding(dp(24),dp(35),dp(24),dp(22));
+        scroll.addView(body);
+        LinearLayout hero=DesignSystem.vertical(this);
+        hero.setPadding(dp(25),dp(30),dp(25),dp(28));
+        hero.setBackground(DesignSystem.gradient(this,0xFF33245A,0xFF15374F,26));
+        DesignSystem.AsterionMark mark=new DesignSystem.AsterionMark(this);
+        hero.addView(mark,new LinearLayout.LayoutParams(dp(54),dp(54)));
+        TextView kicker=label("ASTERION  /  THE OPEN WEB",11,0xFFA4EDE7,true);
+        kicker.setLetterSpacing(.10f);
+        kicker.setPadding(0,dp(17),0,dp(9));
+        add(hero,kicker);
+        TextView title=label("Explore without limits.",26,DesignSystem.TEXT,true);
+        add(hero,title);
+        TextView subtitle=label(
+            "One place for research, browsing, bookmarks and downloads. Private shields stay in your control.",
+            13,0xFFD0D8EA,false);
+        subtitle.setPadding(0,dp(12),0,dp(19));
+        add(hero,subtitle);
+        TextView search=control("Search the web",()->{
+            address.requestFocus();
+            android.view.inputmethod.InputMethodManager keyboard=
+                (android.view.inputmethod.InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);
+            if(keyboard!=null)keyboard.showSoftInput(address,
+                android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+        });
+        search.setBackground(DesignSystem.gradient(this,0xFF7862E8,0xFF288DC5,16));
+        add(hero,search);
+        TextView provider=label("Search provider: "+providerName()+"  •  Change",12,
+            DesignSystem.TEXT,true);
+        provider.setPadding(0,dp(17),0,0);
+        provider.setOnClickListener(v->chooseSearchProvider());
+        add(hero,provider);
+        add(body,hero);
+        TextView library=label("YOUR WORKSPACE",11,DesignSystem.TEAL,true);
+        library.setLetterSpacing(.10f);
+        library.setPadding(0,dp(29),0,dp(13));
+        add(body,library);
+        LinearLayout cards=DesignSystem.vertical(this);
+        cards.setPadding(dp(16),dp(8),dp(16),dp(12));
+        cards.setBackground(DesignSystem.shape(this,DesignSystem.SURFACE,
+            DesignSystem.EDGE,20));
+        add(cards,control("Bookmarks & history",this::showSavedPages));
+        add(cards,control("Private browsing shields",this::showProtectionDetails));
+        add(cards,control("Downloads",this::showDownloadProgress));
+        add(cards,control("Password vault",this::showVault));
+        add(body,cards);
+        TextView foot=label("No provider account or custom home server required.",11,
+            DesignSystem.MUTED,false);
+        foot.setPadding(0,dp(22),0,0);
+        add(body,foot);
+        return scroll;
+    }
+
     private static String safeSessionUrl(String value){
         try{
             Uri url=Uri.parse(value);
