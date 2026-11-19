@@ -80,8 +80,11 @@ final class BrowserProtection {
         int parsed=0;
         void accept(String line) {
             String rule=line.trim();
-            if(rule.startsWith("!")||rule.startsWith("[")||rule.startsWith("#"))return;
+            if(rule.startsWith("!")||rule.startsWith("["))return;
+            // Generic EasyList ## rules begin with '#'; parse them before
+            // the hostname-only network-rule guard below.
             cosmetics.accept(rule);
+            if(rule.startsWith("#"))return;
             boolean exception=rule.startsWith("@@");
             if(exception)rule=rule.substring(2);
             if(!rule.startsWith("||"))return;
