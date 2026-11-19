@@ -4,6 +4,18 @@
 param([switch]$PublishToDevBranch)
 $ErrorActionPreference='Stop'
 $root=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+# Use D: project-owned scratch/cache because the original Windows C: volume
+# reached only 359,952,384 free bytes during genuine native model compilation.
+# Leave original user's Gradle cache/keystore untouched; no destructive cleanup.
+if(-not $root.StartsWith('D:\\',[System.StringComparison]::OrdinalIgnoreCase)){
+  throw 'Owner-safe isolated D: build workspace is required'
+}
+$env:GRADLE_USER_HOME=Join-Path $root '_v6_gradle_user_home'
+$env:TEMP=Join-Path $root '_v6_build_temp'
+$env:TMP=$env:TEMP
+foreach($directory in @($env:GRADLE_USER_HOME,$env:TEMP)){
+  New-Item -ItemType Directory -Path $directory -Force | Out-Null
+}
 $branch='work/control-0927-overnight-cycles-20261111'
 Set-Location $root
 $current=(git branch --show-current).Trim()
@@ -73,7 +85,7 @@ $log=Join-Path $root 'ANDROID_BUILD_v0935.log'
 Push-Location (Join-Path $root 'android')
 try{
   $ErrorActionPreference='Continue'
-  & $gradle[0].FullName :app:assembleRelease --offline --no-daemon --console=plain *> $log
+  & $gradle[0].FullName :app:assembleRelease --no-daemon --max-workers=2 --console=plain *> $log
   $result=$LASTEXITCODE
   $ErrorActionPreference='Stop'
 }finally{Pop-Location}
