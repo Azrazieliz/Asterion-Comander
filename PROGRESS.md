@@ -1,3 +1,23 @@
+# 2026-11-19 — OWNER RELEASE HOLD: NO MORE EARLY APK BUILDS OR TRANSFERS
+
+**Binding owner correction:** Complete the actual V6 implementation and source-level behavior first. **Do not** produce another signed integration APK, push a large phone transfer, attempt installation, claim a release, or ask the owner to retest intermediate builds while M0–M13 functionality is incomplete. Follow previously approved roadmap/owner corrections. A source-only regression test is permitted. When real requirements are complete and pre-release validation is meaningful, produce **one final owner-signed build** and perform full on-device acceptance, including unavoidable OS consent.
+
+**Latest historical artifacts, not release:** 0.9.38 owner-signed APK **505,163,972 bytes**, SHA-256 `31c10e86409c9183fa952c5079401eadddc879bed28f8f3c74c4f45de2440f7a`, original signer matched `9bc439712a0a460cc4703ebf254aaaf9bf3cc6e67b0ced6fc12162ed3ca3b9ad`; last confirmed installed Samsung release 0.9.36. No claim 0.9.38 installed.
+
+**Real transfer failure:** original private phone transfer uploaded **505,163,972/505,163,972 bytes** but terminal state **failed**, Windows error `HTTPStatusError`, **no verified Android MediaStore SHA256 publication receipt** and no successful APK install. An exact-identity staging probe later returned `resumed=false; received=0`; no safe resumable complete file was verified. Prior phone UI showed a real active call: **do not interrupt user device for APK investigations or repeat transfer**.
+
+**Source fixes committed after owner hold (not deployed or compiled into Android):**
+- `TransferStore.java`: existing receiver now returns a quick idempotent `verifying` ACK, runs full-file SHA-256 and Android MediaStore publication on a dedicated sequential executor; exposes real `verifying/publishing/completed/failed` status and terminal SHA receipt; protects staged file from early deletion, rejects conflicting chunks/cancellation and duplicate finish.
+- `asterion_remote/native_transfer.py`: existing Windows sender reconciles asynchronous finalization with *read-only* status polling, handles preexisting synchronous receipt, never repeats an uncertain POST and refuses mismatched Android URI/digest.
+- Source-only Python regression: **8/8 passed** (`v6-20261119-sourceonly-transfer-tests-001`, exit 0, 2.10 seconds), covering legacy and async ACK, lost reply, failed commit, wrong digest, identity mismatch, invalid URI and HTTP 400 classification.
+- `ControlPrivateVpn.java`: replaced permanent `peer_reachability_verified=false` placeholder with actual WireGuard `getStatistics` public API including recent handshake and real RX/TX. This is **not** verified exit-IP replacement, VPN enrollment, throughput or provider support.
+- `MainActivity.java`: replaced raw VPN debug dialog with branded functional native shield/handshake/traffic/connection UI, controls for one-tap registration, connect/disconnect and opt-in external IP/speed test. Visually unverified on device.
+- `VoiceDialogueService.java`: real spoken wake listener now independent of text-to-speech initialization, retries unavailable recognition service and previews partial phrases without duplicate command dispatch. **No live recognition acceptance yet**.
+
+**Still OPEN:** 100% of applicable M0–M13 functional and premium UI acceptance criteria; direct cellular handover/fault injection, complete AI reasoning/memory, genuine signed app actions/Downloader, full Browser/ad blocker/crawler tests, VPN provider real enrollment/handshake/changed IP/rotation/speed, OS permission and credential acceptance, English wake in real conditions, M9/M10 development supervisor, security, source-wide regression, final owner-signed APK delivery/installation. The hold overrides earlier incremental build approaches. Do not mark COMPLETE from source commits or unit tests.
+
+---
+
 # 2026-11-19 — V6 M4 completion evidence update: verified second model candidate and ELF dependencies
 
 - Actual completed original Windows worker command `control-v6-m4-20261119-1415-verified-strong-candidate-download`: downloaded full **1,282,439,552-byte Qwen3-1.7B-Q4_K_M.gguf** into independent isolated Model Lab candidate directory, confirmed expected SHA-256 `b7a7dfc98e59b4ceb2abaa822c683ec9c2471ff4c54db7536eaa5008c38432af`, exit 0. The candidate is **NOT** approved for installed APK or benchmarked on the phone; no inference quality claims. Existing 0.6B verified model remains current staged default.
