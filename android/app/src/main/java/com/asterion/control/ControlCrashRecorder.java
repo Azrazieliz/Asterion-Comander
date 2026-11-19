@@ -89,11 +89,11 @@ final class ControlCrashRecorder {
             try(FileInputStream stream=new FileInputStream(file)){
                 bytes=stream.readNBytes(16001);
             }
-            if(bytes.length>16000)return new JSONObject().put("available",false);
+            if(bytes.length>16000)return new JSONObject(java.util.Collections.singletonMap("available",Boolean.FALSE));
             return new JSONObject(new String(bytes,StandardCharsets.UTF_8))
                 .put("available",true);
         }catch(Exception ignored){
-            return new JSONObject().put("available",false);
+            return new JSONObject(java.util.Collections.singletonMap("available",Boolean.FALSE));
         }
     }
 }
