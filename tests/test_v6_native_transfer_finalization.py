@@ -1,0 +1,148 @@
+"""Large signed APK publication receipts must never be confused with bytes sent.
+
+Pure, read-only protocol tests: no Android install, no transfer, no APK build.
+"""
+from __future__ import annotations
+
+import threading
+import unittest
+from unittest.mock import patch
+import httpx
+from asterion_remote.native_transfer import finalize_verified_android_transfer
+
+
+EXPECTED = "a" * 64
+SIZE = 505_163_972
+URI = "content://downloads/857"
+LEGACY = {
+    "ok": True,
+    "sha256": EXPECTED,
+    "size": SIZE,
+    "name": "Asterion-Control-v0.9.38-release.apk",
+    "location": "Downloads/Asterion Control/Asterion-Control-v0.9.38-release.apk",
+    "uri": URI,
+}
+
+
+def response(body, code=200, uri="http://127.0.0.1:8765/"):
+    return httpx.Response(
+        code,
+        json=body,
+        request=httpx.Request("GET", uri),
+    )
+
+
+class FakeClient:
+    def __init__(self, finish, states=()):
+        self.finish = finish
+        self.states = list(states)
+        self.posts = 0
+        self.gets = 0
+
+    def post(self, uri, **kwargs):
+        self.posts += 1
+        if isinstance(self.finish, Exception):
+            raise self.finish
+        return response(self.finish, uri=uri)
+
+    def get(self, uri, **kwargs):
+        self.gets += 1
+        if not self.states:
+            raise AssertionError("Polling beyond simulated transfer receipts")
+        status = self.states.pop(0)
+        if isinstance(status, Exception):
+            raise status
+        return response(status, uri=uri)
+
+
+class PublicationAcceptance(unittest.TestCase):
+    def run_case(self, client, size=SIZE, digest=EXPECTED):
+        phases = []
+        with patch("asterion_remote.native_transfer.time.sleep", return_value=None):
+            result = finalize_verified_android_transfer(
+                client=client, base="http://127.0.0.1:8765", token="unit-test-only",
+                transfer_id="stable-id-123",checksum=digest,size=size,
+                publish_state=phases.append,cancel=threading.Event(),
+                max_wait_seconds=20)
+        return result,phases
+
+    def test_legacy_completed_receipt_still_works(self):
+        client=FakeClient(LEGACY)
+        reply, phases=self.run_case(client)
+        self.assertEqual(reply,LEGACY)
+        self.assertEqual(client.posts,1)
+        self.assertEqual(client.gets,0)
+        self.assertFalse(phases)
+
+    def test_new_android_returns_verifying_then_commits_once(self):
+        client=FakeClient(
+            {"phase":"verifying","id":"stable-id-123"},
+            [
+                {"phase":"verifying","sha256":EXPECTED,"size":SIZE},
+                {"phase":"publishing","sha256":EXPECTED,"size":SIZE},
+                {"phase":"completed","sha256":EXPECTED,"size":SIZE,
+                 "result":LEGACY},
+            ])
+        reply,phases=self.run_case(client)
+        self.assertEqual(reply["uri"],URI)
+        self.assertEqual(phases,["verifying","publishing"])
+        self.assertEqual(client.posts,1)
+        self.assertEqual(client.gets,3)
+
+    def test_lost_finish_ack_uses_read_only_probe(self):
+        client=FakeClient(httpx.ReadTimeout("simulated lost finish reply"),[
+            {"phase":"publishing","sha256":EXPECTED,"size":SIZE},
+            {"phase":"completed","sha256":EXPECTED,"size":SIZE,
+             "result":LEGACY},
+        ])
+        result,phases=self.run_case(client)
+        self.assertTrue(result["ok"])
+        self.assertEqual(phases,["outcome_unknown","publishing"])
+        self.assertEqual(client.posts,1)
+
+    def test_failed_android_publication_is_not_replayed(self):
+        client=FakeClient({"phase":"verifying"},[
+            {"phase":"failed","sha256":EXPECTED,"size":SIZE,
+             "error_code":"downloads_commit_denied"},
+        ])
+        with patch("asterion_remote.native_transfer.time.sleep",return_value=None):
+            with self.assertRaisesRegex(RuntimeError,"downloads_commit_denied"):
+                self.run_case(client)
+        self.assertEqual(client.posts,1)
+
+    def test_abnormal_checksum_blocks_completion(self):
+        client=FakeClient({**LEGACY,"sha256":"b"*64})
+        with self.assertRaisesRegex(RuntimeError,"receipt_mismatch"):
+            self.run_case(client)
+        self.assertEqual(client.posts,1)
+
+    def test_mismatched_status_identity_refused(self):
+        client=FakeClient({"phase":"verifying"},[
+            {"phase":"completed","sha256":"b"*64,"size":SIZE,
+             "result":LEGACY},
+        ])
+        with self.assertRaisesRegex(RuntimeError,"identity_changed"):
+            self.run_case(client)
+        self.assertEqual(client.posts,1)
+
+    def test_invalid_media_store_uri_not_accepted(self):
+        client=FakeClient({**LEGACY,"uri":"https://evil.example/file.apk"})
+        with self.assertRaisesRegex(RuntimeError,"uri_not_verified"):
+            self.run_case(client)
+
+    def test_http_400_is_classified_without_sensitive_response(self):
+        client=FakeClient({"error":"private error"},())
+        # Wrap as a genuine HTTP 400 returned by the phone.
+        client.finish={"error":"internal detail"}
+        original=client.post
+        def bad(uri,**kwargs):
+            client.posts+=1
+            return response({"error":"private"},400,uri)
+        client.post=bad
+        with self.assertRaisesRegex(RuntimeError,"android_finish_http_400"):
+            self.run_case(client)
+        self.assertEqual(client.posts,1)
+
+
+if __name__=="__main__":
+    unittest.main()
