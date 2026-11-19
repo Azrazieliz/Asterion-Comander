@@ -1088,12 +1088,12 @@ public final class MainActivity extends Activity {
   private View scrollTools(){
     LinearLayout toolsBody=v();
     wide(toolsBody,eyebrow("CONTROL CAPABILITIES"));
-    sectionTitle(toolsBody,"Tools & services.",
-      "Actual feature status, useful commands and explicit limitations.");
+    sectionTitle(toolsBody,"Your workspace.",
+      "Voice, intelligence, network and your connected applications.");
     gap(toolsBody,15);
     LinearLayout intelligence=card();
-    rowTitle(intelligence,"On-device AI",
-      "Qwen3 GGUF runs inside this Samsung, with no Windows inference server",
+    rowTitle(intelligence,"Asterion intelligence",
+      "Local AI workspace • verified model status is available separately",
       icon("activity",DesignSystem.PURPLE,23));
     gap(intelligence,12);
     button(intelligence,"Ask the phone AI","activity",true,
@@ -1102,7 +1102,7 @@ public final class MainActivity extends Activity {
     twoActions(intelligence,"Model status","check",this::showPhoneAiStatus,
       "App integrations","settings",this::showAppBridgeApprovals);
     wide(toolsBody,intelligence);
-    gap(toolsBody,12);LinearLayout incidents=card();
+    LinearLayout advancedPanel=v();gap(advancedPanel,12);LinearLayout incidents=card();
     rowTitle(incidents,"Incident investigation",
       "Cross-app opt-in evidence and Android's own crash history",
       icon("activity",DesignSystem.TEAL,23));
@@ -1115,30 +1115,32 @@ public final class MainActivity extends Activity {
     gap(incidents,8);
     button(incidents,"Historical Windows event archive","monitor",false,
       ()->showRemoteSection("diagnostics"));
-    wide(toolsBody,incidents);
+    wide(advancedPanel,incidents);
     gap(toolsBody,12);LinearLayout privacyTools=card();
     rowTitle(privacyTools,"Network & privacy",
-      "Owner-managed WireGuard and local security permissions",
+      "Free VPN connection, measured IP and Android permissions",
       icon("shield",DesignSystem.TEAL,23));
     gap(privacyTools,10);
-    twoActions(privacyTools,"VPN status","shield",this::showVpnDetails,
+    button(privacyTools,"Activate / manage free VPN","shield",true,this::showVpnDetails);
+    gap(privacyTools,9);
+    twoActions(privacyTools,"Verify IP","shield",this::showVpnVerification,
       "Security","settings",this::showSecurityChoices);
     gap(privacyTools,9);
-    button(privacyTools,"Verify VPN public IP & speed","shield",false,
-      this::showVpnVerification);
-    gap(privacyTools,9);
-    button(privacyTools,"All Android authorizations","shield",true,
+    button(privacyTools,"Android permissions","shield",false,
       this::showPermissionsHub);
+    gap(privacyTools,9);
+    button(privacyTools,"Advanced privacy settings","settings",false,
+      this::showSecurityChoices);
     wide(toolsBody,privacyTools);
 
     // Internal relays, checkpoints and observation have authenticated APIs,
     // not duplicate diagnostic switches on this user-facing screen.
     gap(toolsBody,12);LinearLayout voice=card();
-    rowTitle(voice,"Voice control",
-      "Say Asterion followed by your request · works in background while Android permits microphone access",
+    rowTitle(voice,"Asterion voice",
+      "Enable the wake word once. Android microphone approval is required.",
       icon("activity",DesignSystem.TEAL,22));
     voiceStartAction=v();
-    button(voiceStartAction,"Enable hands-free voice","check",true,this::startVoiceQuestions);
+    button(voiceStartAction,"Enable Asterion wake word","check",true,this::startVoiceQuestions);
     wide(voice,voiceStartAction);
     voiceTalkAction=v();
     button(voiceTalkAction,"Talk to Asterion","activity",true,()->{
@@ -1160,10 +1162,10 @@ public final class MainActivity extends Activity {
     wide(voice,voiceStopAction);wide(toolsBody,voice);
 
     gap(toolsBody,12);LinearLayout integrations=card();
-    rowTitle(integrations,"Asterion app integrations",
-      "Native commands · per-app consent · no unrestricted access",icon("shield",DesignSystem.TEAL,22));
+    rowTitle(integrations,"Connected applications",
+      "Only signed and approved app bridges can execute native actions",icon("shield",DesignSystem.TEAL,22));
     gap(integrations,10);
-    button(integrations,"Browse installed apps & add","devices",true,this::showAppBridgeApprovals);
+    button(integrations,"Manage signed applications","devices",true,this::showAppBridgeApprovals);
     gap(integrations,9);
     button(integrations,"My added apps","settings",false,this::showMyAddedApps);
     gap(integrations,9);
@@ -1171,23 +1173,42 @@ public final class MainActivity extends Activity {
       this::showIntegrationCoverage);
     wide(toolsBody,integrations);
 
-    gap(toolsBody,12);LinearLayout transfer=card();
+    gap(advancedPanel,12);LinearLayout transfer=card();
     rowTitle(transfer,"Direct Wi-Fi file transfer","PC → Phone · Files are saved to Downloads/Asterion Control",icon("download",DesignSystem.TEAL,24));
     gap(transfer,12);button(transfer,"Send a PC file to this phone","share",true,this::promptWifiTransfer);
     transferCancelAction=v();button(transferCancelAction,"Cancel transfer","power",false,this::cancelWifiTransfer);
     wide(transfer,transferCancelAction);transferCancelAction.setVisibility(View.GONE);
     gap(transfer,9);transferFeedback=t("No transfer active. Uses the existing private Wi-Fi connection, never GitHub or ADB.",12,DesignSystem.MUTED,false);
-    transferFeedback.setMaxLines(6);wide(transfer,transferFeedback);wide(toolsBody,transfer);
+    transferFeedback.setMaxLines(6);wide(transfer,transferFeedback);wide(advancedPanel,transfer);
 
-    gap(toolsBody,12);LinearLayout updater=card();
+    gap(advancedPanel,12);LinearLayout updater=card();
     rowTitle(updater,"Asterion Control updates","Official signed releases · install without losing data",icon("refresh",DesignSystem.TEAL,22));
     gap(updater,12);button(updater,"Check for updates","refresh",true,
       ()->UpdateManager.check(this,this::showUpdateFeedback));
     gap(updater,9);updateFeedback=t("Checks the official release, verifies SHA-256 and requests Android approval before installing.",12,DesignSystem.MUTED,false);
     updateFeedback.setMaxLines(5);wide(updater,updateFeedback);
-    wide(toolsBody,updater);
+    wide(advancedPanel,updater);
 
 
+        gap(toolsBody,15);
+    LinearLayout advancedHead=card();
+    rowTitle(advancedHead,"Advanced tools",
+      "Incident evidence, secure file transfer and signed updates",
+      icon("settings",DesignSystem.PURPLE,22));
+    gap(advancedHead,11);
+    TextView expandAction=t("Show advanced tools",13,DesignSystem.TEXT,true);
+    expandAction.setGravity(Gravity.CENTER);
+    expandAction.setPadding(dp(13),dp(14),dp(13),dp(14));
+    DesignSystem.clickable(expandAction,this,DesignSystem.SURFACE2,DesignSystem.EDGE,14);
+    wide(advancedHead,expandAction);
+    advancedPanel.setVisibility(View.GONE);
+    expandAction.setOnClickListener(w->{
+      boolean open=advancedPanel.getVisibility()!=View.VISIBLE;
+      advancedPanel.setVisibility(open?View.VISIBLE:View.GONE);
+      expandAction.setText(open?"Hide advanced tools":"Show advanced tools");
+    });
+    wide(toolsBody,advancedHead);
+    wide(toolsBody,advancedPanel);
     return scroll(toolsBody);
   }
 
