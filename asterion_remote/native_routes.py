@@ -37,6 +37,27 @@ class AppBridgeOperation(BaseModel):
     request_id: str = Field(min_length=8,max_length=100)
     cancel: bool = False
 
+class AppCapabilityRead(BaseModel):
+    package: str = Field(min_length=3,max_length=180)
+
+class NativeIntentRequest(BaseModel):
+    intent: str = Field(min_length=1,max_length=80)
+    request_id: str = Field(min_length=8,max_length=100)
+    package: str = Field(default="",max_length=180)
+    payload: dict = Field(default_factory=dict)
+
+@router.post('/phone/app-bridge/capabilities')
+def app_bridge_capabilities(data:AppCapabilityRead):
+    # Read the approved actual partner's own versioned action contract.
+    # No engine in Control and no invented actions.
+    return request('/app-bridge/capabilities','POST',data.model_dump(),timeout=8).json()
+
+@router.post('/phone/intent/dispatch')
+def phone_direct_intent(data:NativeIntentRequest):
+    # Deterministic Android native routing; AI inference not in critical path.
+    # AppBridge owner-signer approval + idempotent receipt still enforced there.
+    return request('/intent/dispatch','POST',data.model_dump(),timeout=13).json()
+
 @router.post('/phone/app-bridge/operation')
 def app_bridge_operation(data:AppBridgeOperation):
     return request('/app-bridge/operation','POST',data.model_dump(),timeout=11).json()
