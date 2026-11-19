@@ -31,6 +31,7 @@
           android:process=":asterion_browser" android:screenOrientation="unspecified"/>
       <!-- OS-controlled Autofill binding; never a chat/AI/Windows credential API. -->
       <service android:name=".ControlAutofillService"
+          android:process=":asterion_browser"
           android:exported="true"
           android:permission="android.permission.BIND_AUTOFILL_SERVICE">
         <intent-filter>
