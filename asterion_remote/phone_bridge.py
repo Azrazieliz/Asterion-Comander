@@ -106,6 +106,30 @@ def _request_via_outbound_wss(path: str, method: str, payload: dict | None,
     raise HTTPException(502, 'Unsupported native phone response')
 
 
+def request_native_only(path: str, method: str='GET',
+                        payload: dict | None=None, timeout: float=6.0) -> httpx.Response:
+    """The ORIGINAL authenticated Android WSS, strictly no private-Wi-Fi fallback.
+
+    Native model jobs can take time after their initial submission. If dispatch
+    becomes ambiguous, the same request_id can only return a durable receipt,
+    never trigger a duplicate operation. No new tunnel or phone listener.
+    """
+    if path not in {'/ai/model/status','/ai/jobs/submit','/ai/jobs/status',
+                    '/ai/jobs/cancel'} or method not in {'GET','POST'}:
+        raise HTTPException(404, 'Unsupported native-only path')
+    if path=='/ai/model/status' and method!='GET':
+        raise HTTPException(405, 'Incorrect native model method')
+    if path!='/ai/model/status' and method!='POST':
+        raise HTTPException(405, 'Incorrect native model job method')
+    paired=load()
+    if paired is None:
+        raise HTTPException(409,'Original Android pairing unavailable')
+    response=_request_via_outbound_wss(path,method,payload,timeout,paired['token'])
+    if response is None:
+        raise HTTPException(503,'Real native WSS has not connected; no LAN fallback')
+    return response
+
+
 def probe_native_wss_roundtrip(timeout: float = 5.0) -> dict:
     """Verify one actual Android RPC over the existing outbound WSS, not LAN.
 
