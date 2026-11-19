@@ -1,3 +1,13 @@
+# 2026-11-19 — Full V6 implementation roadmap, tickets and password manager contract committed
+
+- Created [full dependent M0–M13 roadmap](docs/CONTROL_V6_FULL_IMPLEMENTATION_ROADMAP_20261119.md) spanning all V4 24 real execution engines, original V3 approved 20 modules, V6 R01–R08/R10, ordinary full Browser/ad/pop blocking, B06/B09, genuine VPN and AI, English voice, external RE, original signer and device acceptance.
+- Created [complete copyable cross-conversation implementation handoff](docs/CONTROL_V6_IMPLEMENTATION_HANDOFF_20261119.md). Explicit mandate: **no placeholders**, no stopping at documentation/source-only mocks/green tests/signing without installed physical acceptance; only large-scale subsequent AI training may continue beyond working first release.
+- Created [GitHub master implementation issue #3](https://github.com/Azrazieliz/Asterion-Comander/issues/3) with [milestone tickets #4–#17](https://github.com/Azrazieliz/Asterion-Comander/issues?q=is%3Aissue+is%3Aopen+%5BV6%5D), each with acceptance gates and respect for original app ownership. Existing issue #2 preserved.
+- Latest owner approval: **B06** resumable/segmented file transfer through **existing Downloader owner** only; **B09** domain permissions via existing Control Security/Android; all other unapproved B extras stay proposals. Approved native **password manager** has a single encrypted, scoped vault and persistent browser/app sessions, interpreted as **no repeated manual reconnection** unless Android/provider policy, expiry or MFA requires it. This is not approval to copy OS/browser secrets into prompts.
+- **Source/repository documentation and issue planning only for this entry**: no worker recovery, model install/inference, VPN activation, Android APK build/install, or live B06/B09/password acceptance claimed. Latest real check remains native WSS responding **over Wi-Fi**, with cellular and resilient recovery unverified.
+
+---
+
 # 2026-11-19 — Current phone-status receipt: native WSS healthy on Wi-Fi, cellular still untested
 
 - `control-nov19-p1-phone-status-0842` returned `status:complete, ok:true`: Samsung `SM-S948B` Android 17 `paired:true, reachable:true`; native remote `connected:true`, `validated:true`, `network:wifi`, `transport:direct_wss`, outbound-only TLS, `requires_home_wifi:false`. This is **actual current read-only phone-status execution via existing fallback worker**, not a cellular test.
