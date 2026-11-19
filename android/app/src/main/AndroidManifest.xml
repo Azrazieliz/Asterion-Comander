@@ -29,6 +29,16 @@
       <!-- Isolate website cookies/storage from the authenticated Control dashboard. -->
       <activity android:name=".BrowserActivity" android:exported="false"
           android:process=":asterion_browser" android:screenOrientation="unspecified"/>
+      <!-- OS-controlled Autofill binding; never a chat/AI/Windows credential API. -->
+      <service android:name=".ControlAutofillService"
+          android:exported="true"
+          android:permission="android.permission.BIND_AUTOFILL_SERVICE">
+        <intent-filter>
+          <action android:name="android.service.autofill.AutofillService"/>
+        </intent-filter>
+        <meta-data android:name="android.autofill"
+            android:resource="@xml/autofill_service"/>
+      </service>
       <service android:name=".VoiceDialogueService" android:exported="false" android:foregroundServiceType="microphone" />
       <service android:name=".AgentService" android:exported="false" android:stopWithTask="false" android:foregroundServiceType="connectedDevice" />
       <!-- The official WireGuard AAR supplies and secures its own VpnService.
