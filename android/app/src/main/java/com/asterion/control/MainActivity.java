@@ -2124,9 +2124,15 @@ public final class MainActivity extends Activity {
       requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},MICROPHONE_REQUEST);
       return;
     }
-    try{startForegroundService(new Intent(this,VoiceDialogueService.class));
-      toast("Voice questions enabled. Microphone listens only after a question");}
-    catch(Exception e){toast("Android could not start the voice session");}
+    try{
+      JSONObject receipt=VoiceDialogueService.enableFromOwnerApi(this);
+      toast(receipt.optBoolean("already_listening",false) ?
+        "Asterion wake listening is already enabled" :
+        "Asterion wake listening requested; check live microphone state");
+      handler.postDelayed(this::updateHealth,750);
+    }catch(Exception e){
+      toast("Asterion wake activation failed: "+e.getClass().getSimpleName());
+    }
   }
   private void startAsterionObservation(){
     // The user selects an installed app by its actual label, not by typing
