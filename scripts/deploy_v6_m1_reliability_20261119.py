@@ -20,11 +20,12 @@ SOURCE = Path(__file__).resolve().parents[1]
 TARGET = Path("D:/AsterionControlRelease")
 BRANCH = "work/control-0927-overnight-cycles-20261111"
 RELAY = "scripts/reload_native_wss_after_idle_20261119.ps1"
+WORKER_RELOAD = "scripts/reload_windows_worker_once.py"
 WATCHDOG = "scripts/control_repair_watchdog.ps1"
 GIT = "asterion_remote/github_bridge_git.py"
 PHONE = "asterion_remote/phone_bridge.py"
 ROUTES = "asterion_remote/native_routes.py"
-FILES = (GIT, PHONE, ROUTES, WATCHDOG, RELAY)
+FILES = (GIT, PHONE, ROUTES, WATCHDOG, RELAY, WORKER_RELOAD)
 
 
 def digest(data: bytes) -> str:
@@ -151,7 +152,12 @@ def plan() -> dict[str, bytes]:
     if p is not None and p != desired:
         raise RuntimeError("Existing owner reload helper differs; not replacing")
     outputs[RELAY] = desired
-    for name in (GIT, PHONE, ROUTES):
+    p = original[WORKER_RELOAD]
+    helper = (SOURCE / WORKER_RELOAD).read_bytes()
+    if p is not None and p != helper:
+        raise RuntimeError("Owner already has distinct native worker reload helper; preserving it")
+    outputs[WORKER_RELOAD] = helper
+    for name in (GIT, PHONE, ROUTES, WORKER_RELOAD):
         ast.parse(outputs[name].decode("utf8"), filename=name)
     for text, label in ((source, WATCHDOG), (desired.decode("utf8"), RELAY)):
         if "Remove-Item $key" in text or "mcp_gateway:app" in text:
