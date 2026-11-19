@@ -96,7 +96,7 @@ try{
   Write-Report 'verified' $true
 }catch{
   try{Restore-Existing}catch{}
-  [void]$record.Add(@{failure_class=$_.Exception.GetType().Name;verified=$false})
+  [void]$record.Add(@{failure_class=$_.Exception.GetType().Name;verified=$false;script_line=[int]$_.InvocationInfo.ScriptLineNumber;command_name=[string]$_.InvocationInfo.MyCommand.Name})
   Write-Report 'failed_or_blocked' $false
   exit 2
 }
