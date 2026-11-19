@@ -777,36 +777,31 @@ public final class MainActivity extends Activity {
         if(configured)
           dialog.setPositiveButton("Connect",(d,w)->requestVpnConsentAndConnect());
         else
-          dialog.setPositiveButton("Get free VPN profile",(d,w)->showFreeVpnConfigSetup());
-        dialog.setNeutralButton(configured?"Replace configuration":"Import configuration",
+          dialog.setPositiveButton("Activate free VPN",(d,w)->showFreeVpnConfigSetup());
+        dialog.setNeutralButton("Advanced peer settings",
           (d,w)->showVpnImportType());
       }
       dialog.show();
     }catch(Exception e){toast("VPN status unavailable: "+e.getClass().getSimpleName());}
   }
   private void showFreeVpnConfigSetup(){
+    if(ControlFreeVpnProvisioner.busy()){
+      toast("The real provider enrollment is already running");return;
+    }
     new AlertDialog.Builder(this)
-      .setTitle("Set up a free WireGuard tunnel")
-      .setMessage("Asterion Control already includes the WireGuard engine, "+
-        "but no VPN server or account is bundled. A third-party peer must "+
-        "supply a valid configuration.\n\n"+
-        "Proton VPN's Free plan currently allows manual WireGuard "+
-        "configurations. Create a free Proton account, open Downloads > "+
-        "WireGuard configuration, and download the generated .conf file. "+
-        "Import its contents into Asterion Control. This does not share "+
-        "your configuration with Control's Windows service.\n\n"+
-        "After importing, Android must separately approve the VPN. "+
-        "A working internet route and exit IP must be tested before "+
-        "calling the VPN connected. No speed, port forwarding, "+
-        "or rotation guarantees are implied.")
-      .setPositiveButton("Open Proton account",(d,w)->{
-        try{
-          startActivity(new Intent(Intent.ACTION_VIEW,
-            Uri.parse("https://account.protonvpn.com")));
-        }catch(Exception e){toast("Could not open Proton setup website");}
+      .setTitle("Activate Asterion Free VPN")
+      .setMessage("Asterion will automatically generate a private WireGuard key on your phone, register a free Cloudflare WARP tunnel, and securely store the configuration in Android Keystore. No account creation, profile download or manual setup is required.\n\n"+
+        "Cloudflare is an external provider. By tapping Agree & configure, you accept Cloudflare's terms for the free service. The connection is subject to provider availability and there is no guaranteed country, IP rotation or speed.\n\n"+
+        "Android will still ask you to approve the VPN connection. Your existing Control connection and saved data are preserved.")
+      .setPositiveButton("Agree & configure",(dialog,which)->
+        ControlFreeVpnProvisioner.enroll(this,this::toast,
+          this::requestVpnConsentAndConnect))
+      .setNeutralButton("Provider terms",(dialog,which)->{
+        try{startActivity(new Intent(Intent.ACTION_VIEW,
+          Uri.parse("https://www.cloudflare.com/application/terms/")));}
+        catch(Exception error){toast("Could not open provider terms");}
       })
-      .setNeutralButton("Import WireGuard profile",(d,w)->showVpnImportType())
-      .setNegativeButton("Close",null).show();
+      .setNegativeButton("Not now",null).show();
   }
   private void showVpnImportType(){
     final String[] options={"Private-device split routes (recommended)",
