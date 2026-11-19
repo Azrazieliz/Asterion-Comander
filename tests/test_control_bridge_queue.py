@@ -122,7 +122,7 @@ def test_recovery_rejects_mismatched_identity_and_nonterminal_receipts(tmp_path,
         "valid-terminal":{"id":"valid-terminal","status":"complete","ok":True},
     }.items():
         (folder/(name+".json")).write_text(json.dumps(record),encoding="utf8")
-    lines="".join(" M results/"+p.stem+".json\\n" for p in sorted(folder.glob("*.json")))
+    lines="".join(" M results/"+p.stem+".json\n" for p in sorted(folder.glob("*.json")))
     monkeypatch.setattr(bridge.subprocess,"run",lambda *a,**kw:
         SimpleNamespace(returncode=0,stdout=lines,stderr=""))
     published=[]
