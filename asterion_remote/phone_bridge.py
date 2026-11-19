@@ -106,6 +106,37 @@ def _request_via_outbound_wss(path: str, method: str, payload: dict | None,
     raise HTTPException(502, 'Unsupported native phone response')
 
 
+def probe_native_wss_roundtrip(timeout: float = 5.0) -> dict:
+    """Verify one actual Android RPC over the existing outbound WSS, not LAN.
+
+    The phone's cached `connected` flag can stay true after transport failure.
+    Unlike request(), this deliberate diagnostic MUST NOT fall back to Wi-Fi;
+    otherwise cellular would be incorrectly certified by a private-LAN reply.
+    It never discloses the pairing token or any address.
+    """
+    paired = load()
+    if not paired:
+        return {"verified": False, "reason": "phone_not_registered"}
+    start = time.perf_counter()
+    try:
+        reply = _request_via_outbound_wss(
+            '/network/status', 'GET', None, timeout, paired['token'])
+        if reply is None:
+            return {"verified": False, "reason": "native_wss_unavailable"}
+        result = reply.json()
+        if not isinstance(result, dict) or not isinstance(result.get('network'), str):
+            return {"verified": False, "reason": "invalid_native_network_receipt"}
+        return {"verified": True, "transport": "native_wss",
+                "network": result['network'],
+                "roundtrip_ms": round((time.perf_counter() - start)*1000, 1),
+                "observed_unix_ms": round(time.time()*1000)}
+    except (HTTPException, httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+        # A failed read-only verification does not grant permission to restart,
+        # re-pair, replace the relay, or replay an uncertain phone side effect.
+        return {"verified": False, "reason": "native_wss_probe_failed",
+                "error_type": type(exc).__name__}
+
+
 def request(path: str, method: str='GET', payload: dict | None=None, timeout: float=5.0) -> httpx.Response:
     if path not in {'/health', '/ui', '/input', '/screen', '/continuation/status', '/continuation/queue', '/continuation/dispatch', '/observation/status', '/observation/events', '/observation/frame', '/voice/status', '/voice/question', '/voice/ack', '/voice/enable', '/voice/stop', '/voice/settings', '/cycles/status', '/cycles/start', '/cycles/pause', '/cycles/resume', '/cycles/stop', '/cycles/confirm-new-chat', '/network/status', '/github-bridge/status', '/performance/status', '/performance/mode', '/performance/optimize', '/diagnostics/logcat', '/diagnostics/exit-history', '/diagnostics/events', '/diagnostics/security', '/diagnostics/permissions', '/diagnostics/vpn', '/apps', '/apps/launch', '/app-bridge/apps', '/app-bridge/invoke', '/app-bridge/operation', '/continuation/ack', '/continuation/cancel', '/chat/new' } and not re.fullmatch(r'/observation/frame/frame-[0-9]{10,15}\.jpg',path):
         raise HTTPException(400, 'Unsupported phone API call')
