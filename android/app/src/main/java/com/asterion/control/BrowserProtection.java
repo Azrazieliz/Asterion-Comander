@@ -21,10 +21,12 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Browser network shield owned by Browser, not by Downloader. Downloads genuine
- * EasyList and EasyPrivacy over HTTPS. Only the conservatively understood
- * third-party hostname rules are enforced; the unsupported ABP rule types,
- * cosmetic rules, in-stream ads and opaque service-worker traffic are NOT
- * represented as blocked. Report real intercepted requests only.
+ * EasyList and EasyPrivacy over HTTPS. Third-party hostname rules and a
+ * bounded domain-scoped cosmetic CSS subset are enforced by the same subscription.
+ * Unsupported ABP procedures/scriptlets, in-stream ads and opaque
+ * service-worker traffic are NOT represented as blocked.
+ * Report actual intercepted requests only; hidden elements are not counted as
+ * network requests.
  */
 final class BrowserProtection {
     interface Listener { void updated(boolean success, String message); }
