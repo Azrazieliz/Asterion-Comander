@@ -55,6 +55,11 @@ final class AndroidMcp {
       "duration_ms","integer","text","string"),"action"));
     tools.put(tool("control_phone_apps","Discover launchable installed Android apps",null));
     tools.put(tool("control_phone_app_bridges","List installed partner app bridges and on-device approval state",null));
+    tools.put(tool("control_phone_app_capabilities","Read a locally approved signed specialist's real versioned capabilities without executing it",
+      args("package","string"),"package"));
+    tools.put(tool("control_phone_intent_dispatch","Route a typed simple request directly to one advertised approved specialist without a generation engine in Control",
+      args("intent","string","request_id","string","package","string","payload","object"),
+      "intent","request_id"));
     tools.put(tool("control_phone_app_invoke","Invoke an owner-approved partner action once with a durable idempotency key",
       args("package","string","action","string","request_id","string","payload","object"),
       "package","action","request_id"));
@@ -150,6 +155,8 @@ final class AndroidMcp {
       }
       case "control_phone_apps":return textContent(AppCatalog.list(owner));
       case "control_phone_app_bridges":return textContent(AppBridge.list(owner));
+      case "control_phone_app_capabilities":return textContent(AppBridge.capabilities(owner,args.getString("package")));
+      case "control_phone_intent_dispatch":return textContent(AppIntentFastPath.route(owner,args));
       case "control_phone_app_invoke":return textContent(AppBridge.invoke(owner,args));
       case "control_phone_app_operation":return textContent(AppBridge.operation(owner,
         args.getString("package"),args.getString("request_id"),args.optBoolean("cancel",false)));
