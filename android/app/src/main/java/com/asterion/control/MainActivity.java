@@ -756,33 +756,116 @@ public final class MainActivity extends Activity {
 
   private void showVpnDetails(){
     try{
-      JSONObject android=ControlPermissionMatrix.status(this);
       JSONObject tunnel=ControlPrivateVpn.status(this);
       boolean active=tunnel.optBoolean("active",false);
       boolean configured=tunnel.optBoolean("configuration_present",false);
-      String message="Asterion WireGuard: "+tunnel.optString("state","off")+
-        "\nConfiguration safely stored: "+configured+
-        "\nAndroid VPN route active: "+android.optBoolean("other_vpn_or_active_vpn")+
-        "\nFull-tunnel owner approved: "+tunnel.optBoolean("full_tunnel_owner_approved")+
-        "\n\nThe current Control secure connection does not require a VPN. " +
-        "A VPN can run only with a valid owner-managed peer and Android system consent. " +
-        "Tunnel UP does not prove remote peer reachability or improved speed.";
-      AlertDialog.Builder dialog=new AlertDialog.Builder(this)
-        .setTitle("Private VPN — WireGuard").setMessage(message)
-        .setNegativeButton("Close",null);
-      if(active){
-        dialog.setPositiveButton("Disconnect",(d,w)->
-          ControlPrivateVpn.disconnect(this,this::toast));
-      }else{
-        if(configured)
-          dialog.setPositiveButton("Connect",(d,w)->requestVpnConsentAndConnect());
-        else
-          dialog.setPositiveButton("Activate free VPN",(d,w)->showFreeVpnConfigSetup());
-        dialog.setNeutralButton("Advanced peer settings",
-          (d,w)->showVpnImportType());
+      boolean handshake=tunnel.optBoolean("peer_reachability_verified",false);
+      long lastHandshake=tunnel.optLong("last_real_peer_handshake_ms",0);
+      long rx=tunnel.optLong("real_bytes_received",0),tx=tunnel.optLong("real_bytes_sent",0);
+
+      ScrollView scroll=new ScrollView(this);
+      scroll.setFillViewport(true);
+      scroll.setBackgroundColor(DesignSystem.BG);
+      LinearLayout content=v();
+      pad(content,18,21);
+      scroll.addView(content);
+      LinearLayout hero=card();
+      hero.setBackground(DesignSystem.gradient(this,
+          active?0xFF134A56:0xFF342650,0xFF151D37,25));
+      LinearLayout brand=h();brand.setGravity(Gravity.CENTER_VERTICAL);
+      brand.addView(squareIcon("shield",active?DesignSystem.TEAL:DesignSystem.PURPLE));
+      LinearLayout copy=v();copy.setPadding(dp(14),0,0,0);
+      wide(copy,eyebrow("ASTERION / NETWORK"));
+      margin(copy,t("Private connection",22,DesignSystem.TEXT,true),8);
+      brand.addView(copy,new LinearLayout.LayoutParams(0,-2,1));
+      wide(hero,brand);gap(hero,22);
+      String mainState=active?(handshake?
+          "Tunnel active · Peer verified":"Tunnel active · Awaiting real peer handshake"):
+          configured?"VPN ready to connect":"VPN not configured";
+      TextView stateText=t(mainState,15,handshake?DesignSystem.TEAL:
+          active?DesignSystem.WARNING:DesignSystem.MUTED,true);
+      stateText.setMaxLines(3);wide(hero,stateText);
+      gap(hero,11);
+      wide(hero,t(active?
+          "Live tunnel state from Android's WireGuard backend, not a simulated connection.":
+          "A free provider can be enrolled in-app. Existing Windows control remains unaffected.",
+          12,DesignSystem.MUTED,false));
+      wide(content,hero);gap(content,13);
+
+      LinearLayout proof=card();
+      rowTitle(proof,"Live tunnel evidence",
+          "Actual WireGuard runtime information, no estimated traffic",
+          icon("activity",DesignSystem.TEAL,23));
+      gap(proof,13);
+      wide(proof,t("Backend  •  WireGuard Go",12,DesignSystem.MUTED,false));
+      gap(proof,9);
+      wide(proof,t("Encrypted configuration  •  "+
+          (configured?"Safely stored":"Not registered"),12,DesignSystem.TEXT,false));
+      gap(proof,9);
+      String handshakeLabel=lastHandshake>0?
+          new java.util.Date(lastHandshake).toString():
+          "No handshake reported";
+      wide(proof,t("Last real handshake  •  "+handshakeLabel,
+          12,DesignSystem.TEXT,false));
+      gap(proof,9);
+      wide(proof,t("Transferred  •  "+(rx/1024)+" KB received / "+
+          (tx/1024)+" KB sent",12,DesignSystem.TEXT,false));
+      gap(proof,9);
+      wide(proof,t("Exit-IP replacement  •  Not yet measured",
+          12,DesignSystem.WARNING,false));
+      if(tunnel.has("peer_statistics_error_code")&&
+          !tunnel.optString("peer_statistics_error_code","").isEmpty()){
+        gap(proof,9);
+        wide(proof,t("Tunnel telemetry unavailable · "+
+            tunnel.optString("peer_statistics_error_code"),
+            11,DesignSystem.WARNING,false));
       }
-      dialog.show();
-    }catch(Exception e){toast("VPN status unavailable: "+e.getClass().getSimpleName());}
+      wide(content,proof);gap(content,12);
+
+      LinearLayout controls=card();
+      rowTitle(controls,"Connection controls",
+          "Your phone owns the tunnel and its permissions",
+          icon("shield",DesignSystem.PURPLE,23));
+      gap(controls,16);
+      final AlertDialog[] popup=new AlertDialog[1];
+      Runnable close=()->{if(popup[0]!=null)popup[0].dismiss();};
+      if(active){
+        button(controls,"Disconnect VPN","power",true,()->{
+          close.run();ControlPrivateVpn.disconnect(this,this::toast);
+        });
+      }else if(configured){
+        button(controls,"Connect encrypted tunnel","shield",true,()->{
+          close.run();requestVpnConsentAndConnect();
+        });
+      }else{
+        button(controls,"Configure free VPN automatically","shield",true,()->{
+          close.run();showFreeVpnConfigSetup();
+        });
+      }
+      gap(controls,10);
+      button(controls,"Verify public IP and real speed","activity",false,()->{
+        close.run();showVpnVerification();
+      });
+      gap(controls,10);
+      button(controls,"Advanced WireGuard peer settings","settings",false,()->{
+        close.run();showVpnImportType();
+      });
+      wide(content,controls);gap(content,12);
+      wide(content,t(
+        "Cloudflare WARP is an external provider with its own terms. "+
+        "Exit country, automatic address rotation, and a 75% speed ratio "+
+        "are not guaranteed. These require actual device measurements.",
+        11,DesignSystem.MUTED,false));
+      popup[0]=new AlertDialog.Builder(this)
+        .setView(scroll).setNegativeButton("Close",null).create();
+      popup[0].show();
+      android.view.Window window=popup[0].getWindow();
+      if(window!=null)window.setLayout(
+          Math.min(getResources().getDisplayMetrics().widthPixels-dp(20),dp(540)),
+          Math.min(getResources().getDisplayMetrics().heightPixels-dp(85),dp(680)));
+    }catch(Exception e){
+      toast("VPN status unavailable: "+e.getClass().getSimpleName());
+    }
   }
   private void showFreeVpnConfigSetup(){
     if(ControlFreeVpnProvisioner.busy()){
