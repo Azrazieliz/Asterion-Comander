@@ -1,3 +1,13 @@
+# 2026-11-19 — M4 real model dependency acquisition, no phone inference claim
+
+- Owner explicitly authorized direct downloads. Used existing paired private GitHub bridge → original Windows worker to fetch **actual** 484,220,288-byte `Qwen3-0.6B-Q4_K_M.gguf` from Hugging Face `tauqir02/Qwen3-0.6B-GGUF` to isolated D: Android source (`D:\\AsterionControlV6M0_20261119`). Script `scripts/prepare_v6_native_inference_20261119.py` rejects incomplete bytes or SHA other than `373db06783953f0981572d008f183eb2167b93304f5adbf7c4ce6ed6a91ee437`. Later live progress snapshot reports **complete file 484220288 bytes, no partial, native phase arm64_configuring**; entry does NOT claim compiled ELF or phone inference yet.
+- Downloaded full immutable original llama.cpp upstream Git commit `4b77dee0524c64b8471869232e2958bd9589607d` into an isolated, independently verifiable source checkout. The initial short-SHA Git fetch returned 128; fixed script to resolve upstream full 40-character SHA via official GitHub commit API and retry safely. Second actual Windows command returned **exit_code 0** and `runtime_sha_verified`. No replacement engine, ChatGPT plugin, owner signing change, APK install, pairing reset or data wipe.
+- Real Android NDK 27.0 and 27.2 were already present on the original Windows machine; ARM64 CMake/compilation runs against pinned source after verified weight download and records an independently checked ELF file if successful.
+- Advanced-model quality must not be inferred from Qwen3 0.6B. Independently staged a stronger **Qwen3-1.7B-Q4_K_M** licensed candidate download job (expected 1,282,439,552 bytes, SHA `b7a7dfc98e59b4ceb2abaa822c683ec9c2471ff4c54db7536eaa5008c38432af`), isolated outside APK pending real on-phone A/B quality and RAM/thermal benchmarks.
+- **M4 remains OPEN** until real ARM64 library and complete real GGUF produce verified on-phone inference, actionable typed tools, durable memory/research, and original-owner-signed installed APK acceptance. Do not confuse source checkout/disk download with phone AI availability.
+
+---
+
 # 2026-11-19 — V6 continuation: production M1 activated and M2 real signed-device session
 
 - **Owner Windows API actually promoted/verified:** original supervised process PID **26068 → 21132**, existing worker reload report `attempted:true,restarted:true,verified:true`. The new `GET /api/v1/phone/bridge/status` includes a **fresh, independently authenticated WSS-only phone network RPC**; real post-reload receipt reported `verified:true,transport:native_wss,network:wifi,roundtrip_ms:599.8`. Original relay and pairing unchanged.
