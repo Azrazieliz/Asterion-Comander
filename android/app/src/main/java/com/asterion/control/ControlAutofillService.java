@@ -32,9 +32,15 @@ public final class ControlAutofillService extends AutofillService {
         AutofillId username, password;
         String usernameValue="",passwordValue="";
         final Set<String> domains=new HashSet<>();
+        boolean invalidScheme=false;
         String origin="";
         void observe(AssistStructure.ViewNode view,String inherited){
             String raw=view.getWebDomain();
+            // Android reports the scheme separately from webDomain. Refuse
+            // plaintext HTTP and unknown iframe schemes before any vault read.
+            if(raw!=null&&!raw.isBlank() &&
+               !"https".equalsIgnoreCase(view.getWebScheme()))
+                invalidScheme=true;
             String domain=(raw==null||raw.isBlank())?inherited:raw.toLowerCase(Locale.ROOT);
             if(domain!=null&&!domain.isEmpty())domains.add(domain);
             AutofillId id=view.getAutofillId();
@@ -67,11 +73,16 @@ public final class ControlAutofillService extends AutofillService {
                 observe(view.getChildAt(i),domain);
         }
         boolean valid(){
-            if(username==null||password==null||domains.size()!=1)return false;
+            if(invalidScheme||username==null||password==null||
+                domains.size()!=1)return false;
             String domain=domains.iterator().next();
             try{
                 origin=ControlPasswordVault.exactOrigin("https://"+domain);
-                return true;
+                // AssistStructure.webDomain is untrusted. Match EXACTLY the
+                // actual foreground browser WebView HTTPS origin, including
+                // default-port normalization. No cross-port/domain autofill.
+                String real=BrowserActivity.verifiedActiveHttpsOrigin();
+                return real!=null&&origin.equals(real);
             }catch(Exception failure){return false;}
         }
     }
