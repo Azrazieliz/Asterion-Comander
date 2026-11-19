@@ -1,3 +1,12 @@
+# 2026-11-19 — Fresh read-only P−1 bridge probes returned
+
+- Existing worker processed two new Nov19 **read-only** commands, both `complete`/`ok:true`: `control-nov19-p1-pc-status-0839` returned Windows Control `0.8.0` on `LAPTOP-1LI4VRCJ` with files/commands/process/desktop/native Android capabilities. This verifies the **GitHub fallback worker accepted/processed these two current queries**, not that its reliability is fixed.
+- `control-nov19-p1-phone-bridge-0839` returned `transport:direct_wss`, `connected:true`, `phase:connected`, `requires_github:false`, `phone_outbound_tls:true`. Its `last_success_ms=1795044872365` corresponds to **2026-11-18 23:34:32 UTC**; therefore treat it as a **reported connected session**, not freshly verified cellular action, Android UI result or current two-way packet delivery.
+- New Android `phone_status` read-only probe `control-nov19-p1-phone-status-0842` was queued and lacked result on initial inspection. Do not infer Wi-Fi versus cellular or phone health until its real receipt arrives.
+- Remaining top blocker: real Android native phone action on **cellular with Wi-Fi disabled**, WSS reconnection and worker/relay health under deliberate repeated fault injection. Older documented startup/watchdog failures and small free disk remain unresolved.
+
+---
+
 # 2026-11-19 — P−1 read-only follow-up receipts discovered
 
 - Found **previously unreported actual receipts** in the existing GitHub bridge for Nov 18, not new live Nov 19 measurements: `control-repair-disk-watchdog-20261118-0140` completed with `ok:true`, exit 0. It recorded Windows C:226 MB, D:748 MB available, a scheduled task named `Asterion Control Self-Healing Worker` with state Ready / result 0, repeated watchdog launcher messages `Git bridge missing`, and at that moment `WSS_HEALTH=True PHONE_CONNECTED=True`. This **does not certify continuing transport health**.
