@@ -292,7 +292,14 @@ def recover_unpublished():
             receipt=json.loads((ROOT/candidate).read_text(encoding='utf8'))
         except (ValueError,OSError):
             continue
-        if receipt.get('status') in ('running','accepted'):
+        # A modified local filename is not sufficient authorization to
+        # publish a result. Require the exact immutable command identity and
+        # known terminal status; never turn a malformed/unknown receipt into
+        # apparent success or re-execute its originating phone operation.
+        if not isinstance(receipt,dict) or receipt.get('id')!=candidate.stem:
+            continue
+        if receipt.get('status') not in ('complete','error','uncertain',
+                                         'failed','skipped'):
             continue
         ready.append(candidate)
     if ready:
