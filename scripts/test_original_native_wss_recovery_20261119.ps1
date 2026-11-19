@@ -62,7 +62,7 @@ try{
   $network=Native-Probe
   if(-not $network){throw 'Existing authenticated WSS roundtrip unavailable'}
   if(-not $Apply){
-    [void]$record.Add(@{preflight=true;original_pid=$existing.ProcessId;network=$network;relay_mutated=$false})
+    [void]$record.Add(@{preflight=$true;original_pid=$existing.ProcessId;network=$network;relay_mutated=$false})
     Write-Report 'dry_run' $true
     exit 0
   }
