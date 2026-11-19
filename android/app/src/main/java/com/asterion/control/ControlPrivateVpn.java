@@ -13,6 +13,7 @@ import android.util.Base64;
 import org.json.JSONObject;
 import com.wireguard.android.backend.GoBackend;
 import com.wireguard.android.backend.Tunnel;
+import com.wireguard.android.backend.Statistics;
 import com.wireguard.config.Config;
 import com.wireguard.config.InetNetwork;
 import com.wireguard.config.Peer;
@@ -179,10 +180,27 @@ final class ControlPrivateVpn {
   }
   static JSONObject status(Context c)throws Exception{
     boolean up=false;
+    boolean peerVerified=false;
+    long lastHandshake=0L,receiveBytes=0L,transmitBytes=0L;
+    String evidenceError="";
     try{
       GoBackend instance=backend;
       up=instance!=null&&instance.getState(TUNNEL)==Tunnel.State.UP;
-    }catch(Exception ignored){}
+      if(up){
+        // Real WireGuard peer state, not an app toggle or fabricated VPN badge.
+        Statistics stats=instance.getStatistics(TUNNEL);
+        receiveBytes=stats.totalRx();transmitBytes=stats.totalTx();
+        for(com.wireguard.crypto.Key peer:stats.peers()){
+          Statistics.PeerStats detail=stats.peer(peer);
+          if(detail!=null&&detail.latestHandshakeEpochMillis()>lastHandshake)
+            lastHandshake=detail.latestHandshakeEpochMillis();
+        }
+        long age=System.currentTimeMillis()-lastHandshake;
+        peerVerified=lastHandshake>0&&age>=0L&&age<=180000L&&receiveBytes>0L;
+      }
+    }catch(Exception problem){
+      evidenceError=problem.getClass().getSimpleName();
+    }
     return new JSONObject().put("ok",true)
       .put("backend","wireguard_go")
       .put("active",up)
@@ -190,7 +208,11 @@ final class ControlPrivateVpn {
       .put("configuration_present",!pref(c).getString("encrypted_configuration","").isEmpty())
       .put("configuration_encrypted_at_rest",true)
       .put("full_tunnel_owner_approved",pref(c).getBoolean("allow_full_tunnel",false))
-      .put("peer_reachability_verified",false)
+      .put("peer_reachability_verified",peerVerified)
+      .put("last_real_peer_handshake_ms",lastHandshake)
+      .put("real_bytes_received",receiveBytes)
+      .put("real_bytes_sent",transmitBytes)
+      .put("peer_statistics_error_code",evidenceError)
       .put("android_system_consent_required",true)
       .put("error_code",lastErrorCode);
   }
