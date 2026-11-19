@@ -55,6 +55,13 @@ final class AndroidMcp {
       "duration_ms","integer","text","string"),"action"));
     tools.put(tool("control_phone_apps","Discover launchable installed Android apps",null));
     tools.put(tool("control_phone_app_bridges","List installed partner app bridges and on-device approval state",null));
+    tools.put(tool("control_phone_ai_model_status","Real native inference library, verified weight and model readiness on this Android phone",null));
+    tools.put(tool("control_phone_ai_submit","Execute genuine offline Android model inference as an idempotent background job",
+      args("request_id","string","prompt","string"),"request_id","prompt"));
+    tools.put(tool("control_phone_ai_job","Read the actual running/completed native inference result without rerunning the model",
+      args("request_id","string"),"request_id"));
+    tools.put(tool("control_phone_ai_cancel","Request cooperative cancellation of an existing native inference job",
+      args("request_id","string"),"request_id"));
     tools.put(tool("control_phone_app_capabilities","Read a locally approved signed specialist's real versioned capabilities without executing it",
       args("package","string"),"package"));
     tools.put(tool("control_phone_intent_dispatch","Route a typed simple request directly to one advertised approved specialist without a generation engine in Control",
@@ -155,6 +162,10 @@ final class AndroidMcp {
       }
       case "control_phone_apps":return textContent(AppCatalog.list(owner));
       case "control_phone_app_bridges":return textContent(AppBridge.list(owner));
+      case "control_phone_ai_model_status":return textContent(OnDeviceLlm.status(owner));
+      case "control_phone_ai_submit":return textContent(OnDeviceAiJobs.submit(owner,args));
+      case "control_phone_ai_job":return textContent(OnDeviceAiJobs.status(owner,args.getString("request_id")));
+      case "control_phone_ai_cancel":return textContent(OnDeviceAiJobs.cancel(owner,args.getString("request_id")));
       case "control_phone_app_capabilities":return textContent(AppBridge.capabilities(owner,args.getString("package")));
       case "control_phone_intent_dispatch":return textContent(AppIntentFastPath.route(owner,args));
       case "control_phone_app_invoke":return textContent(AppBridge.invoke(owner,args));
