@@ -134,7 +134,7 @@ def plan() -> dict[str, bytes]:
         raise RuntimeError("Original owner watchdog source missing")
     fixed = (SOURCE / WATCHDOG).read_bytes()
     source = fixed.decode("utf8")
-    start = source.index("# R01: a native relay may report connected")
+    start = source.index("# R01: /healthz can be falsely green")
     end = source.index("# Native WSS recovery:", start)
     old = (source[:start] + source[end:]).encode("utf8")
     if p not in (fixed, old):
