@@ -1587,6 +1587,7 @@ public final class MainActivity extends Activity {
                  "Windows reports transfer finished at "+receipt.optString("location")+
                    "\nReported SHA-256: "+receipt.optString("sha256"):
                  "Windows reported transfer completion without an independently checkable phone receipt");
+            if(receipt!=null)offerVerifiedControlUpdate(receipt);
           }else if(state.equals("failed")||state.equals("cancelled")){
             activeTransferId=null;
             transferStatus("Transfer "+state+": "+job.optString("error",""));
@@ -1605,6 +1606,37 @@ public final class MainActivity extends Activity {
       });}
     });
   }
+  /** Reuse the owner's existing private authenticated transfer and Android
+   * package installer. Large GGUF releases exceed ordinary GitHub raw limits;
+   * this is NOT a second transfer engine or silent installation.
+   */
+  private void offerVerifiedControlUpdate(JSONObject receipt){
+    String name=receipt.optString("name","");
+    String sha=receipt.optString("sha256","");
+    String raw=receipt.optString("android_uri","");
+    long size=receipt.optLong("size",0);
+    if(!receipt.optBoolean("verified",false)||
+        !name.matches("Asterion-Control-v[0-9]+\\.[0-9]+\\.[0-9]+-release\\.apk")||
+        !sha.matches("[a-fA-F0-9]{64}")||size<20000L||size>2147483647L||
+        raw.length()>240)return;
+    Uri uri;
+    try{
+      uri=Uri.parse(raw);
+      if(!"content".equals(uri.getScheme())||
+         !"media".equals(uri.getAuthority()))return;
+    }catch(Exception ignored){return;}
+    new AlertDialog.Builder(this)
+      .setTitle("Verified Asterion Control APK received")
+      .setMessage("The original private transfer verified this file's size and SHA-256. "+
+         "Android will independently check its signing identity and ask you to approve "+
+         "the in-place update. Existing pairing and application data are preserved."+
+         "\n\nFile: "+name+"\nSize: "+(size/1024/1024)+" MiB"+
+         "\nSHA-256: "+sha)
+      .setPositiveButton("Open Android installer",(d,w)->
+         UpdateManager.installReceived(this,uri,this::showUpdateFeedback))
+      .setNegativeButton("Later",null).show();
+  }
+
   private void cancelWifiTransfer(){
     String id=activeTransferId;
     if(id==null){toast("No active transfer");return;}
