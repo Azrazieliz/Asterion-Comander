@@ -87,7 +87,8 @@ def preflight(source: Path, production: Path):
         "reconcile_jobs" not in gitcode):
         raise RuntimeError("Git relay safety contract not present")
     if ("control-git-bridge-health.json" not in watchdog or
-        "$jobsKnown -and -not $activeJobs -and $cooldown" not in watchdog or
+        "if($cooldown)" not in watchdog or
+        "$syncAgeSeconds -ge 600" not in watchdog or
         "if(-not [string]::IsNullOrWhiteSpace($inflight))" not in watchdog):
         raise RuntimeError("Idle-only watchdog recovery contract missing")
     return updated,old
