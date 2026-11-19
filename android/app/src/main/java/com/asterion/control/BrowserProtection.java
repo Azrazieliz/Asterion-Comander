@@ -7,6 +7,8 @@ import android.os.Handler;
 import android.os.Looper;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
+import android.webkit.WebView;
+import org.json.JSONObject;
 import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -45,10 +47,16 @@ final class BrowserProtection {
         t.setDaemon(true);
         return t;
     });
+    private static final ExecutorService VISUAL=Executors.newSingleThreadExecutor(r->{
+        Thread t=new Thread(r,"asterion-cosmetic-filter-css");
+        t.setDaemon(true);
+        return t;
+    });
     private final SharedPreferences pref;
     private final File folder;
     private final AtomicReference<Rules> active=new AtomicReference<>(new Rules(
-        SEED,Collections.emptySet(),false));
+        SEED,Collections.emptySet(),false,
+        new BrowserCosmeticFilters.Builder().build()));
     private volatile boolean enabled;
     private volatile boolean updating;
 
@@ -56,19 +64,24 @@ final class BrowserProtection {
         final Set<String> deny;
         final Set<String> allow;
         final boolean loaded;
-        Rules(Set<String> blocked,Set<String> exception,boolean cached){
+        final BrowserCosmeticFilters.Book cosmetic;
+        Rules(Set<String> blocked,Set<String> exception,boolean cached,
+              BrowserCosmeticFilters.Book cosmeticRules){
             deny=Collections.unmodifiableSet(new HashSet<>(blocked));
             allow=Collections.unmodifiableSet(new HashSet<>(exception));
             loaded=cached;
+            cosmetic=cosmeticRules;
         }
     }
     private static final class Builder {
         final Set<String> deny=new HashSet<>(SEED);
         final Set<String> allow=new HashSet<>();
+        final BrowserCosmeticFilters.Builder cosmetics=new BrowserCosmeticFilters.Builder();
         int parsed=0;
         void accept(String line) {
             String rule=line.trim();
             if(rule.startsWith("!")||rule.startsWith("[")||rule.startsWith("#"))return;
+            cosmetics.accept(rule);
             boolean exception=rule.startsWith("@@");
             if(exception)rule=rule.substring(2);
             if(!rule.startsWith("||"))return;
@@ -96,7 +109,7 @@ final class BrowserProtection {
             }else deny.add(host);
             parsed++;
         }
-        Rules build(){return new Rules(deny,allow,true);}
+        Rules build(){return new Rules(deny,allow,true,cosmetics.build());}
     }
     BrowserProtection(Context ctx){
         Context app=ctx.getApplicationContext();
@@ -174,6 +187,35 @@ final class BrowserProtection {
             "Blocked by Asterion Browser",
             Collections.singletonMap("Cache-Control","no-store"),
             new ByteArrayInputStream(new byte[0]));
+    }
+    /** Hide visual ad containers using the same verified filter subscriptions.
+     * WebView has no browser-extension element-hiding API; safely inject only
+     * a bounded CSS subset, never remote JavaScript or second provider logic.
+     * Computing the matched CSS is off the UI thread and navigation-checked.
+     */
+    void applyCosmetic(WebView view,String page){
+        if(view==null||!enabled||isAllowedSite(page))return;
+        String site=host(page);
+        if(site.isEmpty())return;
+        Rules observed=active.get();
+        if(observed.cosmetic.count()==0)return;
+        VISUAL.execute(()->{
+            String css=observed.cosmetic.cssForHost(site);
+            if(css.isEmpty())return;
+            final String js="(function(){"+
+                "var id='asterion-cosmetic-shield-v1';"+
+                "var root=document.head||document.documentElement;"+
+                "if(!root)return;"+
+                "var node=document.getElementById(id);"+
+                "if(!node){node=document.createElement('style');node.id=id;root.appendChild(node);}"+
+                "node.textContent="+JSONObject.quote(css)+";"+
+                "})();";
+            view.post(()->{
+                if(!enabled||isAllowedSite(page)||active.get()!=observed||
+                   !site.equals(host(view.getUrl())))return;
+                view.evaluateJavascript(js,null);
+            });
+        });
     }
     private File cached(int n){return new File(folder,CACHE[n]);}
     private void loadCached(){
