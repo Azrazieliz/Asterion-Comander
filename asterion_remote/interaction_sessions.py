@@ -12,11 +12,10 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Literal
-import httpx
 from fastapi import HTTPException
 from pydantic import BaseModel, Field, model_validator
 
-from .phone_bridge import PhoneInput, load
+from .phone_bridge import PhoneInput, load, request as phone_request
 from . import session_journal
 from .diagnostic_core import try_record
 
@@ -86,46 +85,52 @@ def flatten_ui(node,found):
             found.append(node[field])
     for child in node.get("children",[]):flatten_ui(child,found)
 
-def perform(step: Step,device: str,client: httpx.Client | None,headers:dict | None,base:str | None):
+def perform(step: Step,device: str):
+    """Run one explicitly approved step through the original primary WSS bridge.
+
+    The previous implementation used paired private-LAN HTTP directly and
+    failed on cellular. Reuse the existing no-duplicate/unknown-outcome logic
+    in phone_bridge.request; never make this session a second transport engine.
+    """
     kind=step.kind
-    if kind=="wait":return {"wait_ms":step.wait_ms}
+    if kind=="wait":
+        return {"wait_ms":step.wait_ms}
     if device=="phone":
-        if client is None or headers is None or base is None:
-            raise RuntimeError("Paired native phone required")
         if kind=="input":
             data=PhoneInput(**step.payload).model_dump(exclude_none=True)
-            resp=client.post(base+"/input",headers=headers,json=data)
-            resp.raise_for_status()
-            if not resp.json().get("ok"):raise RuntimeError("Phone did not confirm input")
+            resp=phone_request("/input","POST",data,timeout=8.0)
+            result=resp.json()
+            if not result.get("ok"):
+                raise RuntimeError("Phone did not confirm the authorized input")
             return {"ok":True,"action":data["action"]}
         if kind=="health":
-            resp=client.get(base+"/health",headers=headers);resp.raise_for_status()
-            value=resp.json()
+            value=phone_request("/health",timeout=8.0).json()
             return {"ok":bool(value.get("ok")),"accessible":value.get("accessible"),
-              "capture":value.get("capture"),"battery":value.get("battery")}
+                    "capture":value.get("capture"),"battery":value.get("battery")}
         if kind in ("assert_package","await_package"):
-            # Foreground package check avoids image screenshots and model
-            # decisions for each navigation or app switch.
-            deadline=time.monotonic()+min(8.0,max(.1,step.wait_ms/1000 if step.wait_ms else 3.0))
+            deadline=time.monotonic()+min(8.0,max(.1,step.wait_ms/1000
+                if step.wait_ms else 3.0))
             last=""
             while True:
-                resp=client.get(base+"/ui",headers=headers);resp.raise_for_status()
-                last=resp.json().get("foreground_package","")
+                last=phone_request("/ui",timeout=8.0).json().get("foreground_package","")
                 if last==step.text:
-                    return {"expected_package":step.text,"observed_package":last,"verified":True}
+                    return {"expected_package":step.text,
+                            "observed_package":last,"verified":True}
                 if kind=="assert_package" or time.monotonic()>=deadline:
-                    raise AssertionError("Android package mismatch; expected "+step.text+" got "+str(last)[:100])
+                    raise AssertionError("Android package mismatch; expected "
+                                         +step.text+" got "+str(last)[:100])
                 time.sleep(.08)
         if kind=="assert_text":
-            resp=client.get(base+"/ui",headers=headers);resp.raise_for_status()
-            contents=[];flatten_ui(resp.json().get("root"),contents)
+            contents=[]
+            flatten_ui(phone_request("/ui",timeout=8.0).json().get("root"),contents)
             expected=step.text.casefold()
-            matches=[v for v in contents if expected in v.casefold()]
-            if not matches:raise AssertionError("Expected text is not visible: "+step.text)
+            if not any(expected in value.casefold() for value in contents):
+                raise AssertionError("Expected text is not visible: "+step.text)
             return {"matched":step.text,"visible":True}
         if kind=="capture":
-            resp=client.get(base+"/screen",headers=headers);resp.raise_for_status()
-            frame=resp.content
+            frame=phone_request("/screen",timeout=12.0).content
+            if not frame:
+                raise RuntimeError("Consented native frame unavailable")
             return {"bytes":len(frame),"sha256":hashlib.sha256(frame).hexdigest()}
     else:
         from . import app as remote
@@ -163,8 +168,6 @@ def worker(key: str,request: SessionRequest,cancel:threading.Event):
     pairing=load() if needs_phone else None
     if needs_phone and pairing is None:
         update(key,state="failed",error="Phone not paired");return
-    client=httpx.Client(timeout=httpx.Timeout(8.0,connect=3.0),
-                        trust_env=False,follow_redirects=False) if pairing else None
     try:
         results=[]
         for i,step in enumerate(request.steps):
@@ -183,9 +186,7 @@ def worker(key: str,request: SessionRequest,cancel:threading.Event):
                             update(key,state="cancelled",current_step=i);return
                     observation={"wait_ms":step.wait_ms}
                 else:
-                    observation=perform(step,step.device or request.device,client,
-                        {"Authorization":"Bearer "+pairing["token"]} if pairing else None,
-                        pairing["base_url"] if pairing else None)
+                    observation=perform(step,step.device or request.device)
                 result={"index":i,"kind":step.kind,"device":step.device or request.device,"ok":True,
                         "elapsed_ms":round((time.perf_counter()-step_started)*1000,1),
                         "observation":observation}
@@ -199,7 +200,8 @@ def worker(key: str,request: SessionRequest,cancel:threading.Event):
                 update(key,state="failed",error=result["error"]);return
         update(key,state="completed",elapsed_ms=round((time.monotonic()-started)*1000,1))
     finally:
-        if client:client.close()
+        with _guard:
+            _cancels.pop(key,None)
 
 def start(data:SessionRequest):
     try:
@@ -212,6 +214,15 @@ def start(data:SessionRequest):
                 "reused":True,"replay_allowed":False,
                 "status_path":"/api/v1/sessions/"+previous["id"]}
     with _guard:
+        # The durable SQLite journal preserves terminal receipts across
+        # restarts. Bound live in-memory state without touching active jobs.
+        if len(_jobs)>200:
+            old=sorted((job for job in _jobs.values() if
+                        job["state"] not in ("queued","running","cancelling")),
+                       key=lambda job:job.get("updated_at",0))
+            for item in old[:max(0,len(_jobs)-120)]:
+                _jobs.pop(item["id"],None)
+                _cancels.pop(item["id"],None)
         if sum(1 for j in _jobs.values() if j["state"] in ("queued","running"))>=3:
             raise HTTPException(429,"Maximum concurrent control sessions reached")
         ident=uuid.uuid4().hex
