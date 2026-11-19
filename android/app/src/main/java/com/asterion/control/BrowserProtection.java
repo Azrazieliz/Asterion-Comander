@@ -127,8 +127,13 @@ final class BrowserProtection {
             return value==null?"":value.toLowerCase(Locale.ROOT);
         }catch(Exception error){return "";}
     }
-    private static boolean matches(String subject,String rule){
-        return subject.equals(rule)||subject.endsWith("."+rule);
+    // Hash-based suffix lookup: even 94k actual EasyList/EasyPrivacy domain
+    // entries are checked in O(hostname labels), not O(rule-list length).
+    private static boolean matchesRule(Set<String> rules,String host){
+        if(rules.contains(host))return true;
+        for(int i=host.indexOf('.');i>=0;i=host.indexOf('.',i+1))
+            if(rules.contains(host.substring(i+1)))return true;
+        return false;
     }
     private static String rootDomain(String host){
         String[] parts=host.split("\\.");
@@ -159,8 +164,8 @@ final class BrowserProtection {
         if(target.isEmpty()||origin.isEmpty())return false;
         if(rootDomain(target).equals(rootDomain(origin)))return false;
         Rules rules=active.get();
-        for(String exception:rules.allow)if(matches(target,exception))return false;
-        for(String blocked:rules.deny)if(matches(target,blocked))return true;
+        if(matchesRule(rules.allow,target))return false;
+        if(matchesRule(rules.deny,target))return true;
         return false;
     }
     WebResourceResponse intercept(WebResourceRequest req,String page){
