@@ -78,7 +78,7 @@ final class UpdateManager {
         if(!name.matches("[0-9]+\\.[0-9]+\\.[0-9]+")
           ||!(url.equals(PREFIX+"Asterion-Control-v"+name+"-release.apk") ||
                url.equals(PREFIX+"Asterion-Control-v"+name+"-debug.apk"))
-          ||!sha.matches("[0-9a-f]{64}")||size<20000||size>300000000)
+          ||!sha.matches("[0-9a-f]{64}")||size<20000||size>2147483648L)
           throw new IllegalStateException("Invalid update signature metadata");
         long current=owner.getPackageManager().getPackageInfo(owner.getPackageName(),0).getLongVersionCode();
         if(version<=current){
