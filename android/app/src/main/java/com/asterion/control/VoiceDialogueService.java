@@ -180,6 +180,7 @@ public final class VoiceDialogueService extends Service {
       if(command.isEmpty()){
         ambientAwaitingCommand=true;
         lastWakePhraseAtMs=System.currentTimeMillis();
+        state("wake_detected","Asterion heard. Listening for the request.");
       }
     }
     if(!command.isEmpty()){
@@ -386,14 +387,30 @@ public final class VoiceDialogueService extends Service {
     migrateMusicSafePreferences(owner);
     if(owner.checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)
       throw new IllegalStateException("Android microphone permission is required");
-    VoiceDialogueService running=active;
-    if(running!=null)return running.report();
     if(MainActivity.foregroundActivity()==null)
       throw new IllegalStateException("Open Asterion Control on phone before enabling voice in the foreground");
-    owner.getSharedPreferences("voice_style",MODE_PRIVATE).edit()
-      .putBoolean(ALWAYS_ON_PREF,true).apply();
+    // Previously the UI only started the service; ALWAYS_ON_PREF stayed false,
+    // so the advertised hotword was never actually armed.
+    if(!owner.getSharedPreferences("voice_style",MODE_PRIVATE).edit()
+         .putBoolean(ALWAYS_ON_PREF,true).commit())
+      throw new IllegalStateException("Wake preference not persisted");
+    VoiceDialogueService running=active;
+    if(running!=null){
+      running.enableAmbientFromOwner();
+      return running.report().put("already_listening",true);
+    }
     owner.startForegroundService(new Intent(owner,VoiceDialogueService.class));
-    return new JSONObject().put("ok",true).put("start_requested",true).put("phase","initializing");
+    return new JSONObject().put("ok",true).put("start_requested",true)
+      .put("wake_word","asterion").put("phase","initializing");
+  }
+  private void enableAmbientFromOwner(){
+    if(active!=this)return;
+    ambientEnabled=true;
+    if(ambientWakeRefresh==null)updateAmbientWake();
+    if(speakerReady){
+      state("ambient_starting","Listening for Asterion");
+      scheduleAmbient(250L);
+    }else state("initializing","Waiting for Android speech engine");
   }
   static JSONObject stopFromOwnerApi(Context owner)throws Exception{
     boolean wasRunning=active!=null;
