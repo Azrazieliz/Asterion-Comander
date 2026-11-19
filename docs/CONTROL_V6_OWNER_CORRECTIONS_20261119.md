@@ -4,7 +4,15 @@ Status: OWNER-APPROVED PRODUCT REQUIREMENTS / DOCUMENTATION RECONCILIATION. **No
 Canonical repository: Azrazieliz/Asterion-Comander
 Active implementation branch: work/control-0927-overnight-cycles-20261111
 
-This file records the owner's first V6 corrections and the later explicit approval of R01–R08 plus R10. **Second correction (2026-11-19):** the app and assistant are **Asterion Control**; the unrelated name was an unwanted keyboard autocorrection. Browser request = broad **downloads**, not digitization. Extreme built-in ad/pop-up blocking, genuine first-use VPN activation and a fully functional AI (with only large-scale training allowed to continue later) are mandatory. It is the **latest owner decision** for conflicting provisions. All non-conflicting requirements in V3, V4, V5, 7STAR diagnostics, CYCLE_EXECUTION_CONTRACT.md and CONTROL_CROSS_APP_API_V1.md remain binding. Existing code, approved UX, Windows worker, original Android package and signer, paired phone, WSS, keys, project data, user models and working specialist apps must be preserved. Old documents remain history; do not edit their old dates or imply their original no-code hold is currently operative after subsequent owner implementation authorization. Documentary approval is not runtime completion.
+This file records the owner's first V6 corrections and the later explicit approval of R01–R08 plus R10. **Second correction (2026-11-19):** the app and assistant are **Asterion Control**; the unrelated name was an unwanted keyboard autocorrection. Browser request = broad **downloads**, not digitization. Extreme built-in ad/pop-up blocking, genuine first-use VPN activation and a fully functional AI (with only large-scale training allowed to continue later) are mandatory. It is the **latest owner decision** for conflicting provisions.
+
+**LATEST OWNER CORRECTION — 2026-11-19 (non-duplication / Browser options / password manager):**
+- **HARD NO-REDUNDANCY CONTRACT:** Control is the orchestrator and shared platform, not a reimplementation of specialist app engines, download extractors, document viewers, tagging models or Android-managed subsystems. Audit existing functionality before writing any feature; reuse existing approved source, signed partner provider and OS API, extend it in its owning project only when appropriately authorized. A parallel second engine is a product failure, even if it looks premium.
+- **Browser proposal approvals:** **B06** (advanced resumable/segmented downloads) and **B09** (site-permissions center) are now APPROVED. **B01–B05, B07, B08 and B10 remain UNAPPROVED**. B06 must reuse the owning Downloader download/transfer pipeline for bulk/segmented work when an authorized matching capability exists; the Browser retains only the minimal generic direct-download hooks necessary for an actual browser. B09 is a browser-facing view of the **single Control Security & Privacy permission policy and Android site permissions**, not a second independent permission manager.
+- **P0 password manager APPROVED:** Provide a native private credential vault integrated with Browser and relevant approved Control connections: encrypted saved passwords, autofill/credential retrieval tied to exact site/app origins, passkey/Credential Manager integration where the platform supports it, biometric/device-auth unlock, secure import/export, deletion, multiple accounts, update/save prompts, breach-risk warning when trustworthy data is available, and **persistent sessions/reconnect**. Do **not** ask the owner to manually log in or reconnect after every browser/app/session restart; safely reuse encrypted credentials, cookies and OS session tokens. Demand interaction only when Android consent, provider authentication/MFA, expired/revoked tokens or user policy actually requires it. Never persist unencrypted secrets in GitHub, LLM prompts or remote logs. Do not duplicate an already functional OS/provider password store; build only necessary Control-specific integrations and UI.
+- Only the owner will perform unavoidable Android/system consents/approvals. Implementation and technical setup are not delegated back to the owner.
+
+ All non-conflicting requirements in V3, V4, V5, 7STAR diagnostics, CYCLE_EXECUTION_CONTRACT.md and CONTROL_CROSS_APP_API_V1.md remain binding. Existing code, approved UX, Windows worker, original Android package and signer, paired phone, WSS, keys, project data, user models and working specialist apps must be preserved. Old documents remain history; do not edit their old dates or imply their original no-code hold is currently operative after subsequent owner implementation authorization. Documentary approval is not runtime completion.
 
 ## 1. Binding owner priority matrix
 
@@ -19,6 +27,7 @@ This file records the owner's first V6 corrections and the later explicit approv
 | **P0, required** | Continuous development cycles | Preserve genuinely autonomous, repeated substantive turns and durable state; never equate a normal action with a development cycle. |
 | **P0, required** | Interactive cross-app ecosystem | Core and Downloader have bridge implementations reported by owner as practically nonfunctional; upgrade real capability contracts, logs, inspections, dispatch and outputs. Include 3D Foundry and every current/future Asterion app. |
 | **P0, required** | Security & Privacy | Earlier Standard/Deep scanning, reversible quarantine, confidentiality, permission scope, privacy, VPN routes and no false safety claims remain. |
+| **P0, required** | Integrated password manager and persistent logins | Safe credential storage and scoped automatic sign-in for owner-approved browser/apps, reusing Android Credential Manager/Keystore; no repeated manual reconnect unless authentication policy requires it. |
 | **P0, required** | Model Lab/training | Maximize measured reasoning, tool proficiency, app-tailored capabilities and device-specific optimization; no purely cosmetic "model installed" gate. |
 | **P0, required** | Software/research/RE | Inspect software/data and observed behavior **outside GitHub**; support independent, rights-respecting functional recreation/compatibility of unavailable implementations rather than exact copied proprietary expression. |
 | **P0, required** | Premium UI everywhere | Consistent premium design **through every page/dialog, secondary feature and Advanced screen**, no placeholders, disconnected themes, coding-matrix/raw-command first-party UI or dead controls. |
@@ -139,11 +148,13 @@ Acceptance must distinguish: `OWNER_APPROVED_SPEC` → `IMPLEMENTED_SOURCE` → 
 | **R08** | Regression Lock (P−1 for repeat Control failures, otherwise P0) | Protect known-good functionality with automated tests and meaningful device acceptance; reject recurring severe regressions |
 | **R10** | Functional-Equivalence Studio (P0) | Inspect authorized external app/binary/site behavior and create original, compatible functional implementations with real proof |
 
+**B06 Advanced resumable/segmented downloads and B09 Site Permissions Cockpit are explicitly OWNER APPROVED.** They must operate by delegating to the existing **Downloader-owned engine** (B06) and the shared **Control Security & Privacy/Android permission policy** (B09), respectively. This is not approval for a second competing downloader or second permission engine. **B01–B05, B07, B08, B10 remain NOT approved.** The new integrated password manager is separately owner-approved P0.
+
 **R09 Storage Safety Planner is explicitly NOT approved.** Existing owner-data preservation and safe storage checks remain binding. Original V3 **N01–N30 remain unapproved** unless separately approved; overlap does not grant approval.
 
-### Additional concrete proposals — *not approved yet*
+### Browser options — only B06/B09 approved; other proposals remain unapproved
 
-These suggestions are intentionally specific features rather than vague systems. They do not dilute the already-approved adblocker, popup blocker or downloading requirements.
+B06 and B09 below are now explicitly approved as part of existing engine integrations. Other B-items are suggestions only. Mandatory ad blocking, popup blocking and basic browsing/download capability remain independent original requirements.
 
 | ID | Proposed Browser/AI feature | Concrete benefit |
 |---|---|---|
@@ -152,14 +163,30 @@ These suggestions are intentionally specific features rather than vague systems.
 | **B03** | Blocking shield dashboard | Per-site ad/tracker/popup/redirect counts, failed script diagnosis, list updates and immediate exceptions |
 | **B04** | Page-wide bulk download picker | Enumerate actually available owner-visible images/links/files, filter/preview them, then download or hand off provider-specific batches to Downloader |
 | **B05** | Isolated site identities | Multiple browsing profiles with separate cookies, permissions and privacy-preserving private sessions |
-| **B06** | Advanced resumable segmented downloads | Optional parallel HTTP range chunks, restart-safe queue, integrity hashes, duplicate prevention and per-host fairness when supported |
+| **B06 — APPROVED** | Advanced resumable segmented downloads via **Downloader** | Route generic Browser downloads to an available signed Downloader capability for resumable/parallel segmented transfers and integrity verification; do not fork Downloader's queue, transfer engine or provider adapters |
 | **B07** | Visual element-block picker | Select and hide persistent page elements, customize supported cosmetic rules and safely override a site's filters |
 | **B08** | Browser workflow recorder | Record and replay owner-authorized site actions with semantic selectors and verified task outcomes |
-| **B09** | Site permissions cockpit | Review/revoke camera, mic, location, clipboard, external intents and push permissions by domain |
+| **B09 — APPROVED** | Browser site permissions cockpit | Reuse Control's single Security & Privacy consent store and Android site permissions, showing real grant/expiry/deny/revoke status per origin rather than adding a parallel permission engine |
 | **B10** | Tab memory/performance governor | Hibernate inactive tabs, restore lost sessions, budget RAM/battery, save source-linked offline pages |
+
+## 11.4 Mandatory non-duplication acceptance
+
+For **every feature**, document: intended user task → existing owning Android/Windows/partner system → current verified reusable API/function → narrowly scoped Control adapter/UI → actual performance/acceptance comparison. When capability is absent, preserve owner app's source scope and request its maintainer to expose a signed contract; do not invent a competing implementation inside Control. Enforce negative checks in CI/code review against duplicate media extractors, file format viewers/editors, image/music/3D generators, app taggers, download transfer engines, copied project datasets, duplicate VPN providers/Android VpnServices, duplicate partner memories and multiple password stores. Fix or extend existing implementations only with proper ownership/permission. Browser owns rendering and owner navigation; Downloader owns specialist acquisition and transfer optimizations; Security & Privacy owns access policies; the credential vault has one backing store exposed to Browser/Control.
+
+## 11.5 Password manager acceptance (P0)
+
+1. Inspect existing Android Credential Manager/Autofill and any already approved in-project credential vault before adding code; reuse owner-authorized existing credentials when technically possible. Credential Manager, browser password manager, key store and Asterion connection tokens are not interchangeable; apply least privilege.
+2. Secure primary vault using Android Keystore with hardware-backed keys where present, authenticated encryption, versioned encrypted local storage, optional biometric/device-auth unlock with owner-configurable timeout, safe recovery/export only with explicit choice. Avoid inventing a recoverable master secret stored as plaintext.
+3. Save/update/list/search/delete password entries by origin and verified app package/signature; support multiple accounts, password generation and strength checks, scoped autofill, import/export and passkeys where Android/WebView APIs genuinely permit. Prevent phishing autofill into mismatched origins or iframes.
+4. Persistent login: retain normal cookies or permitted refresh credentials and reconnect automatically on safe app/browser restarts; do not require manual reconnection every time. Handle expiry, revoked sessions, MFA/CAPTCHA and device auth with short explicit prompts only as needed; never bypass external authentication.
+5. Never include passwords, cookies, OTPs or auth tokens in AI prompts, GitHub/diagnostic logs, untrusted browser JavaScript, shared cross-app knowledge packs or ordinary telemetry. The AI can request a scoped credential action and receive only success/denied/requires-auth receipt.
+6. Real phone test: save two website accounts; restart Browser and Control; verify sessions persist and appropriate autofill works; test revoked/expired sessions, wrong-origin refusal, logout/wipe, biometric denied, unavailable passkey support, encrypted backup/restore and password not in exported logs.
+7. UI: one premium **Passwords & Sessions** screen inside Control Security & Privacy and small contextual controls in Browser. No second separate password-manager app and no duplicated sign-in interface across apps.
 
 ## 12. Corrected wording and implementation reality
 
+- **No duplication:** prior user instruction reconfirmed. Control must never build replacements for other Asterion engines simply to claim completeness; B06 and B09 are delegating facades over the existing owners.
+- **Password manager wording:** the request is interpreted as persistent authorized sign-in **without repeated manual reconnection**. When user or provider explicitly requires authentication, show one necessary consent/challenge and then securely persist supported session state.
 - **Name:** Asterion Control is both app and native AI. The mistaken previous assistant nickname was caused by keyboard autocorrection; it is not an approved project name.
 - **Download:** the user asked to *download* broadly accessible page files and media, not digitize the world. Do not quietly substitute OCR or a text-only crawler.
 - **AI deliverable:** install/compile/package/test working optimized AI on real phone and finish practical reasoning+tool functionality. Only longer-term large-scale model training may continue beyond first working release.
