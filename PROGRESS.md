@@ -1,3 +1,11 @@
+# 2026-11-19 — V6 M4 completion evidence update: verified second model candidate and ELF dependencies
+
+- Actual completed original Windows worker command `control-v6-m4-20261119-1415-verified-strong-candidate-download`: downloaded full **1,282,439,552-byte Qwen3-1.7B-Q4_K_M.gguf** into independent isolated Model Lab candidate directory, confirmed expected SHA-256 `b7a7dfc98e59b4ceb2abaa822c683ec9c2471ff4c54db7536eaa5008c38432af`, exit 0. The candidate is **NOT** approved for installed APK or benchmarked on the phone; no inference quality claims. Existing 0.6B verified model remains current staged default.
+- Actual original Windows ARM64 `llvm-readelf` inspection `control-v6-m4-20261119-1500-arm64-elf-needed-audit`: `libasterion_llm.so` **55,637,432 bytes**, SHA-256 `5fc2a80654b87e040afa90445d040ad3297f9ba2f1b4d1b2763eab952ab4a5f2`, **ELF64 / DYN / AArch64**, dynamic dependencies only `libandroid.so`, `liblog.so`, `libm.so`, `libdl.so`, `libc.so`; command exit 0. This confirms machine architecture/library dependency inventory, **not** a load/inference result on Samsung.
+- Remains BLOCKED/OPEN for M4 release: integrated Android Java compile after new AI job sources, original-signer-compatible full APK, installed version certificate check, actual offline phone inference with recorded output, A/B thermal/performance tests, native WSS typed action and durable memory/research acceptance. C: low-space pressure remains a separate build risk; staging and script scratch moved to isolated D: without deleting owner data. Full V6 M5–M13 remains OPEN.
+
+---
+
 # 2026-11-19 — M4 real GGUF and ARM64 JNI compile complete; Android inference still awaiting installed release
 
 - **Actual Windows native build completed**, original private-bridge result `control-v6-m4-20261119-1342-verified-model-native-build-01` status `complete/ok:true`, `exit_code:0`. Actual GGUF exact **484,220,288 bytes**, SHA256 `373db06783953f0981572d008f183eb2167b93304f5adbf7c4ce6ed6a91ee437`. Fully pinned original llama.cpp commit `4b77dee0524c64b8471869232e2958bd9589607d`.
