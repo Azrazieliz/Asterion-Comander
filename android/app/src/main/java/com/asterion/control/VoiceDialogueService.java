@@ -34,8 +34,6 @@ import java.util.ArrayList;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
-import java.util.regex.Pattern;
-import java.util.regex.Matcher;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -98,8 +96,6 @@ public final class VoiceDialogueService extends Service {
         .putBoolean(MUSIC_SAFE_MIGRATION_PREF,true).apply();
     }
   }
-  private static final Pattern WAKE_REQUEST=Pattern.compile(
-    "(?i)^\\s*(?:(?:hey|okay|ok)\\s+)?asterion[\\s,:;.!?-]*(.*)$");
   private volatile boolean ambientEnabled=false;
   private volatile boolean ambientCapture=false;
   private volatile boolean ambientAwaitingCommand=false;
@@ -173,26 +169,21 @@ public final class VoiceDialogueService extends Service {
     ui.postDelayed(ambientRetry,delayMs);
   }
   private void onAmbientTranscript(String heard){
-    String speech=heard==null?"":heard.trim();
-    Matcher match=WAKE_REQUEST.matcher(speech);
-    String command="";
-    if(ambientAwaitingCommand){
-      ambientAwaitingCommand=false;
-      if(System.currentTimeMillis()-lastWakePhraseAtMs<=12000L)
-        command=speech;
-    }else if(match.matches()){
-      command=match.group(1).trim();
+    final long now=System.currentTimeMillis();
+    VoiceWakeWords.Decision parsed=VoiceWakeWords.decide(
+      heard,ambientAwaitingCommand,lastWakePhraseAtMs,now);
+    ambientAwaitingCommand=parsed.awaitingCommand;
+    if(parsed.heardWake){
       recognizedWakeCount++;
-      if(command.isEmpty()){
-        ambientAwaitingCommand=true;
-        lastWakePhraseAtMs=System.currentTimeMillis();
+      if(parsed.awaitingCommand){
+        lastWakePhraseAtMs=now;
         state("wake_detected","Asterion heard. Listening for the request.");
       }
     }
-    if(!command.isEmpty()){
+    if(!parsed.command.isEmpty()){
       ownerDispatchRetryCount=0;
-      pendingOwnerSpeech=command;
-      try{PendingVoiceStore.save(this,command);}
+      pendingOwnerSpeech=parsed.command;
+      try{PendingVoiceStore.save(this,parsed.command);}
       catch(Exception saveFailure){
         lastVoiceDispatch="recognized_not_persisted";
         state("awaiting_device","Voice command held in memory only");
@@ -678,7 +669,7 @@ public final class VoiceDialogueService extends Service {
         if(partial==null||partial.isEmpty())return;
         // Preview only. Dispatch exclusively from final recognition to avoid
         // sending duplicate or incomplete owner instructions.
-        if(WAKE_REQUEST.matcher(partial.get(0).trim()).matches())
+        if(VoiceWakeWords.matchesWake(partial.get(0)))
           state("ambient_listening","Asterion wake phrase heard; awaiting final recognition");
       }
       @Override public void onEvent(int type,Bundle params){}
