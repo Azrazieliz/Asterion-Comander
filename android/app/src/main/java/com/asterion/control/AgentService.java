@@ -602,7 +602,13 @@ public final class AgentService extends Service {
     JSONObject thermals=new JSONObject().put("status",pm.getCurrentThermalStatus());
     if(Build.VERSION.SDK_INT>=30){float headroom=pm.getThermalHeadroom(10);thermals.put("headroom",Float.isNaN(headroom)?JSONObject.NULL:headroom);}
     StatFs disk=new StatFs(getFilesDir().getPath());
+    android.content.pm.PackageInfo packageInfo=
+      getPackageManager().getPackageInfo(getPackageName(),0);
     return new JSONObject().put("ok",true).put("device",Build.MODEL).put("android",Build.VERSION.RELEASE)
+      .put("control_package",getPackageName())
+      .put("control_version_name",packageInfo.versionName)
+      .put("control_version_code",Build.VERSION.SDK_INT>=28?
+        packageInfo.getLongVersionCode():packageInfo.versionCode)
       .put("accessible",ControlAccessibilityService.active!=null).put("capture",CaptureService.active)
       .put("screen_width",m.widthPixels).put("screen_height",m.heightPixels)
       .put("frame_width",CaptureService.width).put("frame_height",CaptureService.height)
