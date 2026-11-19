@@ -96,7 +96,9 @@ def test_watchdog_checks_bridge_before_native_api_failure_short_circuit():
     assert "$ageSeconds -ge 360" in WATCHDOG
     assert "$errorCount -ge 4" in WATCHDOG
     assert "if(-not [string]::IsNullOrWhiteSpace($inflight))" in WATCHDOG
-    assert "$jobsKnown -and -not $activeJobs -and $cooldown" in WATCHDOG
+    assert "if($cooldown)" in WATCHDOG
+    assert "$syncAgeSeconds -ge 600" in WATCHDOG
+    assert "$jobsKnown -and -not $activeJobs" not in WATCHDOG
     assert "$bridge.Count -gt 1" in WATCHDOG
     assert "control-git-bridge-last-recovery.txt" in WATCHDOG
 
