@@ -1,3 +1,11 @@
+# 2026-11-19 — V6 owner corrections recorded (spec only)
+
+- **Latest binding specification:** [docs/CONTROL_V6_OWNER_CORRECTIONS_20261119.md](docs/CONTROL_V6_OWNER_CORRECTIONS_20261119.md). Owner changed the priority order to P−1 for repeat bridge failures, worker/phone reliability and genuinely actionable Control/partner diagnostics; P0 for all other listed systems except English-only voice P1. User wants highest attainable device-tuned advanced native Asterion Cute, complete Aloha-class-functional Browser/crawlers, native WSS as primary for AI actions and Control, no manual VPN engineering/configuration, cross-app actual tools and knowledge (including 3D, Core, Downloader), external software functional analysis and universal premium UI.
+- This entry is **a repository specification reconciliation only**. It does not restart Windows services, repair/verify cellular, install an APK, run a native AI, configure real VPN exits, improve partner source, compile UI or verify voice. The Nov 18 observed watchdog, remote typing, storage and runtime gaps remain subject to fresh checks before claiming closure.
+- Conflicting V3/V5 historical language is superseded by V6 while nonconflicting 20 mandatory modules and approved decisions remain. V3 N01–N30 and new V6 R01–R10 remain **recommendations**, not silently approved or implemented.
+
+---
+
 # 2026-11-18 — Owner screenshot: remote input broken, watchdog/storage recovery
 
 - **Observed screenshot (direct owner evidence):** phone embedded PC view shows Android status icons overlapping the native Control header and navigation-bar overlap at bottom. In the Windows PowerShell screenshot, the command intended as `SCHTASKS /RUN /TN "ASTERION CONTROL SELFHEALING WORKER"` arrived as `SCHTASKS :rUN :tn ...`, which PowerShell/schtasks rejected. This demonstrates a keyboard-layout-dependent remote typing defect, not a genuine invalid intended `schtasks` command.
