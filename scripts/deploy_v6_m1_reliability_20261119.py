@@ -70,7 +70,8 @@ def plan() -> dict[str, bytes]:
     p = original[GIT]
     if p is None:
         raise RuntimeError("Original private Git bridge missing")
-    code = p.decode("utf8")
+    crlf = b"\r\n" in p
+    code = p.decode("utf8").replace("\r\n", "\n")
     fixed = (SOURCE / GIT).read_text("utf8")
     start = fixed.index("    # Do not use git(): it calls .strip()")
     end = fixed.index("    ready=[]", start)
@@ -82,14 +83,15 @@ def plan() -> dict[str, bytes]:
     else:
         code = unique_replace(code, old, fragment, GIT)
     ast.parse(code, filename=GIT)
-    outputs = {GIT: code.encode("utf8")}
+    outputs = {GIT: (code.replace("\n", "\r\n") if crlf else code).encode("utf8")}
 
     # Preserve each existing paired phone adapter; add ONLY a WSS-exclusive
     # verified status probe, never another network client or pairing store.
     p = original[PHONE]
     if p is None:
         raise RuntimeError("Original phone client missing")
-    code = p.decode("utf8")
+    crlf = b"\r\n" in p
+    code = p.decode("utf8").replace("\r\n", "\n")
     fixed = (SOURCE / PHONE).read_text("utf8")
     start = fixed.index("def probe_native_wss_roundtrip(")
     end = fixed.index("def request(path:", start)
@@ -102,14 +104,15 @@ def plan() -> dict[str, bytes]:
             raise RuntimeError("Original phone bridge is incompatible with WSS-only probe")
         code = unique_replace(code, "def request(path:", fragment + "def request(path:", PHONE)
     ast.parse(code, filename=PHONE)
-    outputs[PHONE] = code.encode("utf8")
+    outputs[PHONE] = (code.replace("\n", "\r\n") if crlf else code).encode("utf8")
 
     # Keep every production-specific native route, change ONLY existing
     # Android bridge status endpoint and its import.
     p = original[ROUTES]
     if p is None:
         raise RuntimeError("Original Control native route missing")
-    code = p.decode("utf8")
+    crlf = b"\r\n" in p
+    code = p.decode("utf8").replace("\r\n", "\n")
     import_anchor = "from .phone_bridge import PairPhone, PhoneInput, register, request, load"
     import_new = import_anchor + ", probe_native_wss_roundtrip"
     if import_new not in code:
@@ -125,7 +128,7 @@ def plan() -> dict[str, bytes]:
     if changed not in code:
         code = unique_replace(code, current, changed, ROUTES)
     ast.parse(code, filename=ROUTES)
-    outputs[ROUTES] = code.encode("utf8")
+    outputs[ROUTES] = (code.replace("\n", "\r\n") if crlf else code).encode("utf8")
 
     # Only update the exact reviewed original watchdog, not arbitrary owner
     # modifications to scheduled tasks or other service scripts.
