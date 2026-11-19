@@ -300,6 +300,7 @@ public final class BrowserActivity extends Activity {
             }
             @Override public void onPageFinished(WebView web, String url) {
                 tab.pageUrl=url;
+                protection.applyCosmetic(web,url);
                 CookieManager.getInstance().flush();
                 rememberPage(url,tab.title);
                 if(current()==tab) refreshToolbar();
@@ -853,11 +854,16 @@ public final class BrowserActivity extends Activity {
                         if(index==0){
                             protection.refresh(true,(ok,msg)->{
                                 notice(msg);
+                                if(ok&&current()!=null)current().web.reload();
                                 refreshToolbar();
                             });
                             notice("Refreshing original filter lists");
                         }else if(index==1){
                             protection.setEnabled(!protection.isEnabled());
+                            // Remove previously injected CSS on disable and
+                            // apply the freshly selected shield on enable.
+                            BrowserTab selected=current();
+                            if(selected!=null)selected.web.reload();
                             refreshToolbar();
                         }else{
                             try{
