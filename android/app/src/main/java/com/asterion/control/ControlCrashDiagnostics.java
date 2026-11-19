@@ -24,6 +24,8 @@ final class ControlCrashDiagnostics {
       .put("global_logcat",false)
       .put("schema_version",1);
     JSONArray exits=new JSONArray();
+    response.put("last_java_crash_browser",ControlCrashRecorder.last(context,"browser"));
+    response.put("last_java_crash_main",ControlCrashRecorder.last(context,"main"));
     if(Build.VERSION.SDK_INT < 30){
       return response.put("supported",false).put("exits",exits);
     }
