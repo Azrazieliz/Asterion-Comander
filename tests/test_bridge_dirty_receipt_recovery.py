@@ -59,6 +59,24 @@ class DirtyReceiptRecoveryTest(unittest.TestCase):
         git(self.publisher,'pull','--ff-only')
         self.assertEqual(json.loads((self.publisher/'results'/'test-job.json').read_text()),complete)
 
+    def test_recover_unpublished_single_tracked_modification_keeps_status_columns(self):
+        """A lone ' M results/job.json' must not lose its first path character.
+
+        Regresses the porcelain .strip() bug which stranded finished receipts
+        when an otherwise healthy worker tried to publish after an outage.
+        """
+        receipt=self.worker/'results'/'test-job.json'
+        complete={'id':'test-job','ok':True,'status':'complete',
+                  'result':{'exit_code':0}}
+        receipt.write_text(json.dumps(complete),encoding='utf8')
+        captured=[]
+        with patch.object(bridge,'ROOT',self.worker), \
+             patch.object(bridge,'publish',side_effect=lambda paths: captured.extend(paths)):
+            count=bridge.recover_unpublished()
+        self.assertEqual(count,1)
+        self.assertEqual(captured,[Path('results/test-job.json')])
+        self.assertEqual(json.loads(receipt.read_text('utf8')),complete)
+
     def test_untracked_incomplete_journal_is_preserved(self):
         pending=self.worker/'results'/'test-job.pending'
         pending.write_text('partial durable journal')
