@@ -254,7 +254,12 @@ def sync_remote():
     git('update-ref','refs/asterion-recovery/unpublished-'+original_head[:16],original_head)
     for attempt in range(10):
         git('fetch','--quiet','origin','main')
-        git('rebase','-X','ours','origin/main')
+        # Receipt commits use an explicit service identity; rebasing them must
+        # use that same scoped identity even when Windows Git has no global
+        # user.name/user.email configured.
+        git('-c','user.name=Asterion Control',
+            '-c','user.email=asterion-control@users.noreply.github.com',
+            'rebase','-X','ours','origin/main')
         try:
             git('push','--quiet','origin','HEAD:main')
             return
@@ -280,7 +285,9 @@ def publish(paths):
         'commit','--quiet','-m','Asterion Control private bridge results')
     for attempt in range(4):
         git('fetch','--quiet','origin','main')
-        git('rebase','origin/main')
+        git('-c','user.name=Asterion Control',
+            '-c','user.email=asterion-control@users.noreply.github.com',
+            'rebase','origin/main')
         try:
             git('push','--quiet','origin','HEAD:main')
             return
