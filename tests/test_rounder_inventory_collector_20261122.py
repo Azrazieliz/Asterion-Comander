@@ -105,6 +105,23 @@ class InventoryExportTest(unittest.TestCase):
             self.assertEqual(len(items), 2)
             self.assertEqual(self.cursors, ["", self.items[0]["path"]])
 
+    def test_transient_phone_dns_failure_recovers_without_restart(self):
+        temporarily_failed = dict(self.meta,
+            status="failed", reason="index_error", index_building=True,
+            index_error='Unable to resolve host "www.terabox.com": No address associated with hostname',
+            complete_for_index_generation=False)
+        resumed = dict(self.meta, status="accepted", index_building=True,
+                       complete_for_index_generation=False)
+        with patch.object(inventory, "call", return_value=(
+                "failed", temporarily_failed, "rounder-dns-retry-123")) as invoke, \\
+             patch.object(inventory, "status_for", side_effect=[
+                ("accepted", resumed), ("completed", self.meta)]) as status, \\
+             patch.object(inventory.time, "sleep"):
+            result = inventory.wait_for_inventory(20.0, 0.5)
+        self.assertEqual(result["generation"], 7)
+        invoke.assert_called_once()
+        self.assertEqual(status.call_count, 2)
+
     def test_subtree_escape_is_rejected(self):
         with tempfile.TemporaryDirectory() as work:
             def malicious(*a, **kw):
