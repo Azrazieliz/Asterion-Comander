@@ -163,5 +163,46 @@ class DirtyReceiptRecoveryTest(unittest.TestCase):
         self.assertEqual(json.loads(receipt_remote.read_text('utf8'))['status'],'error')
 
 
+    def test_publish_with_concurrent_command_uses_safe_convergence(self):
+        """Publishing a receipt must never start git rebase-merge."""
+        result=self.worker/'results'/'fresh-local-result.json'
+        result.write_text(json.dumps({'id':'fresh-local-result',
+            'status':'complete','ok':True}),encoding='utf8')
+        (self.publisher/'commands'/'active').mkdir(parents=True)
+        (self.publisher/'commands'/'active'/'another-project.json').write_text(
+            json.dumps({'id':'another-project','op':'pc_status','params':{}}),encoding='utf8')
+        git(self.publisher,'add','commands')
+        git(self.publisher,'commit','-m','Concurrent project command')
+        git(self.publisher,'push')
+        with patch.object(bridge,'ROOT',self.worker):
+            bridge.publish([Path('results/fresh-local-result.json')])
+        self.assertFalse((self.worker/'.git'/'rebase-merge').exists())
+        self.assertEqual(git(self.worker,'status','--porcelain'),'')
+        git(self.publisher,'pull','--ff-only')
+        self.assertTrue((self.publisher/'results'/'fresh-local-result.json').exists())
+        self.assertTrue((self.publisher/'commands'/'active'/'another-project.json').exists())
+
+    def test_publish_competing_terminal_receipt_preserves_original_without_replay(self):
+        """Overlapping command receipts must not hang publishing or replay jobs."""
+        local=self.worker/'results'/'test-job.json'
+        local.write_text(json.dumps({'id':'test-job','status':'complete',
+            'ok':True,'result':{'exit_code':0}}),encoding='utf8')
+        original=local.read_bytes()
+        remote=self.publisher/'results'/'test-job.json'
+        remote.write_text(json.dumps({'id':'test-job','status':'error',
+            'ok':False,'error':'previously published terminal state'}),encoding='utf8')
+        git(self.publisher,'add','results')
+        git(self.publisher,'commit','-m','Concurrent final receipt')
+        git(self.publisher,'push')
+        with patch.object(bridge,'ROOT',self.worker):
+            bridge.publish([Path('results/test-job.json')])
+        self.assertFalse((self.worker/'.git'/'rebase-merge').exists())
+        self.assertEqual(json.loads(local.read_text())['status'],'error')
+        recovered=list((self.base/'receipt-recovery').glob('test-job-*.json'))
+        self.assertTrue(any(p.read_bytes()==original for p in recovered))
+        self.assertEqual(git(self.worker,'status','--porcelain'),'')
+
+
+
 if __name__=='__main__':
     unittest.main()
