@@ -225,46 +225,101 @@ def recover_interrupted_rebase():
     return True
 
 
-def sync_remote():
-    """Recover committed, unpublished receipts after competing Git writers.
+def _compact_unpublished_receipts():
+    """Rebuild the bridge from remote while preserving every local receipt.
 
-    A failed push can leave HEAD ahead of origin/main. An ff-only merge alone
-    then blocks every future command, even while the native agent is healthy.
-    Never drop local commits or replay an already journaled phone action.
+    Rebase can repeatedly conflict when other writers publish receipts for the
+    same job IDs. Never replay commands: save local commits and exact receipt
+    bytes before moving HEAD, then restore only receipts missing remotely or
+    newer terminal states over remote nonterminal states.
     """
-    # Never rebase over uncommitted result journals; this guard runs at startup
-    # and on every polling cycle, even after a failed publish or agent restart.
+    import hashlib
+    original=git('rev-parse','HEAD')
+    git('update-ref','refs/asterion-recovery/unpublished-'+original[:16],original)
+    changes=sorted(set(p.strip() for p in
+        git('log','--format=','--name-only','origin/main..HEAD').splitlines()
+        if p.strip()))
+    if not changes or any(not p.startswith('results/') or
+                          not p.endswith('.json') or
+                          not NAME.fullmatch(Path(p).stem) for p in changes):
+        raise RuntimeError('Unpublished non-receipt commit; refusing worktree reset')
+    backup=ROOT.parent/'receipt-recovery'
+    backup.mkdir(parents=True,exist_ok=True)
+    restore={}
+    terminal={'complete','error','uncertain','failed','skipped'}
+    for relative in changes:
+        path=ROOT/relative
+        if not path.is_file():
+            raise RuntimeError('Unpublished receipt missing; refusing reset: '+relative)
+        raw=path.read_bytes()
+        try:
+            local=json.loads(raw)
+            if not isinstance(local,dict) or local.get('id')!=path.stem or not isinstance(local.get('status'),str):
+                raise ValueError('Receipt id/status invalid')
+        except (ValueError,TypeError,UnicodeDecodeError) as exc:
+            raise RuntimeError('Invalid unpublished receipt; refusing reset: '+relative) from exc
+        destination=backup/(path.stem+'-'+hashlib.sha256(raw).hexdigest()+'.json')
+        try:
+            with destination.open('xb') as out:
+                out.write(raw)
+                out.flush()
+                os.fsync(out.fileno())
+        except FileExistsError:
+            if destination.read_bytes()!=raw:
+                raise RuntimeError('Receipt backup hash mismatch: '+relative)
+        remote=subprocess.run(['git','cat-file','-e','origin/main:'+relative],
+                              cwd=ROOT,check=False,capture_output=True,timeout=30)
+        if remote.returncode==0:
+            published=subprocess.run(['git','show','origin/main:'+relative],
+                              cwd=ROOT,check=True,capture_output=True,timeout=30).stdout
+            try:
+                existing=json.loads(published)
+                if not isinstance(existing,dict) or existing.get('id')!=path.stem:
+                    raise ValueError('Remote receipt identity mismatch')
+            except (ValueError,UnicodeDecodeError) as exc:
+                raise RuntimeError('Invalid remote receipt; refusing reset: '+relative) from exc
+            # A published terminal receipt is authoritative. Otherwise a
+            # locally completed result upgrades an old accepted/running one.
+            if existing.get('status') in terminal or local['status'] not in terminal:
+                continue
+        elif remote.returncode!=1:
+            raise RuntimeError('Unable to check remote receipt: '+relative)
+        restore[relative]=raw
+    # Local history and individual receipts are now independently recoverable.
+    git('reset','--hard','origin/main')
+    for relative,raw in restore.items():
+        target=ROOT/relative
+        target.parent.mkdir(parents=True,exist_ok=True)
+        target.write_bytes(raw)
+    if restore:
+        git('add','--',*sorted(restore))
+        if git('diff','--cached','--name-only'):
+            git('-c','user.name=Asterion Control',
+                '-c','user.email=asterion-control@users.noreply.github.com',
+                'commit','--quiet','-m','Restore preserved local Control result receipts')
+    return len(restore)
+
+
+def sync_remote():
+    """Safely converge private bridge receipt history without conflicting rebases."""
     recover_interrupted_rebase()
     preserve_dirty_receipts()
-    git('fetch','--quiet','origin','main')
-    unpublished=int(git('rev-list','--count','origin/main..HEAD'))
-    if not unpublished:
-        git('merge','--ff-only','origin/main')
-        return
-    paths=[p.strip() for p in git('log','--format=','--name-only',
-                                  'origin/main..HEAD').splitlines() if p.strip()]
-    if not paths or any(not p.startswith('results/') or not p.endswith('.json')
-                        for p in paths):
-        raise RuntimeError('Local bridge commits contain non-receipt changes; preserve and inspect')
-    # A concurrent writer may have published a receipt of the same ID.
-    # Keep the original local commits reachable, then prefer the remote
-    # receipt on overlapping paths: it is already durable and prevents replay.
-    # Non-overlapping local receipts still rebase and publish normally.
-    original_head=git('rev-parse','HEAD')
-    git('update-ref','refs/asterion-recovery/unpublished-'+original_head[:16],original_head)
     for attempt in range(10):
         git('fetch','--quiet','origin','main')
-        # Receipt commits use an explicit service identity; rebasing them must
-        # use that same scoped identity even when Windows Git has no global
-        # user.name/user.email configured.
-        git('-c','user.name=Asterion Control',
-            '-c','user.email=asterion-control@users.noreply.github.com',
-            'rebase','-X','ours','origin/main')
+        unpublished=int(git('rev-list','--count','origin/main..HEAD'))
+        if not unpublished:
+            git('merge','--ff-only','origin/main')
+            return
+        _compact_unpublished_receipts()
+        if not git('rev-list','--count','origin/main..HEAD') or \
+                int(git('rev-list','--count','origin/main..HEAD'))==0:
+            return
         try:
             git('push','--quiet','origin','HEAD:main')
             return
         except RuntimeError:
-            if attempt==9:raise
+            if attempt==9:
+                raise
             time.sleep(min(10,1+attempt))
 
 
