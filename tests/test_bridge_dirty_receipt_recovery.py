@@ -102,5 +102,40 @@ class DirtyReceiptRecoveryTest(unittest.TestCase):
         self.assertFalse((self.base/'receipt-recovery').exists())
 
 
+    def test_interrupted_conflicting_rebase_recovers_commits_without_replaying(self):
+        """A crashed Git rebase must not starve all subsequent Control commands."""
+        receipt=self.worker/'results'/'test-job.json'
+        receipt.write_text(json.dumps({'id':'test-job','ok':True,
+            'status':'complete','result':{'exit_code':0}}),encoding='utf8')
+        (self.worker/'results'/'worker-only.json').write_text(
+            json.dumps({'id':'worker-only','ok':True,'status':'complete'}),encoding='utf8')
+        git(self.worker,'add','results')
+        git(self.worker,'commit','-m','Local durable Control receipts')
+        original=git(self.worker,'rev-parse','HEAD')
+        receipt_remote=self.publisher/'results'/'test-job.json'
+        receipt_remote.write_text(json.dumps({'id':'test-job','ok':False,
+            'status':'error','error':'already published'}),encoding='utf8')
+        git(self.publisher,'add','results')
+        git(self.publisher,'commit','-m','Competing receipt publication')
+        git(self.publisher,'push')
+        git(self.worker,'fetch','origin','main')
+        attempt=subprocess.run(['git','rebase','origin/main'],cwd=self.worker,
+            text=True,capture_output=True,check=False,timeout=20)
+        self.assertNotEqual(attempt.returncode,0)
+        self.assertTrue((self.worker/'.git'/'rebase-merge').exists())
+        with patch.object(bridge,'ROOT',self.worker):
+            bridge.sync_remote()
+            bridge.sync_remote()
+        self.assertFalse((self.worker/'.git'/'rebase-merge').exists())
+        self.assertEqual(git(self.worker,'status','--porcelain'),'')
+        self.assertEqual(git(self.worker,'rev-parse',
+            'refs/asterion-recovery/aborted-'+original[:16]),original)
+        self.assertEqual(json.loads(receipt.read_text('utf8'))['status'],'error')
+        self.assertTrue((self.worker/'results'/'worker-only.json').exists())
+        git(self.publisher,'pull','--ff-only')
+        self.assertTrue((self.publisher/'results'/'worker-only.json').exists())
+        self.assertEqual(json.loads(receipt_remote.read_text('utf8'))['status'],'error')
+
+
 if __name__=='__main__':
     unittest.main()
