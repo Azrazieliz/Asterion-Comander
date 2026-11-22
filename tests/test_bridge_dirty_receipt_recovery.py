@@ -120,9 +120,9 @@ class DirtyReceiptRecoveryTest(unittest.TestCase):
         git(self.publisher,'push')
         clean_global=self.base/'empty-global-git-config'
         clean_global.write_text('',encoding='utf8')
-        with patch.dict(os.environ,{'GIT_CONFIG_GLOBAL':str(clean_global),
-                                  'GIT_CONFIG_NOSYSTEM':'1'}), \\
-             patch.object(bridge,'ROOT',self.worker):
+        with (patch.dict(os.environ,{'GIT_CONFIG_GLOBAL':str(clean_global),
+                                    'GIT_CONFIG_NOSYSTEM':'1'}),
+              patch.object(bridge,'ROOT',self.worker)):
             bridge.sync_remote()
         self.assertEqual(git(self.worker,'status','--porcelain'),'')
         self.assertTrue((self.worker/'commands'/'active'/'remote-job.json').exists())
