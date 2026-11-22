@@ -331,21 +331,19 @@ def setup():
     sync_remote()
 
 def publish(paths):
+    """Publish receipts through the same conflict-safe convergence as startup.
+
+    A direct git rebase here previously stranded the relay in rebase-merge
+    whenever independent Asterion projects published competing receipts.
+    Converge via the validated receipt-preserving algorithm instead; no
+    command is executed a second time after a failed publication.
+    """
     git('add','--',*[str(p) for p in paths])
-    if not git('status','--porcelain'):return
+    if not git('diff','--cached','--name-only'):
+        return
     git('-c','user.name=Asterion Control','-c','user.email=asterion-control@users.noreply.github.com',
         'commit','--quiet','-m','Asterion Control private bridge results')
-    for attempt in range(4):
-        git('fetch','--quiet','origin','main')
-        git('-c','user.name=Asterion Control',
-            '-c','user.email=asterion-control@users.noreply.github.com',
-            'rebase','origin/main')
-        try:
-            git('push','--quiet','origin','HEAD:main')
-            return
-        except RuntimeError:
-            if attempt==3:raise
-            time.sleep(1+attempt)
+    sync_remote()
 
 def write_result(identity,response,*,publish_now=True):
     folder=ROOT/'results';folder.mkdir(exist_ok=True)
