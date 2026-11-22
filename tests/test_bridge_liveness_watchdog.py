@@ -24,6 +24,9 @@ def prepare(tmp_path, monkeypatch):
     monkeypatch.setattr(worker, "git", lambda *args, **kwargs:
         "0" if args and args[0] == "rev-list" else "")
     monkeypatch.setattr(worker, "preserve_dirty_receipts", lambda: 0)
+    # Cycle tests use temporary file fixtures, not a Git worktree. The
+    # production unpublished-journal recovery is covered independently.
+    monkeypatch.setattr(worker, "recover_unpublished", lambda: 0)
     monkeypatch.setattr(worker, "publish", lambda paths: None)
     monkeypatch.setattr(worker, "ensure_agent", lambda key: {"ok":True})
     (tmp_path/"commands"/"active").mkdir(parents=True)
