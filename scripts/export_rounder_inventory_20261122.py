@@ -72,10 +72,19 @@ def call(action: str, payload: dict | None = None) -> tuple[str, dict, str]:
     try:
         result = request("/app-bridge/invoke", "POST", body, timeout=11.0).json()
     except Exception as exc:
-        raise ExportError(
-            "Inventory action outcome uncertain; do not repeat receipt ID "
-            + receipt_id + ": " + type(exc).__name__
-        ) from exc
+        # An uncertain WSS/Binder acknowledgement is not permission to repeat
+        # the invoke. Read the SAME signed/idempotent request's status instead.
+        # This also recovers replies delayed after a transient 7-second call
+        # timeout without starting another TeraBox metadata operation.
+        try:
+            status, response = status_for(receipt_id)
+            return status, response, receipt_id
+        except ExportError as status_error:
+            raise ExportError(
+                "Inventory action outcome uncertain; original receipt "
+                + receipt_id + ", status lookup failed: "
+                + str(status_error)[:180]
+            ) from exc
     status, response = inner(result)
     return status, response, receipt_id
 
