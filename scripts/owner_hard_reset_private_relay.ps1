@@ -52,7 +52,9 @@ try {
         })
     foreach ($p in $supervisors) {
         try { Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop }
-        catch [Microsoft.PowerShell.Commands.ProcessCommandException] {}
+        catch {
+            if (Get-Process -Id $p.ProcessId -ErrorAction SilentlyContinue) { throw }
+        }
     }
     $workers = @(Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" |
         Where-Object {
@@ -60,7 +62,9 @@ try {
         })
     foreach ($p in $workers) {
         try { Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop }
-        catch [Microsoft.PowerShell.Commands.ProcessCommandException] {}
+        catch {
+            if (Get-Process -Id $p.ProcessId -ErrorAction SilentlyContinue) { throw }
+        }
     }
     Start-Sleep -Seconds 2
     $remaining = @(Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" |
@@ -111,8 +115,9 @@ try {
                 id=$marker.BaseName;ok=$false;status='uncertain'
                 error='Local in-flight journal found during supervised relay rebuild; no automatic replay'
             }
-            $record | ConvertTo-Json -Compress |
-                Set-Content -LiteralPath $target -Encoding UTF8
+            [System.IO.File]::WriteAllText(
+                $target, ($record | ConvertTo-Json -Compress),
+                (New-Object System.Text.UTF8Encoding($false)))
             $uncertain++
         }
     }
@@ -120,9 +125,11 @@ try {
     $success = $true
 }
 finally {
-    if (!$success -and $switched -and (Test-Path $backup)) {
-        $failedRepo = Join-Path $state ('private-bridge-repo-failed-' + $stamp)
-        if (Test-Path $repo) { Move-Item -LiteralPath $repo -Destination $failedRepo }
+    if (!$success -and (Test-Path $backup)) {
+        if (Test-Path $repo) {
+            $failedRepo = Join-Path $state ('private-bridge-repo-failed-' + $stamp)
+            Move-Item -LiteralPath $repo -Destination $failedRepo
+        }
         Move-Item -LiteralPath $backup -Destination $repo
     }
     Remove-Item -LiteralPath $guard -Force -ErrorAction SilentlyContinue
