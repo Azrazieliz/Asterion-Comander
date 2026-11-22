@@ -142,3 +142,45 @@ def test_native_batch_has_bounded_twelve_command_window(tmp_path, monkeypatch):
     assert control.cycle("private-key") == 1
     assert len(published) == 2 and len(published[1]) == 1
     assert len(executed) == 13
+
+
+
+def test_old_accepted_jobs_cannot_starve_fresh_pc_commands(tmp_path, monkeypatch):
+    """A 24-job backlog is checked fairly without replaying any job.
+
+    If the native agent has hundreds of old accepted commands, every
+    queue cycle must still accept the owner's new read-only P0 probe.
+    """
+    active = prepare(tmp_path, monkeypatch)
+    saved = tmp_path / "results"
+    saved.mkdir()
+    job_ids = ["%032x" % (i + 1) for i in range(24)]
+    for i, job_id in enumerate(job_ids):
+        ident = "past-native-job-%02d" % i
+        (saved / (ident + ".json")).write_text(
+            json.dumps({"id": ident, "status": "accepted", "ok": True,
+                        "result": {"id": job_id, "status": "running"}}),
+            encoding="utf8")
+    fresh_id = "new-live-samsung-probe"
+    (active / (fresh_id + ".json")).write_text(
+        json.dumps({"id": fresh_id, "op": "pc_status", "params": {}}),
+        encoding="utf8")
+    called = []
+    def execute(request, key):
+        called.append(request["op"])
+        if request["op"] == "pc_job_status":
+            return {"status": "running"}
+        if request["op"] == "pc_status":
+            return {"ok": True}
+        raise AssertionError("Unexpected side effect: " + request["op"])
+    monkeypatch.setattr(control, "run", execute)
+    monkeypatch.setattr(control, "_RECONCILE_CURSOR", 0)
+    assert control.cycle("redacted-key") == 1
+    assert json.loads((saved / (fresh_id + ".json")).read_text())["status"] == "complete"
+    assert called.count("pc_job_status") == control.RECONCILE_PER_CYCLE
+    assert called.count("pc_status") == 1
+    for _ in range(7):
+        assert control.cycle("redacted-key") == 0
+    assert called.count("pc_job_status") == 24
+    assert called.count("pc_status") == 1
+    assert "pc_command" not in called
