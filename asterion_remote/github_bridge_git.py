@@ -78,6 +78,24 @@ def ensure_agent(key):
         raise RuntimeError('Native Control agent is not healthy yet')
     return response
 
+# A long backlog of accepted PC jobs must not starve newly authorized
+# commands or require thousands of sequential native status roundtrips.
+# Rotate checks without ever reexecuting a submitted side effect.
+_RECONCILE_CURSOR = 0
+RECONCILE_PER_CYCLE = 3
+
+def reconcile_slice(pending):
+    global _RECONCILE_CURSOR
+    if not pending:
+        _RECONCILE_CURSOR = 0
+        return []
+    start = _RECONCILE_CURSOR % len(pending)
+    size = min(RECONCILE_PER_CYCLE, len(pending))
+    batch = [pending[(start + k) % len(pending)] for k in range(size)]
+    _RECONCILE_CURSOR = (start + size) % len(pending)
+    return batch
+
+
 def outstanding_jobs():
     """Load only native job receipts that lack a final exit status."""
     folder=ROOT/'results'
@@ -355,7 +373,10 @@ def cycle(key):
     if tasks or unfinished:
         ensure_agent(key)
     if unfinished:
-        reconcile_jobs(key,unfinished)
+        # Do not indefinitely block the four-second fresh command queue
+        # behind old accepted native jobs. Those jobs remain durable and
+        # are checked in bounded rotating batches; never resubmit them.
+        reconcile_jobs(key,reconcile_slice(unfinished))
     # A finished receipt written just before a previous push failed is
     # publication-only: NEVER execute the corresponding operation again.
     recover_unpublished()
