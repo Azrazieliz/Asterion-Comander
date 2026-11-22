@@ -3,6 +3,9 @@
 $ErrorActionPreference='Continue'
 $root=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $state=Join-Path $env:LOCALAPPDATA 'AsterionControl'
+# Owner-initiated hard relay recovery: prevent the minute watchdog from
+# recreating a relay while its original Git worktree is being backed up.
+if(Test-Path (Join-Path $state 'control-relay-maintenance.lock')){exit 0}
 $hostFile=Join-Path $state 'agent-host.txt'
 $key=Join-Path $state 'control-token.txt'
 if(-not(Test-Path $hostFile) -or -not(Test-Path $key)){exit 1}
