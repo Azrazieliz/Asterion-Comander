@@ -109,6 +109,8 @@ def wait_for_inventory(max_wait: float, interval: float) -> dict:
         raise ExportError("Index generation missing")
     if not str(meta.get("root", "")).startswith("/"):
         raise ExportError("Approved directory missing")
+    if not re.fullmatch(r"[0-9a-f]{24}", str(meta.get("account_fingerprint", ""))):
+        raise ExportError("Account identity fingerprint missing")
     return meta
 
 
@@ -137,8 +139,9 @@ def write_checkpoint(path: Path, value: dict) -> None:
 def collect(metadata: dict, directory: Path, formats: str, max_pages: int) -> dict:
     scope_root = metadata["root"]
     generation = metadata["generation"]
+    account = metadata["account_fingerprint"]
     fingerprint = hashlib.sha256(
-        (scope_root + "|" + str(generation)).encode("utf-8")
+        (account + "|" + scope_root + "|" + str(generation)).encode("utf-8")
     ).hexdigest()[:20]
     directory.mkdir(parents=True, exist_ok=True)
     stem = directory / ("rounder-" + fingerprint)
@@ -150,11 +153,14 @@ def collect(metadata: dict, directory: Path, formats: str, max_pages: int) -> di
     done = False
     if checkpoint.exists():
         stored = json.loads(checkpoint.read_text(encoding="utf-8"))
-        if stored.get("root") != scope_root or stored.get("generation") != generation:
+        if (stored.get("root") != scope_root or
+                stored.get("generation") != generation or
+                stored.get("account_fingerprint") != account):
             raise ExportError("Checkpoint belongs to another root or index generation")
         if stored.get("done"):
-            if not ((formats in ("both", "json") and final_json.is_file()) or
-                    (formats == "csv" and final_csv.is_file())):
+            if not ((formats == "json" and final_json.is_file()) or
+                    (formats == "csv" and final_csv.is_file()) or
+                    (formats == "both" and final_json.is_file() and final_csv.is_file())):
                 raise ExportError("A previous export completed but its final file is missing")
             return stored["summary"]
         if not jsonl_part.is_file() or not csv_part.is_file():
@@ -179,7 +185,8 @@ def collect(metadata: dict, directory: Path, formats: str, max_pages: int) -> di
         cursor = ""
         count = 0
         pages = 0
-        write_checkpoint(checkpoint, {"root": scope_root, "generation": generation,
+        write_checkpoint(checkpoint, {"root": scope_root, "account_fingerprint": account,
+                                      "generation": generation,
                                       "after": cursor, "entries": count, "pages": pages,
                                       "jsonl_bytes": jsonl_part.stat().st_size,
                                       "csv_bytes": csv_part.stat().st_size})
@@ -191,7 +198,9 @@ def collect(metadata: dict, directory: Path, formats: str, max_pages: int) -> di
         })
         if state != "completed":
             raise ExportError("Rounder page not complete; receipt " + receipt)
-        if response.get("generation") != generation or response.get("root") != scope_root:
+        if (response.get("generation") != generation or
+            response.get("root") != scope_root or
+            response.get("account_fingerprint") != account):
             raise ExportError("TeraBox account/root/generation changed during collection")
         items = response.get("items")
         if not isinstance(items, list) or response.get("count") != len(items):
@@ -228,7 +237,8 @@ def collect(metadata: dict, directory: Path, formats: str, max_pages: int) -> di
         cursor = next_cursor
         done = not bool(response.get("has_more"))
         # Crash-safe resume requires committing both append logs before cursor.
-        write_checkpoint(checkpoint, {"root": scope_root, "generation": generation,
+        write_checkpoint(checkpoint, {"root": scope_root, "account_fingerprint": account,
+                                      "generation": generation,
                                       "after": cursor, "entries": count, "pages": pages,
                                       "jsonl_bytes": jsonl_part.stat().st_size,
                                       "csv_bytes": csv_part.stat().st_size})
@@ -243,6 +253,7 @@ def collect(metadata: dict, directory: Path, formats: str, max_pages: int) -> di
             out.write('{"schema":"rounder-inventory-v1","root":')
             out.write(json.dumps(scope_root, ensure_ascii=False))
             out.write(',"generation":' + str(generation))
+            out.write(',"account_fingerprint":' + json.dumps(account))
             out.write(',"entries":[')
             first = True
             with jsonl_part.open("r", encoding="utf-8") as source:
@@ -263,6 +274,7 @@ def collect(metadata: dict, directory: Path, formats: str, max_pages: int) -> di
     summary = {
         "ok": True, "status": "complete", "source": "Rounder via Control",
         "root_sha256_prefix": hashlib.sha256(scope_root.encode("utf-8")).hexdigest()[:16],
+        "account_fingerprint": account,
         "generation": generation, "entries": count, "pages": pages,
         "files": metadata.get("files"), "folders": metadata.get("folders"),
         "json_path": str(final_json) if formats in ("both", "json") else None,
@@ -270,7 +282,7 @@ def collect(metadata: dict, directory: Path, formats: str, max_pages: int) -> di
         "private_local_export": True,
     }
     write_checkpoint(checkpoint, {"done": True, "root": scope_root,
-        "generation": generation, "summary": summary})
+        "account_fingerprint": account, "generation": generation, "summary": summary})
     return summary
 
 
