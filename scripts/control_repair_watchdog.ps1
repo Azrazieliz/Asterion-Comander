@@ -30,7 +30,11 @@ if($bridge.Count -eq 2){
     $parent=@($bridge | Where-Object {$_.ProcessId -eq $child[0].ParentProcessId})
     if($parent.Count -eq 1){
       $startGap=[math]::Abs(($child[0].CreationDate-$parent[0].CreationDate).TotalSeconds)
-      if($startGap -le 5){
+      # Windows venv launcher -> executing Python child can take tens of
+      # seconds to initialize. A five-second gap falsely classified the
+      # owner's verified 26-second parent/child pair as duplicate relays.
+      # Still require exact parent PID, known module and bounded launch gap.
+      if($startGap -le 120){
         # Prefer the executing child for safe idle-only restart: the waiting
         # venv launcher and existing supervisor will observe its termination.
         $bridge=@($child[0])
