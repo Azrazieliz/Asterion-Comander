@@ -90,18 +90,26 @@ def call(action: str, payload: dict | None = None) -> tuple[str, dict, str]:
 
 
 def status_for(receipt_id: str) -> tuple[str, dict]:
-    # Existing operation call only queries the prior request: never invokes anew.
-    try:
-        response = request(
-            "/app-bridge/operation", "POST",
-            {"package": PACKAGE, "request_id": receipt_id, "cancel": False},
-            timeout=10.0,
-        ).json()
-    except Exception as exc:
-        raise ExportError(
-            "Operation status unknown; original receipt remains " + receipt_id
-        ) from exc
-    return inner(response)
+    # This method is ONLY a read-only status query of a previously submitted
+    # durable request. Retrying the status lookup NEVER repeats the invoke.
+    for attempt in range(4):
+        try:
+            response = request(
+                "/app-bridge/operation", "POST",
+                {"package": PACKAGE, "request_id": receipt_id, "cancel": False},
+                timeout=10.0,
+            ).json()
+            return inner(response)
+        except ExportError:
+            raise  # A definite partner denial must not be retried.
+        except Exception as exc:
+            if attempt == 3:
+                raise ExportError(
+                    "Operation status unknown after four read-only probes; "
+                    "original receipt remains " + receipt_id
+                ) from exc
+            time.sleep(min(1.0 * (2 ** attempt), 3.0))
+    raise ExportError("Operation receipt not available: " + receipt_id)
 
 
 def wait_for_inventory(max_wait: float, interval: float) -> dict:
