@@ -138,3 +138,15 @@ def test_backup_and_pairing_are_not_changed_by_watchdog():
         assert forbidden not in WATCHDOG
     assert "Stop-Process -Id $current.ProcessId -Force" in WATCHDOG
     assert "Stop-Process -Id $worker" not in WATCHDOG
+
+
+def test_venv_launcher_delayed_child_is_one_logical_relay():
+    # The real owner's Python venv launcher and its executing child were born
+    # 26 seconds apart. Five-second guards leave the watchdog in a stall loop.
+    import re
+    match = re.search(r"if\(\$startGap -le (\d+)\)", WATCHDOG)
+    assert match is not None
+    assert 26 <= int(match.group(1)) <= 180
+    assert "$bridge.ProcessId -contains $_.ParentProcessId" in WATCHDOG
+    assert "$bridge=@($child[0])" in WATCHDOG
+    assert "$bridge.Count -gt 1" in WATCHDOG  # Still reject independent relays
