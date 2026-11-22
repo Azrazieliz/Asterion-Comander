@@ -42,6 +42,7 @@ class InventoryExportTest(unittest.TestCase):
         self.root = "/Apps/Koikatsu"
         self.meta = {
             "status": "completed", "root": self.root, "generation": 7,
+            "account_fingerprint": "d54c50b6ad0e2edcb1f2ade3",
             "complete_for_index_generation": True, "entries": 2,
             "files": 1, "folders": 1,
         }
@@ -70,12 +71,12 @@ class InventoryExportTest(unittest.TestCase):
         if not after:
             return Reply(envelope({
                 "status": "completed", "root": self.root,
-                "generation": 7, "items": [self.items[0]], "count": 1,
+                "generation": 7, "account_fingerprint": "d54c50b6ad0e2edcb1f2ade3", "items": [self.items[0]], "count": 1,
                 "next_after": self.items[0]["path"], "has_more": True,
             }))
         return Reply(envelope({
             "status": "completed", "root": self.root,
-            "generation": 7, "items": [self.items[1]], "count": 1,
+            "generation": 7, "account_fingerprint": "d54c50b6ad0e2edcb1f2ade3", "items": [self.items[1]], "count": 1,
             "next_after": self.items[1]["path"], "has_more": False,
         }))
 
@@ -109,7 +110,7 @@ class InventoryExportTest(unittest.TestCase):
             def malicious(*a, **kw):
                 return Reply(envelope({
                     "status": "completed", "root": self.root,
-                    "generation": 7, "items": [
+                    "generation": 7, "account_fingerprint": "d54c50b6ad0e2edcb1f2ade3", "items": [
                         {**self.items[0], "path": "/Private/other.txt"}],
                     "count": 1, "next_after": "/Private/other.txt",
                     "has_more": False,
