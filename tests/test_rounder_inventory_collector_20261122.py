@@ -105,6 +105,22 @@ class InventoryExportTest(unittest.TestCase):
             self.assertEqual(len(items), 2)
             self.assertEqual(self.cursors, ["", self.items[0]["path"]])
 
+    def test_status_read_only_retries_same_receipt_after_wss_errors(self):
+        final = {"status": "completed", "generation": 1, "items": []}
+        receipt = "rounder-export-original-123456"
+        with patch.object(inventory, "request", side_effect=[
+                TimeoutError("WSS lost"), ConnectionError("WSS reconnection"),
+                Reply(envelope(final))]) as lookup, \
+             patch.object(inventory.time, "sleep") as delay:
+            state, body = inventory.status_for(receipt)
+        self.assertEqual(state, "completed")
+        self.assertEqual(body, final)
+        self.assertEqual(lookup.call_count, 3)
+        self.assertEqual(delay.call_count, 2)
+        for args, kwargs in lookup.call_args_list:
+            self.assertEqual(args[0], "/app-bridge/operation")
+            self.assertEqual(args[2]["request_id"], receipt)
+
     def test_uncertain_native_page_ack_queries_original_receipt_without_replay(self):
         complete = {"status": "completed", "generation": 7,
                     "root": self.root, "items": [], "has_more": False}
