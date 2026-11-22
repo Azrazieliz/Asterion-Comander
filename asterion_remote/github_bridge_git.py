@@ -207,6 +207,24 @@ def preserve_dirty_receipts():
     return len(candidates)
 
 
+def recover_interrupted_rebase():
+    """Preserve committed receipt history before aborting a failed Git rebase.
+
+    An interrupted rebase can leave .git/rebase-merge across worker restarts.
+    Until cleared, every new startup fails before command polling begins.
+    No original command is rerun; local commits remain under a recovery ref.
+    """
+    markers=[ROOT/'.git'/'rebase-merge',ROOT/'.git'/'rebase-apply']
+    if not any(p.exists() for p in markers):
+        return False
+    branch_head=git('rev-parse','refs/heads/main')
+    git('update-ref','refs/asterion-recovery/aborted-'+branch_head[:16],branch_head)
+    git('rebase','--abort')
+    if any(p.exists() for p in markers):
+        raise RuntimeError('Git rebase metadata still present after safe abort')
+    return True
+
+
 def sync_remote():
     """Recover committed, unpublished receipts after competing Git writers.
 
@@ -216,6 +234,7 @@ def sync_remote():
     """
     # Never rebase over uncommitted result journals; this guard runs at startup
     # and on every polling cycle, even after a failed publish or agent restart.
+    recover_interrupted_rebase()
     preserve_dirty_receipts()
     git('fetch','--quiet','origin','main')
     unpublished=int(git('rev-list','--count','origin/main..HEAD'))
@@ -227,9 +246,15 @@ def sync_remote():
     if not paths or any(not p.startswith('results/') or not p.endswith('.json')
                         for p in paths):
         raise RuntimeError('Local bridge commits contain non-receipt changes; preserve and inspect')
+    # A concurrent writer may have published a receipt of the same ID.
+    # Keep the original local commits reachable, then prefer the remote
+    # receipt on overlapping paths: it is already durable and prevents replay.
+    # Non-overlapping local receipts still rebase and publish normally.
+    original_head=git('rev-parse','HEAD')
+    git('update-ref','refs/asterion-recovery/unpublished-'+original_head[:16],original_head)
     for attempt in range(10):
         git('fetch','--quiet','origin','main')
-        git('rebase','origin/main')
+        git('rebase','-X','ours','origin/main')
         try:
             git('push','--quiet','origin','HEAD:main')
             return
