@@ -267,9 +267,9 @@ def _compact_unpublished_receipts():
         except FileExistsError:
             if destination.read_bytes()!=raw:
                 raise RuntimeError('Receipt backup hash mismatch: '+relative)
-        remote=subprocess.run(['git','cat-file','-e','origin/main:'+relative],
-                              cwd=ROOT,check=False,capture_output=True,timeout=30)
-        if remote.returncode==0:
+        remote_exists=(git('ls-tree','-r','--name-only','origin/main',
+                           '--',relative)==relative)
+        if remote_exists:
             published=subprocess.run(['git','show','origin/main:'+relative],
                               cwd=ROOT,check=True,capture_output=True,timeout=30).stdout
             try:
@@ -282,8 +282,6 @@ def _compact_unpublished_receipts():
             # locally completed result upgrades an old accepted/running one.
             if existing.get('status') in terminal or local['status'] not in terminal:
                 continue
-        elif remote.returncode!=1:
-            raise RuntimeError('Unable to check remote receipt: '+relative)
         restore[relative]=raw
     # Local history and individual receipts are now independently recoverable.
     git('reset','--hard','origin/main')
@@ -311,8 +309,7 @@ def sync_remote():
             git('merge','--ff-only','origin/main')
             return
         _compact_unpublished_receipts()
-        if not git('rev-list','--count','origin/main..HEAD') or \
-                int(git('rev-list','--count','origin/main..HEAD'))==0:
+        if int(git('rev-list','--count','origin/main..HEAD'))==0:
             return
         try:
             git('push','--quiet','origin','HEAD:main')
