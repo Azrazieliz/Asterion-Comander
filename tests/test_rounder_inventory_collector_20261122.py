@@ -113,9 +113,9 @@ class InventoryExportTest(unittest.TestCase):
         resumed = dict(self.meta, status="accepted", index_building=True,
                        complete_for_index_generation=False)
         with patch.object(inventory, "call", return_value=(
-                "failed", temporarily_failed, "rounder-dns-retry-123")) as invoke, \\
+                "failed", temporarily_failed, "rounder-dns-retry-123")) as invoke, \
              patch.object(inventory, "status_for", side_effect=[
-                ("accepted", resumed), ("completed", self.meta)]) as status, \\
+                ("accepted", resumed), ("completed", self.meta)]) as status, \
              patch.object(inventory.time, "sleep"):
             result = inventory.wait_for_inventory(20.0, 0.5)
         self.assertEqual(result["generation"], 7)
