@@ -465,6 +465,16 @@ def main():
         secret=local_token()
     except Exception as exc:
         health('startup_error',error_kind=type(exc).__name__)
+        # Keep a durable owner-local startup traceback; the Windows launcher
+        # reopens stdout/stderr on each retry, erasing previous crash output.
+        # Never log tokens, command payloads or phone screenshots.
+        try:
+            import traceback
+            error_file=HEALTH.parent/'control-git-bridge-startup-last-error.log'
+            with error_file.open('w',encoding='utf8') as stream:
+                stream.write(traceback.format_exc()[-6000:])
+        except OSError:
+            pass
         raise
     print('Asterion Control private Git transport active; no REST quota',flush=True)
     failures=0
