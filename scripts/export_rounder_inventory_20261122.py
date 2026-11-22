@@ -152,8 +152,21 @@ def collect(metadata: dict, directory: Path, formats: str, max_pages: int) -> di
         stored = json.loads(checkpoint.read_text(encoding="utf-8"))
         if stored.get("root") != scope_root or stored.get("generation") != generation:
             raise ExportError("Checkpoint belongs to another root or index generation")
+        if stored.get("done"):
+            if not ((formats in ("both", "json") and final_json.is_file()) or
+                    (formats == "csv" and final_csv.is_file())):
+                raise ExportError("A previous export completed but its final file is missing")
+            return stored["summary"]
         if not jsonl_part.is_file() or not csv_part.is_file():
             raise ExportError("Checkpoint exists but one staging file is missing")
+        # A crash after an append but before the checkpoint must not duplicate
+        # entries on resume. Restore the last fully committed byte offsets.
+        for file_path, key in ((jsonl_part, "jsonl_bytes"), (csv_part, "csv_bytes")):
+            last = stored.get(key)
+            if not isinstance(last, int) or last < 0 or file_path.stat().st_size < last:
+                raise ExportError("Cannot safely resume an incomplete staging file")
+            with file_path.open("r+b") as file_handle:
+                file_handle.truncate(last)
         cursor = stored["after"]
         count = stored["entries"]
         pages = stored["pages"]
@@ -167,7 +180,9 @@ def collect(metadata: dict, directory: Path, formats: str, max_pages: int) -> di
         count = 0
         pages = 0
         write_checkpoint(checkpoint, {"root": scope_root, "generation": generation,
-                                      "after": cursor, "entries": count, "pages": pages})
+                                      "after": cursor, "entries": count, "pages": pages,
+                                      "jsonl_bytes": jsonl_part.stat().st_size,
+                                      "csv_bytes": csv_part.stat().st_size})
     while not done:
         if pages >= max_pages:
             raise ExportError("Stopped at requested page limit; checkpoint is resumable")
@@ -214,7 +229,9 @@ def collect(metadata: dict, directory: Path, formats: str, max_pages: int) -> di
         done = not bool(response.get("has_more"))
         # Crash-safe resume requires committing both append logs before cursor.
         write_checkpoint(checkpoint, {"root": scope_root, "generation": generation,
-                                      "after": cursor, "entries": count, "pages": pages})
+                                      "after": cursor, "entries": count, "pages": pages,
+                                      "jsonl_bytes": jsonl_part.stat().st_size,
+                                      "csv_bytes": csv_part.stat().st_size})
     expected = metadata.get("entries")
     if expected is not None and count != expected:
         raise ExportError(
@@ -242,8 +259,8 @@ def collect(metadata: dict, directory: Path, formats: str, max_pages: int) -> di
         tmp_json.replace(final_json)
     if formats in ("both", "csv"):
         csv_part.replace(final_csv)
-    # Keep original JSONL and checkpoint as read-only evidence until owner cleanup.
-    return {
+    # Keep the JSONL as local verification evidence, but flag durable completion.
+    summary = {
         "ok": True, "status": "complete", "source": "Rounder via Control",
         "root_sha256_prefix": hashlib.sha256(scope_root.encode("utf-8")).hexdigest()[:16],
         "generation": generation, "entries": count, "pages": pages,
@@ -252,6 +269,9 @@ def collect(metadata: dict, directory: Path, formats: str, max_pages: int) -> di
         "csv_path": str(final_csv) if formats in ("both", "csv") else None,
         "private_local_export": True,
     }
+    write_checkpoint(checkpoint, {"done": True, "root": scope_root,
+        "generation": generation, "summary": summary})
+    return summary
 
 
 def main() -> int:
