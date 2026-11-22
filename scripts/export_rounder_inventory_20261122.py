@@ -98,13 +98,33 @@ def status_for(receipt_id: str) -> tuple[str, dict]:
 def wait_for_inventory(max_wait: float, interval: float) -> dict:
     state, meta, receipt = call("rounder.inventory.meta")
     start = time.monotonic()
-    while state == "accepted":
+
+    def retryable_index_error() -> bool:
+        # A TeraBox DNS outage can leave the existing pending-page index marked
+        # failed even after connectivity returns. Status queries trigger the
+        # signed Rounder provider's resumable selected-subtree retry.
+        if state != "failed" or meta.get("reason") != "index_error":
+            return False
+        detail = str(meta.get("index_error", "")).lower()
+        return bool(meta.get("index_building")) and any(
+            marker in detail for marker in (
+                "unable to resolve host", "unknownhostexception",
+                "temporary failure in name resolution",
+                "no address associated with hostname",
+            )
+        )
+
+    while state == "accepted" or retryable_index_error():
         if time.monotonic() - start >= max_wait:
-            raise ExportError("Recursive index is still building; last receipt " + receipt)
+            detail = str(meta.get("index_error") or meta.get("reason") or state)
+            raise ExportError(
+                "Selected-folder inventory not yet complete (bounded retry): "
+                + detail[:180] + "; receipt " + receipt
+            )
         time.sleep(interval)
         state, meta = status_for(receipt)
     if state != "completed" or not meta.get("complete_for_index_generation"):
-        raise ExportError("Index is not complete: " + str(meta.get("reason", state)))
+        raise ExportError("Index is not complete: " + str(meta.get("index_error") or meta.get("reason", state)))
     if not isinstance(meta.get("generation"), int) or meta["generation"] < 1:
         raise ExportError("Index generation missing")
     if not str(meta.get("root", "")).startswith("/"):
