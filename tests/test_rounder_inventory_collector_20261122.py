@@ -105,6 +105,22 @@ class InventoryExportTest(unittest.TestCase):
             self.assertEqual(len(items), 2)
             self.assertEqual(self.cursors, ["", self.items[0]["path"]])
 
+    def test_uncertain_native_page_ack_queries_original_receipt_without_replay(self):
+        complete = {"status": "completed", "generation": 7,
+                    "root": self.root, "items": [], "has_more": False}
+        with patch.object(inventory, "request",
+                          side_effect=RuntimeError("Lost native WSS acknowledgement")) as invoke, \
+             patch.object(inventory, "status_for",
+                          return_value=("completed", complete)) as status:
+            state, body, receipt_id = inventory.call(
+                "rounder.inventory.page",
+                {"generation": 7, "after": "/Apps/Koikatsu/a", "format": "json"})
+        self.assertEqual(state, "completed")
+        self.assertIs(body, complete)
+        self.assertTrue(receipt_id.startswith("rounder-export-"))
+        invoke.assert_called_once()
+        status.assert_called_once_with(receipt_id)
+
     def test_transient_phone_dns_failure_recovers_without_restart(self):
         temporarily_failed = dict(self.meta,
             status="failed", reason="index_error", index_building=True,
