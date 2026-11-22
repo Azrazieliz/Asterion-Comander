@@ -1,0 +1,26 @@
+name: Control Rounder inventory collector source tests
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/export_rounder_inventory_20261122.py'
+      - 'tests/test_rounder_inventory_collector_20261122.py'
+      - '.github/workflows/rounder-inventory-collector-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  read-only-collector:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Parse collector and run synthetic authenticated receipts
+        run: |
+          python -m py_compile scripts/export_rounder_inventory_20261122.py
+          python -m unittest discover -s tests -p 'test_rounder_inventory_collector_20261122.py' -v
