@@ -102,6 +102,32 @@ class DirtyReceiptRecoveryTest(unittest.TestCase):
         self.assertFalse((self.base/'receipt-recovery').exists())
 
 
+    def test_rebase_works_without_global_or_local_git_identity(self):
+        """A Windows service has no configured Git user but can rebase receipts."""
+        import os
+        receipt=self.worker/'results'/'test-job.json'
+        receipt.write_text(json.dumps({'id':'test-job','ok':True,
+            'status':'complete'}),encoding='utf8')
+        git(self.worker,'add','results')
+        git(self.worker,'commit','-m','Committed local receipt')
+        git(self.worker,'config','--unset','user.name')
+        git(self.worker,'config','--unset','user.email')
+        (self.publisher/'commands'/'active').mkdir(parents=True)
+        (self.publisher/'commands'/'active'/'remote-job.json').write_text(
+            json.dumps({'id':'remote-job','op':'pc_status','params':{}}),encoding='utf8')
+        git(self.publisher,'add','commands')
+        git(self.publisher,'commit','-m','Concurrent Control command')
+        git(self.publisher,'push')
+        clean_global=self.base/'empty-global-git-config'
+        clean_global.write_text('',encoding='utf8')
+        with patch.dict(os.environ,{'GIT_CONFIG_GLOBAL':str(clean_global),
+                                  'GIT_CONFIG_NOSYSTEM':'1'}), \\
+             patch.object(bridge,'ROOT',self.worker):
+            bridge.sync_remote()
+        self.assertEqual(git(self.worker,'status','--porcelain'),'')
+        self.assertTrue((self.worker/'commands'/'active'/'remote-job.json').exists())
+        self.assertEqual(git(self.worker,'rev-list','--count','origin/main..HEAD'),'0')
+
     def test_interrupted_conflicting_rebase_recovers_commits_without_replaying(self):
         """A crashed Git rebase must not starve all subsequent Control commands."""
         receipt=self.worker/'results'/'test-job.json'
