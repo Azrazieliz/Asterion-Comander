@@ -44,6 +44,8 @@ android {
 // Official audited WireGuard GoBackend. VPN remains OFF until owner approval
 // and a valid peer configuration; no third-party commercial service.
 dependencies {
+  // Existing Android WebView engine: isolated browsing profiles and profile-local data cleanup.
+  implementation 'androidx.webkit:webkit:1.13.0'
   implementation 'com.wireguard.android:tunnel:1.0.20260102'
   coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.3'
 }
