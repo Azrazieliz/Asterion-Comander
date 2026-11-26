@@ -461,6 +461,7 @@ public final class BrowserActivity extends Activity {
         if(tab==null) return;
         String url=tab.pageUrl;
         address.setHint("Search with "+providerName()+" or enter URL");
+        address.setImeOptions(EditorInfo.IME_ACTION_GO|(tab.privateProfile!=null?EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING:0));
         if(url!=null && !address.hasFocus()) address.setText(START.equals(url)?"":url);
         site.setText(tab.privateProfile!=null?"Private":(START.equals(url)?"Site":("https".equalsIgnoreCase(Uri.parse(url).getScheme())?"HTTPS":"HTTP")));
         site.setContentDescription("Site information and protection");
@@ -842,7 +843,7 @@ public final class BrowserActivity extends Activity {
         });
         LinearLayout.LayoutParams searchLp=new LinearLayout.LayoutParams(-1,dp(52));searchLp.topMargin=dp(20);body.addView(search,searchLp);
         if(privateHome){
-            TextView detail=label("Separate website storage. This tab is not restored or saved in browsing history. Site data is cleared on close; after an unexpected stop, old private profiles are removed at the next Browser start. Downloads and network providers are outside this isolation.",14,DesignSystem.MUTED,false);
+            TextView detail=label("Separate website storage. This tab is not restored or saved in browsing history. Site-data cleanup is requested on close. After an unexpected stop, cleanup is retried at the next Browser process start. Downloads and network providers are outside this isolation.",14,DesignSystem.MUTED,false);
             detail.setPadding(0,dp(22),0,dp(22));add(body,detail);
         }else{
             homeSection(body,"Bookmarks","bookmarks",8);homeSection(body,"Recent activity","history",5);
@@ -1001,6 +1002,7 @@ public final class BrowserActivity extends Activity {
         int blocked=tab==null?0:tab.blocked.get();
         int popups=tab==null?0:tab.popups.get();
         boolean siteAllowed=protection.isAllowedSite(currentUrl);
+        final boolean privateSite=tab!=null&&tab.privateProfile!=null;
         String details="Status: "+(protection.isEnabled()?"Enabled":"Disabled")+
             "\nReal supported filter domains: "+protection.domainRules()+
             "\nOfficial subscriptions loaded: "+protection.subscriptionsLoaded()+
@@ -1032,6 +1034,7 @@ public final class BrowserActivity extends Activity {
                             if(selected!=null)selected.web.reload();
                             refreshToolbar();
                         }else{
+                            if(privateSite){notice("Private tabs do not save site exceptions");return;}
                             try{
                                 protection.allowSite(currentUrl,!siteAllowed);
                                 BrowserTab selected=current();
