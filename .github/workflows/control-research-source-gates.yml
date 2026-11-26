@@ -1,0 +1,29 @@
+name: Control R05 original crawler source and research regression
+on:
+  push:
+    branches:
+      - work/control-non-ai-research-20261126
+      - work/control-native-ai-reconstruction-20261126
+    paths:
+      - 'asterion_remote/browser_crawler.py'
+      - 'tests/test_browser_crawler.py'
+      - '.github/workflows/control-research-source-gates.yml'
+  pull_request:
+    branches:
+      - work/control-native-ai-reconstruction-20261126
+    paths:
+      - 'asterion_remote/browser_crawler.py'
+      - 'tests/test_browser_crawler.py'
+      - '.github/workflows/control-research-source-gates.yml'
+permissions:
+  contents: read
+jobs:
+  crawler:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install pytest fastapi
+      - run: python -m pytest -q tests/test_browser_crawler.py
