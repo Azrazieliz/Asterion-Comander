@@ -40,6 +40,7 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.EditText;
 import android.widget.ArrayAdapter;
+import android.widget.CheckBox;
 import android.widget.ListView;
 import android.widget.Spinner;
 import android.widget.FrameLayout;
@@ -1352,6 +1353,10 @@ public final class MainActivity extends Activity {
     guidance.setInputType(InputType.TYPE_CLASS_TEXT|
       InputType.TYPE_TEXT_FLAG_MULTI_LINE);
     panel.addView(guidance);
+    CheckBox keepHistory=new CheckBox(this);
+    keepHistory.setText("Remember local AI conversations (encrypted on device)");
+    keepHistory.setChecked(ControlAssistantPreferences.saveHistory(this));
+    panel.addView(keepHistory);
     new AlertDialog.Builder(this)
       .setTitle("Local Asterion AI preferences")
       .setView(panel)
@@ -1360,7 +1365,7 @@ public final class MainActivity extends Activity {
           String level=new String[]{"fast","balanced","deep"}[
             effortChoice.getSelectedItemPosition()];
           ControlAssistantPreferences.save(this,level,
-            guidance.getText().toString());
+            guidance.getText().toString(),keepHistory.isChecked());
           toast("Local AI preferences saved");
         }catch(Exception e){
           toast("Could not save local preferences: "+e.getClass().getSimpleName());
@@ -1516,13 +1521,28 @@ public final class MainActivity extends Activity {
         working.show();
         io.execute(()->{
           String answer;
-          try{answer=OnDeviceLlm.generate(getApplicationContext(),prompt);}
-          catch(Exception|LinkageError error){
+          String memoryState="";
+          try{
+            answer=OnDeviceLlm.generate(getApplicationContext(),prompt);
+            if(!abandoned.get()&&ControlAssistantPreferences.saveHistory(this)){
+              try{
+                String history="User:\n"+prompt+"\n\nAsterion:\n"+answer;
+                if(history.length()>11800)
+                  history=history.substring(0,11800)+"\n[entry truncated]";
+                ControlAssistantMemory.remember(this,"General",
+                  "local_conversation_verified_generation",history,true);
+                memoryState="\n\nSaved to encrypted local conversation history.";
+              }catch(Exception failedSave){
+                memoryState="\n\nLocal history could not be saved: "+
+                  failedSave.getClass().getSimpleName();
+              }
+            }
+          }catch(Exception|LinkageError error){
             answer="Local model execution failed: "+
               error.getClass().getSimpleName()+
               ". No text result or completed operation is claimed.";
           }
-          final String text=answer;
+          final String text=answer+memoryState;
           runOnUiThread(()->{
             if(working.isShowing())working.dismiss();
             if(destroyed||abandoned.get())return;
