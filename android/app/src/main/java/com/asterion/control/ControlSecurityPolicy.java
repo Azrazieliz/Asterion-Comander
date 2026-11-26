@@ -31,6 +31,19 @@ final class ControlSecurityPolicy {
        !LOCKDOWN.equals(current)&&!CUSTOM.equals(current))return LOCKDOWN;
     return current;
   }
+  /** Browser B09 uses the same Control security authority. An owner-visible
+   * verified HTTPS document and actual Android permission are both mandatory;
+   * this method neither creates a second permission store nor grants an OS permission. */
+  static boolean canRequestBrowserPermission(String requested,String visible,boolean foreground){
+    return foreground && BrowserNavigationPolicy.sameHttpsOrigin(requested,visible);
+  }
+  static boolean browserPermissionGranted(Context c,String permission){
+    if(!android.Manifest.permission.RECORD_AUDIO.equals(permission)&&
+       !android.Manifest.permission.CAMERA.equals(permission)&&
+       !android.Manifest.permission.ACCESS_COARSE_LOCATION.equals(permission)&&
+       !android.Manifest.permission.ACCESS_FINE_LOCATION.equals(permission))return false;
+    return c.checkSelfPermission(permission)==android.content.pm.PackageManager.PERMISSION_GRANTED;
+  }
   static boolean canRemote(Context c,String method,String path){
     if(path.equals("/diagnostics/logcat")&&!developerAuthorized(c))return false;
     String lvl=level(c);

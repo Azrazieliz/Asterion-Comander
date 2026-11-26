@@ -96,6 +96,9 @@ public final class BrowserActivity extends Activity {
     private FrameLayout viewport;
     private EditText address;
     private TextView status, counter, site;
+    private static final int SITE_PERMISSION_CODE=4107;
+    private SiteRequest pendingSiteRequest, androidPermissionInFlight;
+    private AlertDialog siteRequestDialog;
     private View back, forward;
     private ProgressBar progress;
     private int active = -1;
@@ -256,6 +259,7 @@ public final class BrowserActivity extends Activity {
         WebSettings s = view.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
+        s.setGeolocationEnabled(true);
         s.setAllowFileAccess(false);
         s.setAllowContentAccess(false);
         s.setJavaScriptCanOpenWindowsAutomatically(false);
@@ -287,6 +291,8 @@ public final class BrowserActivity extends Activity {
             @Override public void onPageStarted(WebView web,String url,
                     android.graphics.Bitmap icon) {
                 if(!tabs.contains(tab))return;
+                if(pendingSiteRequest!=null&&pendingSiteRequest.tab==tab)finishSiteRequest(false);
+                tab.siteGrants.clear();
                 tab.committedUrl=null;
                 tab.pageUrl=url;
                 tab.blocked.set(0);
@@ -300,6 +306,12 @@ public final class BrowserActivity extends Activity {
                 tab.committedUrl=null;
                 handler.cancel();
                 if(current()==tab) notice("Certificate verification failed; page blocked");
+            }
+            @Override public void doUpdateVisitedHistory(WebView web,String url,boolean reload){
+                if(!reload&&BrowserNavigationPolicy.sameHttpsOrigin(tab.committedUrl,url)&&url.equals(web.getUrl())){
+                    tab.committedUrl=url;tab.pageUrl=url;
+                    if(current()==tab)refreshToolbar();persistTabs();
+                }
             }
             @Override public void onPageCommitVisible(WebView web,String url){
                 if(tabs.contains(tab)&&BrowserNavigationPolicy.isWeb(url)&&url.equals(web.getUrl()))tab.committedUrl=url;
@@ -337,6 +349,18 @@ public final class BrowserActivity extends Activity {
                 showTab(tabs.size()-1);
                 return true;
             }
+            @Override public void onPermissionRequest(android.webkit.PermissionRequest request){
+                runOnUiThread(()->requestMediaPermission(tab,request));
+            }
+            @Override public void onPermissionRequestCanceled(android.webkit.PermissionRequest request){
+                runOnUiThread(()->{if(pendingSiteRequest!=null&&pendingSiteRequest.media==request)finishSiteRequest(false);});
+            }
+            @Override public void onGeolocationPermissionsShowPrompt(String origin,android.webkit.GeolocationPermissions.Callback callback){
+                runOnUiThread(()->requestLocationPermission(tab,origin,callback));
+            }
+            @Override public void onGeolocationPermissionsHidePrompt(){
+                runOnUiThread(()->{if(pendingSiteRequest!=null&&pendingSiteRequest.tab==tab&&pendingSiteRequest.location!=null)finishSiteRequest(false);});
+            }
             @Override public void onCloseWindow(WebView web){if(tab.popup&&tabs.contains(tab))closeTab(tabs.indexOf(tab));}
             @Override public void onProgressChanged(WebView web, int amount) {
                 if(current()==tab) {
@@ -357,6 +381,7 @@ public final class BrowserActivity extends Activity {
     private void showTab(int index) {
         if(index<0||index>=tabs.size()) return;
         BrowserTab before=current();
+        if(before!=null&&before!=tabs.get(index)&&pendingSiteRequest!=null)finishSiteRequest(false);
         if(before!=null) {
             if(before.web.getParent()==viewport)viewport.removeView(before.web);
             before.web.onPause();
@@ -379,6 +404,7 @@ public final class BrowserActivity extends Activity {
     private void closeTab(int index) {
         if(index<0||index>=tabs.size()) return;
         BrowserTab old=tabs.get(index);
+        if(pendingSiteRequest!=null&&pendingSiteRequest.tab==old)finishSiteRequest(false);
         viewport.removeView(old.web);
         tabs.remove(index);
         old.web.stopLoading();
@@ -413,7 +439,8 @@ public final class BrowserActivity extends Activity {
         String origin=START.equals(url)?"Home":("https".equalsIgnoreCase(scheme)?"HTTPS address":"HTTP address (not encrypted)");
         new AlertDialog.Builder(this).setTitle("Site information")
             .setMessage(origin+"\n"+(START.equals(url)?"":url+"\n")+status.getText())
-            .setPositiveButton("Shields",(d,w)->showProtectionDetails()).setNegativeButton("Close",null).show();
+            .setPositiveButton("Shields",(d,w)->showProtectionDetails())
+            .setNeutralButton("Permissions",(d,w)->showSitePermissions()).setNegativeButton("Close",null).show();
     }
     private void refreshToolbar() {
         BrowserTab tab=current();
@@ -443,6 +470,7 @@ public final class BrowserActivity extends Activity {
         if(tab==null) return;
         String url=safeAddress(value);
         if(START.equals(url)&&value!=null&&!value.trim().isEmpty()&&!START.equals(value.trim())){notice("Unsupported or invalid address");return;}
+        if(pendingSiteRequest!=null)finishSiteRequest(false);
         tab.committedUrl=null;
         tab.pageUrl=url;
         if(START.equals(url)){
@@ -459,6 +487,106 @@ public final class BrowserActivity extends Activity {
         if(keyboard!=null)keyboard.hideSoftInputFromWindow(address.getWindowToken(),0);
         refreshToolbar();persistTabs();
     }
+    private static final class SiteRequest {
+        final BrowserTab tab;
+        final String origin;
+        final android.webkit.PermissionRequest media;
+        final android.webkit.GeolocationPermissions.Callback location;
+        final String[] androidPermissions,webResources;
+        final String description;
+        SiteRequest(BrowserTab t,String o,android.webkit.PermissionRequest m,
+                android.webkit.GeolocationPermissions.Callback l,String[] p,String[] w,String d){
+            tab=t;origin=o;media=m;location=l;androidPermissions=p;webResources=w;description=d;
+        }
+    }
+    private boolean visibleSite(SiteRequest request){
+        return ControlSecurityPolicy.canRequestBrowserPermission(request.origin,verifiedActiveHttpsOrigin(),
+            current()==request.tab&&activeBrowser==this&&!isFinishing()&&!isDestroyed()&&request.tab.web.getParent()==viewport);
+    }
+    private void requestMediaPermission(BrowserTab tab,android.webkit.PermissionRequest request){
+        if(request==null)return;
+        java.util.LinkedHashSet<String> permissions=new java.util.LinkedHashSet<>();
+        java.util.LinkedHashSet<String> names=new java.util.LinkedHashSet<>();
+        String[] resources=request.getResources();
+        if(resources==null||resources.length==0){request.deny();return;}
+        for(String resource:resources){
+            if(android.webkit.PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(resource)){
+                permissions.add(android.Manifest.permission.RECORD_AUDIO);names.add("microphone");
+            }else if(android.webkit.PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(resource)){
+                permissions.add(android.Manifest.permission.CAMERA);names.add("camera");
+            }else{request.deny();return;}
+        }
+        if(request.getOrigin()==null){request.deny();return;}
+        beginSiteRequest(new SiteRequest(tab,request.getOrigin().toString(),request,null,
+            permissions.toArray(new String[0]),resources.clone(),String.join(" and ",names)));
+    }
+    private void requestLocationPermission(BrowserTab tab,String origin,android.webkit.GeolocationPermissions.Callback callback){
+        if(callback==null)return;
+        beginSiteRequest(new SiteRequest(tab,origin,null,callback,new String[]{
+            android.Manifest.permission.ACCESS_COARSE_LOCATION,android.Manifest.permission.ACCESS_FINE_LOCATION},new String[0],"location"));
+    }
+    private boolean androidAllows(SiteRequest request){
+        if(request.location!=null)return ControlSecurityPolicy.browserPermissionGranted(this,android.Manifest.permission.ACCESS_COARSE_LOCATION)||
+            ControlSecurityPolicy.browserPermissionGranted(this,android.Manifest.permission.ACCESS_FINE_LOCATION);
+        for(String permission:request.androidPermissions)
+            if(!ControlSecurityPolicy.browserPermissionGranted(this,permission))return false;
+        return true;
+    }
+    private void answerSiteRequest(SiteRequest request,boolean allowed){
+        try{
+            if(request.media!=null){
+                if(allowed)request.media.grant(request.webResources);else request.media.deny();
+            }else if(request.location!=null)request.location.invoke(request.origin,allowed,false);
+            if(allowed)request.tab.siteGrants.add(request.description);
+        }catch(Exception invalid){notice("Site permission request expired");}
+    }
+    private void beginSiteRequest(SiteRequest request){
+        // Never allow a hidden tab, cross-origin frame, insecure page or a
+        // second request to take over an already visible consent dialog.
+        if(pendingSiteRequest!=null||androidPermissionInFlight!=null||!hasWindowFocus()||!visibleSite(request)){answerSiteRequest(request,false);return;}
+        String display;
+        try{display=ControlPasswordVault.exactOrigin(request.origin);}catch(Exception invalid){answerSiteRequest(request,false);return;}
+        pendingSiteRequest=request;
+        siteRequestDialog=new AlertDialog.Builder(this).setTitle("Site permission")
+            .setMessage(display+" requests access to your "+request.description+".\n\nAllow for this page only?")
+            .setPositiveButton("Allow once",(d,w)->{
+                if(pendingSiteRequest!=request||!visibleSite(request)){finishSiteRequest(false);return;}
+                if(androidAllows(request)){finishSiteRequest(true);return;}
+                androidPermissionInFlight=request;
+                try{requestPermissions(request.androidPermissions,SITE_PERMISSION_CODE);}
+                catch(Exception denied){androidPermissionInFlight=null;finishSiteRequest(false);}
+            }).setNegativeButton("Deny",(d,w)->finishSiteRequest(false))
+            .setOnCancelListener(d->finishSiteRequest(false)).create();
+        siteRequestDialog.show();
+    }
+    private void finishSiteRequest(boolean grant){
+        SiteRequest request=pendingSiteRequest;pendingSiteRequest=null;
+        AlertDialog dialog=siteRequestDialog;siteRequestDialog=null;
+        if(dialog!=null&&dialog.isShowing())dialog.dismiss();
+        if(request!=null)answerSiteRequest(request,grant&&visibleSite(request)&&androidAllows(request));
+    }
+    @Override public void onRequestPermissionsResult(int code,String[] permissions,int[] results){
+        super.onRequestPermissionsResult(code,permissions,results);
+        if(code==SITE_PERMISSION_CODE){
+            SiteRequest completed=androidPermissionInFlight;androidPermissionInFlight=null;
+            if(completed!=null&&pendingSiteRequest==completed)finishSiteRequest(true);
+        }
+    }
+    private void showSitePermissions(){
+        BrowserTab tab=current();String origin=verifiedActiveHttpsOrigin();
+        String grants=tab==null||tab.siteGrants.isEmpty()?"None granted on this page":String.join(", ",tab.siteGrants);
+        String message=(origin==null?"No verified HTTPS site":origin)+"\n\nPage access: "+grants+
+            "\nAndroid microphone: "+(ControlSecurityPolicy.browserPermissionGranted(this,android.Manifest.permission.RECORD_AUDIO)?"allowed":"not granted")+
+            "\nAndroid camera: "+(ControlSecurityPolicy.browserPermissionGranted(this,android.Manifest.permission.CAMERA)?"allowed":"not granted")+
+            "\nAndroid location: "+((ControlSecurityPolicy.browserPermissionGranted(this,android.Manifest.permission.ACCESS_COARSE_LOCATION)||ControlSecurityPolicy.browserPermissionGranted(this,android.Manifest.permission.ACCESS_FINE_LOCATION))?"allowed":"not granted")+
+            "\n\nWebsite access is requested for each page. Closing a site destroys its WebView and ends its access.";
+        AlertDialog.Builder builder=new AlertDialog.Builder(this).setTitle("Site permissions").setMessage(message)
+            .setNeutralButton("Android settings",(d,w)->startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:"+getPackageName()))))
+            .setNegativeButton("Close",null);
+        if(tab!=null&&!START.equals(tab.pageUrl))builder.setPositiveButton("Close site",(d,w)->{if(tabs.contains(tab))closeTab(tabs.indexOf(tab));});
+        builder.show();
+    }
+
     private void confirmDownload(String url, String agent, String disposition, String mime, long length) {
         Uri uri;
         try {
@@ -726,6 +854,7 @@ public final class BrowserActivity extends Activity {
     private void homeSection(LinearLayout body,String heading,String key,int limit){
         LinearLayout bar=DesignSystem.horizontal(this);bar.setPadding(0,dp(20),0,dp(4));
         TextView label=label(heading,17,DesignSystem.TEXT,true);bar.addView(label,new LinearLayout.LayoutParams(0,-2,1));
+        if(key.equals("bookmarks"))bar.addView(control("Add",this::addHomeBookmark));
         bar.addView(control("View all",()->showEntryList(key,heading)));add(body,bar);
         try{
             JSONArray entries=new JSONArray(browserPrefs.getString(key,"[]"));
@@ -791,22 +920,37 @@ public final class BrowserActivity extends Activity {
             browserPrefs.edit().putString("history",now.toString()).apply();
         }catch(Exception ignored){}
     }
+    private void addHomeBookmark(){
+        LinearLayout fields=DesignSystem.vertical(this);fields.setPadding(dp(20),dp(8),dp(20),0);
+        EditText name=new EditText(this);name.setSingleLine(true);name.setHint("Name (optional)");add(fields,name);
+        EditText link=new EditText(this);link.setSingleLine(true);link.setHint("https://example.com");link.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_VARIATION_URI);add(fields,link);
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Add shortcut").setView(fields).setPositiveButton("Save",null).setNegativeButton("Cancel",null).create();
+        dialog.setOnShowListener(v->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(w->{
+            String raw=link.getText().toString().trim();if(!raw.contains("://"))raw="https://"+raw;
+            String url=safeSessionUrl(raw);if(url.equals(START)){link.setError("Enter a valid website address");return;}
+            String title=name.getText().toString().trim();if(title.isEmpty())title=Uri.parse(url).getHost();
+            if(saveBookmark(url,title)){dialog.dismiss();showTab(active);}
+        }));dialog.show();
+    }
     private void bookmarkCurrent(){
         BrowserTab tab=current();
         if(tab==null)return;
-        String url=safeSessionUrl(tab.web.getUrl());
-        if(url.equals(START))return;
+        saveBookmark(tab.web.getUrl(),tab.title);
+    }
+    private boolean saveBookmark(String raw,String title){
+        String url=safeSessionUrl(raw);
+        if(url.equals(START))return false;
         try{
             JSONArray previous=new JSONArray(browserPrefs.getString("bookmarks","[]"));
             JSONArray next=new JSONArray();
-            next.put(new JSONObject().put("url",url).put("title",tab.title));
+            next.put(new JSONObject().put("url",url).put("title",title));
             for(int i=0;i<previous.length()&&next.length()<100;i++){
                 JSONObject e=previous.optJSONObject(i);
                 if(e!=null&&!url.equals(e.optString("url")))next.put(e);
             }
             browserPrefs.edit().putString("bookmarks",next.toString()).apply();
-            notice("Bookmark saved");
-        }catch(Exception error){notice("Unable to save bookmark");}
+            notice("Bookmark saved");return true;
+        }catch(Exception error){notice("Unable to save bookmark");return false;}
     }
     private void showSavedPages(){
         String[] choices={"Open bookmarks","Open history","Bookmark this page",
@@ -996,6 +1140,7 @@ public final class BrowserActivity extends Activity {
         activeBrowser=this;
     }
     @Override protected void onStop() {
+        finishSiteRequest(false);
         if(activeBrowser==this)activeBrowser=null;
         persistTabs();
         CookieManager.getInstance().flush();
@@ -1009,6 +1154,7 @@ public final class BrowserActivity extends Activity {
         out.putInt("current",active);
     }
     @Override protected void onDestroy() {
+        finishSiteRequest(false);
         for(BrowserTab tab:tabs) {
             if(tab.web.getParent()!=null)
                 ((android.view.ViewGroup)tab.web.getParent()).removeView(tab.web);
@@ -1026,6 +1172,7 @@ public final class BrowserActivity extends Activity {
         String title="New tab";
         final String mobileUserAgent;
         boolean desktop,popup;
+        final java.util.Set<String> siteGrants=new java.util.LinkedHashSet<>();
         String committedUrl;
         BrowserTab(WebView view){web=view;mobileUserAgent=view.getSettings().getUserAgentString();}
     }

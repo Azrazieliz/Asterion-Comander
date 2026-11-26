@@ -43,6 +43,13 @@ final class BrowserNavigationPolicy {
     static boolean allowPopup(boolean gesture,boolean foreground,boolean hasRoom){
         return gesture&&foreground&&hasRoom;
     }
+    static boolean sameHttpsOrigin(String requested,String visible){
+        if(!isWeb(requested)||!isWeb(visible))return false;
+        URI a=URI.create(requested),b=URI.create(visible);
+        return "https".equalsIgnoreCase(a.getScheme())&&"https".equalsIgnoreCase(b.getScheme())&&
+            a.getHost().equalsIgnoreCase(b.getHost())&&
+            (a.getPort()==-1?443:a.getPort())==(b.getPort()==-1?443:b.getPort());
+    }
     static boolean sameDocument(String committed,String current){
         return isWeb(committed)&&isWeb(current)&&committed.equals(current);
     }

@@ -31,6 +31,15 @@ public final class BrowserNavigationPolicyTest {
         equal(false,BrowserNavigationPolicy.sameDocument("https://example.com/",home));
         equal(false,BrowserNavigationPolicy.sameDocument(home,home));
         equal(false,BrowserNavigationPolicy.sameDocument(null,null));
+        equal(true,BrowserNavigationPolicy.sameHttpsOrigin("https://example.com","https://EXAMPLE.com:443/path"));
+        equal(true,BrowserNavigationPolicy.sameHttpsOrigin("https://example.com:8443","https://example.com:8443/a"));
+        equal(false,BrowserNavigationPolicy.sameHttpsOrigin("https://example.com:8443","https://example.com"));
+        equal(false,BrowserNavigationPolicy.sameHttpsOrigin("https://example.com.evil.test","https://example.com"));
+        equal(false,BrowserNavigationPolicy.sameHttpsOrigin("https://sub.example.com","https://example.com"));
+        equal(false,BrowserNavigationPolicy.sameHttpsOrigin("http://example.com","https://example.com"));
+        equal(false,BrowserNavigationPolicy.sameHttpsOrigin("https://user@example.com","https://example.com"));
+        equal(false,BrowserNavigationPolicy.sameHttpsOrigin(null,"https://example.com"));
+        equal(false,BrowserNavigationPolicy.sameHttpsOrigin("https://example.com",home));
         System.out.println("BrowserNavigationPolicy: "+assertions+" assertions passed");
     }
 }
