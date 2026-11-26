@@ -285,6 +285,11 @@ public final class BrowserActivity extends Activity {
         tab.pageUrl=url;
         view.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView web, WebResourceRequest request) {
+                if(TorAddressPolicy.onionHost(request.getUrl().getHost())){
+                    if(request.isForMainFrame()&&request.hasGesture()&&current()==tab)
+                        runOnUiThread(()->openTor(request.getUrl().toString()));
+                    return true;
+                }
                 if(!BrowserNavigationPolicy.isWeb(request.getUrl().toString()))return true;
                 // Prevent automatic advertising/popunder navigation, never all
                 // cross-origin redirects (legitimate OAuth would be broken).
@@ -297,6 +302,8 @@ public final class BrowserActivity extends Activity {
             }
             @Override public WebResourceResponse shouldInterceptRequest(
                     WebView web,WebResourceRequest request) {
+                if(TorAddressPolicy.onionHost(request.getUrl().getHost()))
+                    return new WebResourceResponse("text/plain","UTF-8",403,"Blocked",java.util.Collections.emptyMap(),new java.io.ByteArrayInputStream(new byte[0]));
                 WebResourceResponse denied=protection.intercept(request,tab.pageUrl);
                 if(denied!=null)tab.blocked.incrementAndGet();
                 return denied;
@@ -481,7 +488,16 @@ public final class BrowserActivity extends Activity {
             }catch(Exception ignored){status.setText("Browser");}
         }
     }
+    private void openTor(String value){
+        String url=TorAddressPolicy.resolve(value);
+        if(value!=null&&url==null){notice("Invalid v3 onion address; not sent to search");return;}
+        new AlertDialog.Builder(this).setTitle("Open isolated Tor mode?")
+            .setMessage("Starts the embedded Tor runtime with separate browsing data. The exit verification contacts Tor Project. JavaScript and downloads are restricted; this is not the official Tor Browser or a guarantee of anonymity.")
+            .setPositiveButton("Open Tor",(d,w)->{Intent intent=new Intent(this,TorActivity.class);if(url!=null)intent.putExtra("tor_url",url);startActivity(intent);})
+            .setNegativeButton("Cancel",null).show();
+    }
     private void navigate(String value) {
+        if(TorAddressPolicy.looksOnion(value)){openTor(value);return;}
         BrowserTab tab=current();
         if(tab==null) return;
         String url=safeAddress(value);
@@ -798,7 +814,7 @@ public final class BrowserActivity extends Activity {
             "Home","Search engine • "+providerName(),
             "Shields and trackers","Encrypted vault",
             "Bookmarks and history","Extract page evidence",
-            "Android downloads","Desktop site","Asterion assistant","New private tab"};
+            "Android downloads","Desktop site","Asterion assistant","New private tab","Tor / onion mode"};
         new AlertDialog.Builder(this).setTitle("Asterion Browser")
             .setItems(actions,(d,choice)->{
                 switch(choice){
@@ -824,6 +840,7 @@ public final class BrowserActivity extends Activity {
                     }
                     case 8:startActivity(new Intent(this,AssistantActivity.class));break;
                     case 9:newPrivateTab();break;
+                    case 10:openTor(null);break;
                 }
             }).setNegativeButton("Close",null).show();
     }
