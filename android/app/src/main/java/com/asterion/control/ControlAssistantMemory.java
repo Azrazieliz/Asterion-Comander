@@ -32,7 +32,7 @@ final class ControlAssistantMemory {
     private static final Object LOCK=new Object();
     private static final String KEY="asterion_control_ai_memory_aes_20261126";
     private static final String DB="asterion_control_ai_memories_v1.db";
-    private static final int MAX_RECORDS=512;
+    private static final int MAX_RECORDS=4096;
     private ControlAssistantMemory(){}
 
     private static final class Database extends SQLiteOpenHelper {
