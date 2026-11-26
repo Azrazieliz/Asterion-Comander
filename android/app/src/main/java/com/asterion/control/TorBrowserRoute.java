@@ -32,7 +32,7 @@ final class TorBrowserRoute {
     private final Consumer<String> changed;
     private TorService service;
     private WebView probe;
-    private boolean bound,closed,checking;
+    private boolean bound,closed,checking,failed;
     private volatile boolean ready;
     private long started;
     private String state="Connecting to Tor";
@@ -62,7 +62,7 @@ final class TorBrowserRoute {
         }catch(RuntimeException|LinkageError failure){fail("Tor native runtime unavailable");}
     }
     private void poll(){
-        if(closed||checking||service==null)return;
+        if(closed||failed||checking||service==null)return;
         final TorService current=service;
         io.execute(()->{
             int port=-1;
@@ -70,7 +70,7 @@ final class TorBrowserRoute {
             catch(RuntimeException ignored){}
             final int observed=port;
             ui.post(()->{
-                if(closed||service!=current||checking)return;
+                if(closed||failed||service!=current||checking)return;
                 if(observed>0&&observed<=65535)configure(observed);
                 else if(android.os.SystemClock.elapsedRealtime()-started<120000)ui.postDelayed(this::poll,1000);
                 else fail("Tor circuit was not established");
@@ -84,7 +84,7 @@ final class TorBrowserRoute {
                 .addProxyRule("socks5://127.0.0.1:"+port)
                 .removeImplicitRules().build();
             ProxyController.getInstance().setProxyOverride(config,context.getMainExecutor(),()->{
-                if(!closed&&checking)verifyWebView();
+                if(!closed&&!failed&&checking)verifyWebView();
             });
         }catch(RuntimeException e){fail("Tor proxy configuration failed");}
     }
@@ -128,7 +128,7 @@ final class TorBrowserRoute {
         });
     }
     private void disposeProbe(){if(probe!=null){WebView old=probe;probe=null;old.stopLoading();old.destroy();}}
-    private void fail(String why){if(closed)return;ready=false;checking=false;disposeProbe();state(why);}
+    private void fail(String why){if(closed||failed)return;failed=true;ready=false;checking=false;disposeProbe();state(why);}
     void close(){
         closed=true;ready=false;ui.removeCallbacksAndMessages(null);disposeProbe();
         if(bound){try{context.unbindService(connection);}catch(Exception ignored){}bound=false;}
