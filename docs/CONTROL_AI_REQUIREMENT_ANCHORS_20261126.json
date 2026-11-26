@@ -1,0 +1,327 @@
+{
+  "schema_version": "asterion.control.requirement-anchors/1",
+  "owner_directive_date": "2026-11-26",
+  "status": "owner_source_index_not_deployment",
+  "origin": "owner November 26 directive plus immutable previously approved V3–V6 and signed partner documents",
+  "files": {
+    "owner": {
+      "path": "docs/CONTROL_AI_OWNER_DIRECTIVE_PRIORITY_20261126.md",
+      "blob_sha": "78718faaa9d82f615e08d793f74197b19f270e7a"
+    },
+    "v6": {
+      "path": "docs/CONTROL_V6_OWNER_CORRECTIONS_20261119.md",
+      "blob_sha": "a8c6670bbaadcb674e29a9f11904e684c4fee257"
+    },
+    "roadmap": {
+      "path": "docs/CONTROL_V6_FULL_IMPLEMENTATION_ROADMAP_20261119.md",
+      "blob_sha": "e48023cea0ce9fba623a3ab70217f7579e900838"
+    },
+    "native": {
+      "path": "docs/CONTROL_NATIVE_AI_RECONSTRUCTION_20261126.md",
+      "blob_sha": "f8d80c396307ff5611c53fff0776ed6ba31f61bc"
+    },
+    "bridge": {
+      "path": "docs/CONTROL_CROSS_APP_API_V1.md",
+      "blob_sha": "8cbb97470258d835219f2c7a3634127c67e016fd"
+    },
+    "v5": {
+      "path": "docs/CONTROL_V5_USAGE_GEO_BROWSER_REUSE_12000_EVAL_20261115.md",
+      "blob_sha": "335f3e32230d7d0a16e3dd3b54f997eb48aa8887"
+    },
+    "v3": {
+      "path": "docs/CONTROL_V3_COMPLETE_DESIGN_NO_CODE_20261115.md",
+      "blob_sha": "9c40ee6df635e10d3a8a7e106ce78dde13a63bc9"
+    }
+  },
+  "records": [
+    {
+      "id": "OAI-01",
+      "file": "owner",
+      "start_match": "## OAI-01 ",
+      "end_before": "## OAI-02 ",
+      "topic": "owner.ai.01",
+      "kind": "requirement",
+      "importance": "mandatory",
+      "status": "active",
+      "supersedes": []
+    },
+    {
+      "id": "OAI-02",
+      "file": "owner",
+      "start_match": "## OAI-02 ",
+      "end_before": "## OAI-03 ",
+      "topic": "owner.ai.02",
+      "kind": "requirement",
+      "importance": "mandatory",
+      "status": "active",
+      "supersedes": []
+    },
+    {
+      "id": "OAI-03",
+      "file": "owner",
+      "start_match": "## OAI-03 ",
+      "end_before": "## OAI-04 ",
+      "topic": "owner.ai.03",
+      "kind": "requirement",
+      "importance": "mandatory",
+      "status": "active",
+      "supersedes": []
+    },
+    {
+      "id": "OAI-04",
+      "file": "owner",
+      "start_match": "## OAI-04 ",
+      "end_before": "## OAI-05 ",
+      "topic": "owner.ai.04",
+      "kind": "requirement",
+      "importance": "mandatory",
+      "status": "active",
+      "supersedes": []
+    },
+    {
+      "id": "OAI-05",
+      "file": "owner",
+      "start_match": "## OAI-05 ",
+      "end_before": "## OAI-06 ",
+      "topic": "owner.ai.05",
+      "kind": "requirement",
+      "importance": "mandatory",
+      "status": "active",
+      "supersedes": []
+    },
+    {
+      "id": "OAI-06",
+      "file": "owner",
+      "start_match": "## OAI-06 ",
+      "end_before": "## OAI-07 ",
+      "topic": "owner.ai.06",
+      "kind": "requirement",
+      "importance": "mandatory",
+      "status": "active",
+      "supersedes": []
+    },
+    {
+      "id": "OAI-07",
+      "file": "owner",
+      "start_match": "## OAI-07 ",
+      "end_before": "## OAI-08 ",
+      "topic": "owner.ai.07",
+      "kind": "requirement",
+      "importance": "mandatory",
+      "status": "active",
+      "supersedes": []
+    },
+    {
+      "id": "OAI-08",
+      "file": "owner",
+      "start_match": "## OAI-08 ",
+      "end_before": "## OAI-09 ",
+      "topic": "owner.ai.08",
+      "kind": "requirement",
+      "importance": "mandatory",
+      "status": "active",
+      "supersedes": []
+    },
+    {
+      "id": "OAI-09",
+      "file": "owner",
+      "start_match": "## OAI-09 ",
+      "end_before": "## OAI-10 ",
+      "topic": "owner.ai.09",
+      "kind": "requirement",
+      "importance": "mandatory",
+      "status": "active",
+      "supersedes": []
+    },
+    {
+      "id": "OAI-10",
+      "file": "owner",
+      "start_match": "## OAI-10 ",
+      "end_before": "## OAI-11 ",
+      "topic": "owner.ai.10",
+      "kind": "requirement",
+      "importance": "mandatory",
+      "status": "active",
+      "supersedes": []
+    },
+    {
+      "id": "OAI-11",
+      "file": "owner",
+      "start_match": "## OAI-11 ",
+      "end_before": "## OAI-12 ",
+      "topic": "owner.ai.11",
+      "kind": "requirement",
+      "importance": "mandatory",
+      "status": "active",
+      "supersedes": []
+    },
+    {
+      "id": "OAI-12",
+      "file": "owner",
+      "start_match": "## OAI-12 ",
+      "end_before": "## OAI-13 ",
+      "topic": "owner.ai.12",
+      "kind": "requirement",
+      "importance": "mandatory",
+      "status": "active",
+      "supersedes": []
+    },
+    {
+      "id": "OAI-13",
+      "file": "owner",
+      "start_match": "## OAI-13 ",
+      "end_before": "## OAI-14 ",
+      "topic": "owner.ai.13",
+      "kind": "requirement",
+      "importance": "mandatory",
+      "status": "active",
+      "supersedes": []
+    },
+    {
+      "id": "OAI-14",
+      "file": "owner",
+      "start_match": "## OAI-14 ",
+      "end_before": "## OAI-15 ",
+      "topic": "owner.ai.14",
+      "kind": "requirement",
+      "importance": "mandatory",
+      "status": "active",
+      "supersedes": []
+    },
+    {
+      "id": "OAI-15",
+      "file": "owner",
+      "start_match": "## OAI-15 ",
+      "end_before": null,
+      "topic": "owner.ai.15",
+      "kind": "requirement",
+      "importance": "mandatory",
+      "status": "active",
+      "supersedes": []
+    },
+    {
+      "id": "V6-NON-DUPLICATION",
+      "file": "v6",
+      "start_match": "**HARD NO-REDUNDANCY CONTRACT:**",
+      "topic": "control.engine.ownership",
+      "kind": "constraint",
+      "status": "active",
+      "importance": "mandatory",
+      "supersedes": []
+    },
+    {
+      "id": "V6-BROWSER-APPROVALS",
+      "file": "v6",
+      "start_match": "**Browser proposal approvals:**",
+      "topic": "browser.approved.options",
+      "kind": "decision",
+      "status": "active",
+      "importance": "mandatory",
+      "supersedes": []
+    },
+    {
+      "id": "V6-PASSWORD-VAULT",
+      "file": "v6",
+      "start_match": "**P0 password manager APPROVED:**",
+      "topic": "credential.authority",
+      "kind": "decision",
+      "status": "active",
+      "importance": "mandatory",
+      "supersedes": []
+    },
+    {
+      "id": "V6-PRESERVE-APP",
+      "file": "roadmap",
+      "start_match": "**Non-negotiable preservation:**",
+      "topic": "release.original.identity",
+      "kind": "constraint",
+      "status": "active",
+      "importance": "mandatory",
+      "supersedes": []
+    },
+    {
+      "id": "V6-RELEASE-ACCEPTANCE",
+      "file": "roadmap",
+      "start_match": "**Finish-to-end requirement:**",
+      "topic": "release.acceptance",
+      "kind": "requirement",
+      "status": "active",
+      "importance": "mandatory",
+      "supersedes": []
+    },
+    {
+      "id": "AI-MODEL-CAPABILITY",
+      "file": "native",
+      "start_match": "M0 baseline; M1 resilience/",
+      "topic": "native.ai.maturity",
+      "kind": "requirement",
+      "status": "active",
+      "importance": "mandatory",
+      "supersedes": []
+    },
+    {
+      "id": "AI-MATURITY",
+      "file": "native",
+      "start_match": "Before Dec 1: prioritize",
+      "topic": "model.lab.maturity",
+      "kind": "requirement",
+      "status": "active",
+      "importance": "mandatory",
+      "supersedes": []
+    },
+    {
+      "id": "BRIDGE-CERT-PINNING",
+      "file": "bridge",
+      "start_match": "The partner app must be visible",
+      "topic": "partner.authority",
+      "kind": "constraint",
+      "status": "active",
+      "importance": "mandatory",
+      "supersedes": []
+    },
+    {
+      "id": "V5-HOLDOUT-SUPERSESSION",
+      "file": "v5",
+      "start_match": "> **LATEST OWNER OVERRIDE",
+      "topic": "eval.holdout.supersession",
+      "kind": "decision",
+      "status": "active",
+      "importance": "mandatory",
+      "supersedes": []
+    },
+    {
+      "id": "V3-OLDER-STATUS",
+      "file": "v3",
+      "start_match": "> **SUPERSEDED WHERE CONFLICTING",
+      "topic": "historical.v3.supersession",
+      "kind": "decision",
+      "status": "active",
+      "importance": "mandatory",
+      "supersedes": []
+    }
+  ],
+  "required_topics": [
+    "owner.ai.01",
+    "owner.ai.02",
+    "owner.ai.03",
+    "owner.ai.04",
+    "owner.ai.05",
+    "owner.ai.06",
+    "owner.ai.07",
+    "owner.ai.08",
+    "owner.ai.09",
+    "owner.ai.10",
+    "owner.ai.11",
+    "owner.ai.12",
+    "owner.ai.13",
+    "owner.ai.14",
+    "owner.ai.15",
+    "control.engine.ownership",
+    "release.original.identity",
+    "release.acceptance",
+    "credential.authority",
+    "model.lab.maturity",
+    "partner.authority"
+  ],
+  "evidence_note": "SHA-1 fields are immutable Git blob identifiers; SHA-256 full bytes and passage hashes generated and verified by original context_requirements. No semantic interpretation inferred."
+}
