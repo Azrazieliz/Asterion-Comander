@@ -19,4 +19,6 @@ def test_executable_split_utf8_reasoning_and_conversation_regressions(tmp_path):
                    check=True,capture_output=True,text=True)
     result=subprocess.run([runtime,'-cp',str(tmp_path),'com.asterion.control.AssistantWorkspaceTest'],
                           check=True,capture_output=True,text=True,timeout=30)
-    assert '523 assistant output and conversation behavior assertions passed' in result.stdout
+    import re
+    match=re.search(r'(\d+) assistant output and conversation behavior assertions passed', result.stdout)
+    assert match and int(match.group(1))>=523

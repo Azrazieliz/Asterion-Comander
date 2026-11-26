@@ -16,7 +16,7 @@ def test_auth_security():
     with TestClient(app) as c:
         assert c.get('/api/v1/health').status_code == 401
         assert c.get('/api/v1/files', headers={'Authorization':'Bearer wrong'}).status_code == 401
-        assert c.post('/mcp',headers={'Accept':'application/json, text/event-stream'},json={}).status_code == 401
+        assert c.post('/mcp',headers={'Accept':'application/json, text/event-stream'},json={}).status_code == 404
         assert c.get('/api/v1/health',headers=AUTH).json()['app']=='Asterion Control'
 
 
@@ -68,22 +68,11 @@ def test_system_processes():
         assert c.post('/api/v1/commands',headers=AUTH,json={'command':'echo testing'}).status_code==403
 
 
-def test_mcp_protocol_and_security():
+def test_retired_public_mcp_is_unavailable_even_with_owner_token():
     with TestClient(app) as c:
-        init=c.post('/mcp',headers=MCP,json={'jsonrpc':'2.0','id':1,'method':'initialize','params':{}})
-        assert init.status_code==200
-        assert init.json()['result']['capabilities']['tools']=={'listChanged':False}
-        catalog=c.post('/mcp',headers=MCP,json={'jsonrpc':'2.0','id':2,'method':'tools/list'}).json()
-        assert len(catalog['result']['tools'])>=16
-        call=c.post('/mcp',headers=MCP,json={'jsonrpc':'2.0','id':3,'method':'tools/call','params':{'name':'remote_health','arguments':{}}})
-        assert 'asterion' in call.json()['result']['content'][0]['text'].lower()
-        denied=c.post('/mcp',headers={**MCP,'Origin':'https://evil.example'},json={'jsonrpc':'2.0','id':1,'method':'tools/list'})
-        assert denied.status_code==403
-        assert c.post('/mcp',headers=AUTH,json={'jsonrpc':'2.0','id':1,'method':'tools/list'}).status_code==406
-        note=c.post('/mcp',headers=MCP,json={'jsonrpc':'2.0','method':'notifications/initialized'})
-        assert note.status_code==202
-        wrong=c.post('/mcp',headers=MCP,json={'jsonrpc':'2.0','id':5,'method':'tools/call','params':{'name':'remote_pwn','arguments':{}}})
-        assert wrong.json()['result']['isError']
+        for path in ("/mcp","/oauth/authorize","/oauth/token"):
+            for headers in ({},AUTH,MCP):
+                assert c.post(path,headers=headers,json={"jsonrpc":"2.0","id":1,"method":"tools/list"}).status_code==404
 
 
 def test_adb_devices_and_input_safe(monkeypatch):

@@ -8,7 +8,7 @@ from asterion_remote.native_phone_relay import app
 
 
 def test_no_public_tool_discovery_or_oauth_gateway():
-    routes={route.path for route in app.routes}
+    routes={getattr(route,'path',None) for route in app.routes}
     assert "/healthz" in routes
     for forbidden in ("/mcp", "/oauth/authorize", "/oauth/token",
                       "/.well-known/oauth-protected-resource/mcp",
