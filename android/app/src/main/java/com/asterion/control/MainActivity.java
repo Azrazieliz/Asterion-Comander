@@ -697,13 +697,11 @@ public final class MainActivity extends Activity {
         final boolean baseline=index==0;
         new AlertDialog.Builder(this)
           .setTitle("Owner-approved external network test")
-          .setMessage("This check contacts ipify and Cloudflare over HTTPS. "+
+          .setMessage("This check contacts ipify IPv4/IPv6 and Cloudflare over HTTPS. "+
             "Those services will see your public IP, and about 3 MiB "+
             "of test data will be downloaded. No WireGuard keys or "+
             "Asterion files are shared.\n\n"+
-            "It checks the actual egress address and short throughput "+
-            "samples, not provider country, trust, automatic rotation "+
-            "or sustained performance.")
+            "It checks the selected Android route, actual egress addresses, DNS resolution and short throughput samples. It does not certify external DNS leaks, provider trust, rotation or sustained performance.")
           .setPositiveButton("Run on this phone",(d,w)->{
             io.execute(()->{
               String report;
@@ -715,7 +713,12 @@ public final class MainActivity extends Activity {
                   .append(evidence.optString("public_ipv4","unavailable"))
                   .append("\nMeasured median short download: ")
                   .append(evidence.optDouble("median_sample_mbps",0))
-                  .append(" Mbps\n");
+                  .append(" Mbps\n")
+                  .append("Physical transport: ").append(evidence.optString("physical_transport","unknown"))
+                  .append("\nObserved public IPv6: ").append(evidence.optString("public_ipv6","").isEmpty()?"Unavailable":evidence.optString("public_ipv6"))
+                  .append("\nAndroid VPN route: ").append(evidence.optBoolean("android_vpn_route_observed")?"Observed":"No")
+                  .append("\nDefault IPv4/IPv6 routes: ").append(evidence.optBoolean("default_ipv4_route_observed")?"yes":"no").append(" / ").append(evidence.optBoolean("default_ipv6_route_observed")?"yes":"no")
+                  .append("\nSelected-network DNS resolution: ").append(evidence.optBoolean("dns_resolution_through_selected_network")?"Observed":"Unavailable").append("\n");
                 if(baseline)builder.append(
                   "\nBaseline recorded for the next 24 hours. "+
                   "Activate the configured VPN, then run step 2.");
@@ -724,7 +727,7 @@ public final class MainActivity extends Activity {
                   builder.append("\nPrevious baseline: ")
                     .append(known?
                       evidence.optString("previous_public_ipv4","unknown"):
-                      "Unavailable or older than 24 hours")
+                      "Unavailable, stale or not the same known transport")
                     .append("\nPublic-IP replacement verified: ")
                     .append(evidence.optBoolean("ip_replacement_verified",false)?
                       "YES for this measurement":"NO")
@@ -736,10 +739,9 @@ public final class MainActivity extends Activity {
                       "short_sample_within_25_percent_loss",false)?
                       "met":"not met");
                   else builder.append("cannot compare");
+                  builder.append("\nIPv6 assessment: ").append(evidence.optString("ipv6_assessment","inconclusive").replace('_',' '));
                 }
-                builder.append("\n\nJapan exit location, secure peer trust, "+
-                  "IP rotation and sustained throughput are NOT verified "+
-                  "by this measurement.");
+                builder.append("\n\nExternal DNS leakage, leak-free IPv6 routing, provider trust, exit country, IP rotation and sustained throughput are NOT certified.");
                 report=builder.toString();
               }catch(Exception error){
                 report="Live VPN measurement failed: "+
