@@ -86,3 +86,17 @@ def test_encrypted_memory_contract_and_owner_review_controls():
     assert "ControlAssistantMemory.recent" in ui
     assert "ControlAssistantMemory.forget" in ui
     assert "new AlertDialog.Builder(this)" in ui
+
+
+def test_offline_chat_turns_persist_only_after_real_generation():
+    prefs=(JAVA/"ControlAssistantPreferences.java").read_text(encoding="utf8")
+    view=(JAVA/"MainActivity.java").read_text(encoding="utf8")
+    memory=(JAVA/"ControlAssistantMemory.java").read_text(encoding="utf8")
+    assert "encrypted_local_chat_history_enabled" in prefs
+    assert "keepHistory.isChecked()" in view
+    assert "ControlAssistantPreferences.saveHistory(this)" in view
+    assert "ControlAssistantMemory.remember(this,\"General\"" in view
+    assert view.index("answer=OnDeviceLlm.generate(getApplicationContext(),prompt);") < view.index(
+        '"local_conversation_verified_generation"')
+    assert "Local history could not be saved" in view
+    assert "private static final int MAX_RECORDS=4096;" in memory
