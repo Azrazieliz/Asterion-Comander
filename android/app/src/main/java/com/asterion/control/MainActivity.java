@@ -1212,6 +1212,9 @@ public final class MainActivity extends Activity {
     gap(intelligence,9);
     button(intelligence,"Local AI behavior & reasoning","settings",false,
       this::showPhoneAiPreferences);
+    gap(intelligence,9);
+    twoActions(intelligence,"Remember","check",this::showAiRemember,
+      "Review memories","settings",this::showAiMemoryReview);
     wide(toolsBody,intelligence);
     LinearLayout advancedPanel=v();gap(advancedPanel,12);LinearLayout incidents=card();
     rowTitle(incidents,"Incident investigation",
@@ -1364,6 +1367,92 @@ public final class MainActivity extends Activity {
         }
       })
       .setNegativeButton("Cancel",null).show();
+  }
+
+  /** Explicit on-phone confirmation; no automatic ingestion of private apps. */
+  private void showAiRemember(){
+    LinearLayout form=new LinearLayout(this);
+    form.setOrientation(LinearLayout.VERTICAL);
+    form.setPadding(dp(18),dp(8),dp(18),dp(4));
+    EditText project=input("General",false,"Project or memory category");
+    form.addView(project);
+    EditText content=input("",false,"Fact or correction for local Asterion to remember");
+    content.setSingleLine(false);
+    content.setMinLines(4);
+    content.setMaxLines(7);
+    content.setInputType(InputType.TYPE_CLASS_TEXT|
+      InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+    form.addView(content);
+    new AlertDialog.Builder(this)
+      .setTitle("Save private assistant memory")
+      .setMessage("Only what you explicitly save is retained. "+
+        "Stored encrypted on this phone; never sent to ChatGPT or GitHub.")
+      .setView(form)
+      .setPositiveButton("Remember",(dialog,which)->{
+        try{
+          ControlAssistantMemory.remember(this,
+            project.getText().toString().trim(),"explicit_owner_memory",
+            content.getText().toString().trim(),true);
+          toast("Saved in encrypted local memory");
+        }catch(Exception e){
+          toast("Memory not saved: "+e.getClass().getSimpleName());
+        }
+      }).setNegativeButton("Cancel",null).show();
+  }
+
+  private void showAiMemoryReview(){
+    io.execute(()->{
+      org.json.JSONArray memories=null;
+      String error="";
+      try{memories=ControlAssistantMemory.recent(this,80);}
+      catch(Exception e){error=e.getClass().getSimpleName();}
+      final org.json.JSONArray saved=memories;
+      final String failure=error;
+      runOnUiThread(()->{
+        if(destroyed)return;
+        if(!failure.isEmpty()){
+          new AlertDialog.Builder(this).setTitle("Encrypted memory unavailable")
+            .setMessage(failure).setPositiveButton("Close",null).show();
+          return;
+        }
+        if(saved==null||saved.length()==0){
+          new AlertDialog.Builder(this).setTitle("Local assistant memory")
+            .setMessage("No owner-approved memories saved yet.")
+            .setPositiveButton("Close",null).show();return;
+        }
+        String[] descriptions=new String[saved.length()];
+        for(int i=0;i<saved.length();i++){
+          JSONObject row=saved.optJSONObject(i);
+          if(row==null){descriptions[i]="Unavailable memory";continue;}
+          String plain=row.optString("content","");
+          descriptions[i]=row.optString("project","General")+" · "+
+            (plain.length()>75?plain.substring(0,75)+"…":plain);
+        }
+        new AlertDialog.Builder(this).setTitle("Review encrypted memories")
+          .setItems(descriptions,(dialog,which)->{
+            JSONObject row=saved.optJSONObject(which);
+            if(row==null)return;
+            String id=row.optString("id","");
+            new AlertDialog.Builder(this)
+              .setTitle("Owner-saved memory")
+              .setMessage(row.optString("content",""))
+              .setPositiveButton("Forget",(d,w)->{
+                new AlertDialog.Builder(this)
+                  .setTitle("Forget this memory?")
+                  .setMessage("Deletion is permanent for this saved entry.")
+                  .setPositiveButton("Delete",(confirm,chosen)->{
+                    try{
+                      if(ControlAssistantMemory.forget(this,id,true))
+                        toast("Memory deleted");
+                      else toast("Memory no longer exists");
+                    }catch(Exception e){
+                      toast("Memory deletion failed: "+e.getClass().getSimpleName());
+                    }
+                  }).setNegativeButton("Cancel",null).show();
+              }).setNegativeButton("Close",null).show();
+          }).setNegativeButton("Close",null).show();
+      });
+    });
   }
 
   /** Phone is the AI head. No PC or cloud model endpoint is consulted. */
