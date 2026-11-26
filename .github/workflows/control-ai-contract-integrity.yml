@@ -1,0 +1,29 @@
+name: Control AI source-pinned contract reconciliation
+on:
+  push:
+    branches:
+      - work/control-ai-research-reconciliation-20261126
+    paths:
+      - 'docs/CONTROL_AI_OWNER_DIRECTIVE_PRIORITY_20261126.md'
+      - 'docs/CONTROL_AI_REQUIREMENT_ANCHORS_20261126.json'
+      - 'scripts/control_ai_requirements_snapshot.py'
+      - 'asterion_remote/context_requirements.py'
+      - 'tests/test_control_ai_requirements_snapshot.py'
+      - '.github/workflows/control-ai-contract-integrity.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source-integrity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Execute real owner-source consistency and supersession checks
+        run: |
+          python -m pip install --disable-pip-version-check pytest
+          python -m pytest -q tests/test_control_ai_requirements_snapshot.py tests/test_control_ai_context_requirements.py
+          python scripts/control_ai_requirements_snapshot.py --root .
