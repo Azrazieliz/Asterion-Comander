@@ -8,6 +8,8 @@ on:
       - 'asterion_remote/security_scanner.py'
       - 'asterion_remote/control_v2_routes.py'
       - 'asterion_remote/dev_backlog.py'
+      - 'asterion_remote/overnight_supervisor.py'
+      - 'scripts/control_ai_independent_dev.py'
       - 'asterion_remote/isolated_test_runner.py'
       - 'scripts/control_ai_autonomous_daemon.py'
       - 'tests/test_control_security_recovery.py'
