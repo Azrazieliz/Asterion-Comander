@@ -94,3 +94,49 @@ def test_robots_server_error_is_not_treated_as_allowed(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         browser.capture_public("https://site.example/")
     assert exc.value.status_code == 403
+
+
+def test_public_multicast_not_crawlable(monkeypatch):
+    monkeypatch.setattr(browser.socket, "getaddrinfo", lambda *a, **k: [
+        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("224.0.0.1", 443))])
+    with pytest.raises(HTTPException) as exc:
+        browser.validated_public_https("https://multicast.example/")
+    assert exc.value.status_code == 403
+
+
+def test_research_batch_exact_quotes_and_partial_failure(monkeypatch):
+    urls = ["https://first.example/page", "https://second.example/page",
+            "https://first.example/page#fragment", "https://third.example/page"]
+    content = {"https://first.example/page": "Evidence: Solar output rose 12 percent.",
+               "https://second.example/page": "No matching measurement here."}
+    def capture(url, text_limit):
+        if url not in content:
+            raise HTTPException(403, "Robots policy denied")
+        return {"ok": True, "source_url": url, "text": content[url],
+                "content_sha256": hashlib.sha256(content[url].encode()).hexdigest()}
+    monkeypatch.setattr(browser, "capture_public", capture)
+    report = browser.research_sources(urls, ["solar output", "SOLAR OUTPUT"], 1000)
+    assert report["requested"] == 4 and report["unique"] == 3 and report["captured"] == 2
+    assert [s["citation_id"] for s in report["sources"]] == ["S1", "S2", "S3"]
+    assert report["comparison"] == [{"term": "solar output", "matching_citations": ["S1"],
+        "captured_sources_without_match": ["S2"], "failed_sources": ["S3"]}]
+    source = report["sources"][0]
+    excerpt = source["excerpts"][0]
+    assert excerpt["quote"] == source["text"][excerpt["start"]:excerpt["end"]]
+    assert report["sources"][2]["error_code"] == 403
+
+
+def test_research_rejects_unbounded_inputs():
+    with pytest.raises(HTTPException):
+        browser.research_sources(["https://example.com/"] * 5, [])
+    with pytest.raises(HTTPException):
+        browser.research_sources(["https://example.com/"], ["x" * 121])
+    with pytest.raises(HTTPException):
+        browser.research_sources(["https://example.com/"], [""])
+
+
+def test_malformed_optional_html_attributes_do_not_break_extraction():
+    parser = browser._Extract("https://example.com/")
+    parser.feed('<meta property><title>Page</title><a href title>Link</a>')
+    assert parser.title == ["Page"]
+    assert parser.links == []
