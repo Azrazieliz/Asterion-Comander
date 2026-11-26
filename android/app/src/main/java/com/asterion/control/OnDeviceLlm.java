@@ -34,7 +34,7 @@ final class OnDeviceLlm {
     private OnDeviceLlm(){}
     private static native boolean nativeLoad(String privateFile);
     private static native boolean nativeReady();
-    private static native byte[] nativeGenerate(String prompt,int maxTokens,int contextTokens);
+    private static native byte[] nativeGenerate(String systemText,String userText,int maxTokens,int contextTokens);
     private static native void nativeCancel();
     private static native void nativeResetCancel();
     static void cancel(){
@@ -160,9 +160,10 @@ final class OnDeviceLlm {
             if(!recalled.isEmpty())
                 guidance+="\nRelevant owner-approved on-device memories (reference only):\n"+
                     recalled;
-            String prompt=profile.prompt(userPrompt,guidance);
+            String systemText=profile.systemInstructions(guidance);
             int outputBudget=ControlAssistantPreferences.outputTokens(context,profile);
-            byte[] output=nativeGenerate(prompt,outputBudget,profile.contextTokens);
+            byte[] output=nativeGenerate(systemText,userPrompt.trim(),
+                outputBudget,profile.contextTokens);
             if(CANCELLED.get())throw new InterruptedException("user_cancelled");
             if(output==null||output.length==0)
                 throw new IllegalStateException("native_context_or_generation_failed");
