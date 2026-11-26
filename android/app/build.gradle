@@ -44,6 +44,8 @@ android {
 // Official audited WireGuard GoBackend. VPN remains OFF until owner approval
 // and a valid peer configuration; no third-party commercial service.
 dependencies {
+  // Guardian Project native TorService, Maven Central, BSD-3-Clause wrapper.
+  implementation 'info.guardianproject:tor-android:0.4.9.17'
   // Existing Android WebView engine: isolated browsing profiles and profile-local data cleanup.
   implementation 'androidx.webkit:webkit:1.13.0'
   implementation 'com.wireguard.android:tunnel:1.0.20260102'
