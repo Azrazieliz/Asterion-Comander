@@ -1,3 +1,15 @@
+# 2026-11-26 — Non-AI P0 Browser and P−1 relay reconstruction
+
+**Source integration, not final app acceptance.** Original release hold, canonical AI ownership and V3–V6/Nexus scope remain binding. Three isolated non-AI PRs merged into this branch: [#24](https://github.com/Azrazieliz/Asterion-Comander/pull/24) atomic filter recovery (`3adc78de`), [#25](https://github.com/Azrazieliz/Asterion-Comander/pull/25) Browser native UI/navigation/session/download repair (`23935f58`), [#26](https://github.com/Azrazieliz/Asterion-Comander/pull/26) exclusive relay worker lock and duplicate-receipt dispatch guard (`b0a91f47`). No changes to the AI specialist's AssistantActivity/model runtime/training, original signer, pairing, installed app or production worker.
+
+Browser now has system/IME inset-aware compact controls, accessible tab switcher and real bookmark/history home, original WebView engine, user-gesture popup tabs, sanitized session restoration, desktop UA, existing assistant entry and Android download progress. [CI 45833465180](https://github.com/Azrazieliz/Asterion-Comander/actions/runs/45833465180): 36 navigation, 21 filter-cache, 25 cosmetic assertions and Android Java compile passed. [Windows CI 45833656849](https://github.com/Azrazieliz/Asterion-Comander/actions/runs/45833656849): 39 tests passed, including three abrupt isolated subprocess exits with OS lock reacquisition; four PowerShell AST checks. Production worker update and live fault recovery not accepted.
+
+Fresh original authenticated bridge receipts `control-nonai-20261126-browser-pc-health-01` and `control-nonai-20261126-browser-phone-status-01`: both complete/ok; Samsung SM-S948B Android17 Control0.9.38, native WSS Wi-Fi connected, screen capture inactive, battery17% unplugged. No new APK produced or installed.
+
+B09 follow-up [PR #27](https://github.com/Azrazieliz/Asterion-Comander/pull/27), isolated source at `529e046f`: exact visible HTTPS origin, owner one-time camera/microphone/location prompt + Android runtime consent, stale callback denial, permission status and close-site revocation, editable home shortcuts. CI pending at this checkpoint. No persistent site grant store added. Final visual/interaction recordings, actual site permission outcomes, full filtering/private sessions, R05/B06, live fault/cellular recovery, cross-app, full app UI, VPN/Tor, technical tooling, automation, security and voice acceptance remain open. No milestones marked complete solely on compile/test results.
+
+---
+
 # 2026-11-26 — P0 follow-up: CI green, production defects reproduced, diagnostic adapter fails unseen identity
 
 CI **45831474974** passed on `812bd68d` (37 tests, Android Java/resources, native ABI). Two actual original-WSS requests on installed0.9.38 reproduced false application identity and raw thinking delimiters. The adult factual variant returned an answer; its factual accuracy is not accepted and the originally reported refusal is not cleared.
