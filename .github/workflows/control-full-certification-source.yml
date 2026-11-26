@@ -55,7 +55,7 @@ jobs:
           S=android/app/src/main/java/com/asterion/control
           T=tests/java/com/asterion/control
           C=$(mktemp -d)
-          javac -encoding UTF-8 -d "$C" "$S"/{BrowserCosmeticFilters,BrowserDownloadContract,BrowserFilterCacheStore,BrowserNavigationPolicy,TorAddressPolicy,TorRoutePolicy,VoiceReplyPolicy,VoiceWakeWords,VpnEvidencePolicy,VpnRouteScope,AssistantWorkspace}.java "$T"/*.java
+          javac -encoding UTF-8 -d "$C" "$S"/{BrowserCosmeticFilters,BrowserDownloadContract,BrowserFilterCacheStore,BrowserNavigationPolicy,TorAddressPolicy,TorRoutePolicy,VoiceReplyPolicy,VoiceWakeWords,VpnEvidencePolicy,VpnRouteScope,AssistantOutput,AssistantConversation}.java "$T"/*.java
           for test in "$T"/*Test.java; do
             name=$(basename "$test" .java)
             java -cp "$C" com.asterion.control."$name"
