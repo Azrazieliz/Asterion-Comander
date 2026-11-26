@@ -5,7 +5,7 @@ import pytest
 from asterion_remote.context_requirements import make_record,reconcile
 
 def repo(tmp_path):
-    root=tmp_path/"canon";root.mkdir()
+    root=tmp_path/"canon";root.mkdir(parents=True)
     docs=root/"docs";docs.mkdir()
     (docs/"v6.md").write_text(
         "V6 approval: preserve Control, Nexus and signed WSS.\n"
@@ -71,5 +71,5 @@ def test_reject_external_symlinks_and_no_unverified_source(tmp_path):
     outside=tmp_path/"external.md"
     outside.write_text("secret unrelated data\n")
     (root/"docs/untrusted.md").symlink_to(outside)
-    with pytest.raises(ValueError,match="source_not_inside_authorized_project"):
+    with pytest.raises(ValueError,match="external_source"):
         make_record(root,"docs/untrusted.md",1,1,"untrusted","external")
