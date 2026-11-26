@@ -35,7 +35,8 @@ jobs:
             tests/test_control_ai_dev_backlog.py \
             tests/test_control_ai_executor.py \
             tests/test_control_ai_daemon.py \
-            tests/test_control_ai_model_lab_candidates.py
+            tests/test_control_ai_model_lab_candidates.py \
+            tests/test_control_ai_context_requirements.py
   android-java-only:
     needs: python-contracts
     runs-on: ubuntu-latest
