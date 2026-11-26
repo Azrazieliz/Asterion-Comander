@@ -11,7 +11,7 @@ import java.util.regex.Pattern;
 final class OnDeviceModelProfile {
     private static final Pattern NAME=Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,119}\\.gguf");
     private static final Pattern SHA=Pattern.compile("[0-9a-f]{64}");
-    final String asset,file,sha256,source,systemPrefix,userPrefix,assistantPrefix,systemText;
+    final String asset,file,sha256,source,systemText;
     final long bytes;
     final int inputChars,outputTokens,contextTokens;
     private OnDeviceModelProfile(JSONObject j) throws Exception {
@@ -31,18 +31,11 @@ final class OnDeviceModelProfile {
                 ||contextTokens<512||contextTokens>16384
                 ||contextTokens<outputTokens+256)
             throw new IllegalArgumentException("invalid_context_budget");
-        JSONObject format=j.getJSONObject("chat_format");
-        systemPrefix=field(format,"system_prefix");
-        userPrefix=field(format,"user_prefix");
-        assistantPrefix=field(format,"assistant_prefix");
+        // Role formatting comes from the verified GGUF tokenizer metadata
+        // through llama_chat_apply_template, never from a model-name switch.
         systemText=j.getString("system_text");
         if(systemText.length()>4096 || systemText.isBlank())
             throw new IllegalArgumentException("invalid_system_text");
-    }
-    private static String field(JSONObject object,String key)throws Exception{
-        String value=object.getString(key);
-        if(value.isEmpty()||value.length()>512)throw new IllegalArgumentException("invalid_chat_format");
-        return value;
     }
     static OnDeviceModelProfile read(Context context)throws Exception{
         try(InputStream in=context.getAssets().open("models/control-model.json")){
@@ -55,8 +48,7 @@ final class OnDeviceModelProfile {
         }
     }
     /** Format is supplied by the signed manifest, not guessed from vendor or weight filename. */
-    String prompt(String user,String ownerInstructions) {
-        return systemPrefix+systemText+"\n"+ownerInstructions+
-            userPrefix+user.trim()+assistantPrefix;
+    String systemInstructions(String ownerInstructions) {
+        return systemText+"\n"+ownerInstructions;
     }
 }
