@@ -91,16 +91,25 @@ def seed(cycle_id, tasks):
                  item["goal"],item["target_path"],json.dumps(deps),stamp))
         for item in tasks:
             current=db.execute(
-                "SELECT cycle_id,goal,target_path,dependencies FROM dev_backlog WHERE task_id=?",
+                "SELECT cycle_id,goal,target_path,dependencies,priority,component FROM dev_backlog WHERE task_id=?",
                 (item["id"],)).fetchone()
             if (current["cycle_id"]!=cycle_id or current["goal"]!=item["goal"] or
-                    current["target_path"]!=item["target_path"] or
+                    current["target_path"]!=item["target_path"] or current["priority"]!=item["priority"] or
+                    current["component"]!=item["component"] or
                     json.loads(current["dependencies"])!=item.get("depends_on",[])):
                 raise ValueError("attempted_change_to_existing_task")
         known={row["task_id"] for row in db.execute(
             "SELECT task_id FROM dev_backlog WHERE cycle_id=?",(cycle_id,))}
         if any(not set(item.get("depends_on",[])) <= known for item in tasks):
             raise ValueError("unknown_task_dependency")
+        graph={r["task_id"]:json.loads(r["dependencies"]) for r in db.execute(
+            "SELECT task_id,dependencies FROM dev_backlog WHERE cycle_id=?",(cycle_id,))}
+        # Kahn traversal: reject dependency cycles in the complete persisted graph.
+        remaining=set(graph)
+        while remaining:
+            ready={key for key in remaining if not set(graph[key]) & remaining}
+            if not ready:raise ValueError("cyclic_task_dependencies")
+            remaining-=ready
         db.execute("COMMIT")
     except BaseException:
         db.execute("ROLLBACK")
@@ -134,6 +143,9 @@ def claim(cycle_id):
         rows=[dict(r) for r in db.execute(
             "SELECT * FROM dev_backlog WHERE cycle_id=? ORDER BY priority,task_id",
             (cycle_id,))]
+        if any(r["state"]=="claimed" for r in rows):
+            db.execute("COMMIT")
+            return None
         done={r["task_id"] for r in rows if r["state"] in
               ("source_tested","device_verified")}
         chosen=next((r for r in rows if r["state"]=="pending"
