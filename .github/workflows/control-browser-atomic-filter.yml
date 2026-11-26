@@ -98,10 +98,10 @@ jobs:
       - name: Ensure Android 37 platform
         run: |
           SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
-          if [ ! -f "$SDK/platforms/android-37/android.jar" ]; then
-            yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" --channel=3 'platforms;android-37' || true
+          if [ ! -f "$SDK/platforms/android-37.0/android.jar" ]; then
+            yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" --channel=3 'platforms;android-37.0' || true
           fi
-          test -s "$SDK/platforms/android-37/android.jar"
+          test -s "$SDK/platforms/android-37.0/android.jar"
       - name: Integrate Browser Java compilation without APK creation or installation
         working-directory: android
         run: gradle --no-daemon --console=plain :app:compileDebugJavaWithJavac
