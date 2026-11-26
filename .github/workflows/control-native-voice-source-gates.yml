@@ -1,0 +1,46 @@
+name: Control native voice source gates
+on:
+  push:
+    branches:
+      - work/control-non-ai-native-voice-20261126
+    paths:
+      - 'android/app/src/main/java/com/asterion/control/*Voice*.java'
+      - 'android/app/src/main/java/com/asterion/control/MainActivity.java'
+      - 'tests/java/com/asterion/control/*Voice*.java'
+      - '.github/workflows/control-native-voice-source-gates.yml'
+permissions:
+  contents: read
+jobs:
+  policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: |
+          mkdir -p /tmp/voice-policy
+          javac -encoding UTF-8 -d /tmp/voice-policy android/app/src/main/java/com/asterion/control/VoiceReplyPolicy.java tests/java/com/asterion/control/VoiceReplyPolicyTest.java android/app/src/main/java/com/asterion/control/VoiceWakeWords.java tests/java/com/asterion/control/VoiceWakeWordsTest.java
+          java -ea -cp /tmp/voice-policy com.asterion.control.VoiceReplyPolicyTest
+          java -ea -cp /tmp/voice-policy com.asterion.control.VoiceWakeWordsTest
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install pytest
+      - run: python -m pytest -q tests/test_voice_cycle_repair_094.py
+  android-source:
+    runs-on: ubuntu-latest
+    needs: policy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - name: Compile integrated Android source
+        working-directory: android
+        run: gradle --no-daemon --console=plain :app:compileDebugJavaWithJavac
