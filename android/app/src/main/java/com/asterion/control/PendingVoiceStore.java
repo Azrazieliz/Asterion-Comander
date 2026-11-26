@@ -50,12 +50,13 @@ final class PendingVoiceStore {
     System.arraycopy(encrypted,0,combined,nonce.length,encrypted.length);
     if(!prefs(context).edit().putString("ciphertext",
         Base64.encodeToString(combined,Base64.NO_WRAP))
-      .putLong("created",System.currentTimeMillis()).commit())
+      .putLong("created",System.currentTimeMillis()).remove("dispatch_claimed").commit())
       throw new IllegalStateException("Could not persist pending voice command");
     Arrays.fill(combined,(byte)0);
   }
   static synchronized String restore(Context context){
     SharedPreferences p=prefs(context);
+    if(p.getBoolean("dispatch_claimed",false))return ""; // uncertain submission is never replayed
     long created=p.getLong("created",0L);
     if(created<=0||System.currentTimeMillis()<created||
        System.currentTimeMillis()-created>MAX_AGE_MS){
@@ -76,10 +77,21 @@ final class PendingVoiceStore {
       clear(context);return "";
     }
   }
+  static synchronized boolean claimForNativeDispatch(Context context){
+    SharedPreferences p=prefs(context);
+    if(p.getBoolean("dispatch_claimed",false)||p.getString("ciphertext","").isEmpty())return false;
+    return p.edit().putBoolean("dispatch_claimed",true).commit();
+  }
+  static synchronized boolean releaseNativeClaim(Context context){
+    return prefs(context).edit().remove("dispatch_claimed").commit();
+  }
+  static synchronized boolean hasNativeClaim(Context context){
+    return prefs(context).getBoolean("dispatch_claimed",false);
+  }
   static synchronized boolean hasSaved(Context context){
     return !prefs(context).getString("ciphertext","").isEmpty();
   }
   static synchronized void clear(Context context){
-    prefs(context).edit().remove("ciphertext").remove("created").commit();
+    prefs(context).edit().remove("ciphertext").remove("created").remove("dispatch_claimed").commit();
   }
 }
