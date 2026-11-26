@@ -64,6 +64,10 @@ ALLOWED={
 
 # Use the owner's existing locally paired Android API; avoid stale Windows proxy routes.
 PHONE_NATIVE={
+ 'phone_app_bridges':('GET','/app-bridge/apps'),
+ 'phone_app_capabilities':('POST','/app-bridge/capabilities'),
+ 'phone_app_invoke':('POST','/app-bridge/invoke'),
+ 'phone_app_operation':('POST','/app-bridge/operation'),
  'phone_logcat':('GET','/diagnostics/logcat'),
  'phone_voice_settings':('GET','/voice/settings'),
  'phone_voice_configure':('POST','/voice/settings'),
@@ -127,10 +131,41 @@ def pc(path,key,method='GET',body=None,binary=False):
     return http(PC+path,key,method,body,control=True,binary=binary)
 
 def phone_native(path,method='GET',body=None):
-    from .phone_bridge import load
-    paired=load()
-    if not paired:raise RuntimeError('Native phone is not paired on private network')
-    return http(paired['base_url']+path,paired['token'],method,body,control=True)
+    # Reuse the original paired native WSS-first transport. The old direct
+    # private-LAN-only call silently defeated cellular and failed after handover.
+    from .phone_bridge import request
+    return request(path,method,body,timeout=10.0).json()
+
+_PARTNER_PACKAGE=re.compile(r'[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*){1,12}')
+_PARTNER_ACTION=re.compile(r'[a-z][a-z0-9_.-]{0,79}')
+_PARTNER_ID=re.compile(r'[A-Za-z0-9_.:-]{8,100}')
+
+def validate_partner_operation(op,args):
+    if op=='phone_app_bridges':
+        if args:raise ValueError('Discovery takes no arguments')
+        return
+    allowed={
+        'phone_app_capabilities':{'package'},
+        'phone_app_invoke':{'package','action','request_id','payload'},
+        'phone_app_operation':{'package','request_id','cancel'},
+    }[op]
+    if set(args)-allowed:raise ValueError('Unsupported partner argument')
+    pkg=args.get('package')
+    if not isinstance(pkg,str) or not _PARTNER_PACKAGE.fullmatch(pkg):
+        raise ValueError('Invalid partner package')
+    if op=='phone_app_capabilities':return
+    identity=args.get('request_id')
+    if not isinstance(identity,str) or not _PARTNER_ID.fullmatch(identity):
+        raise ValueError('Invalid durable partner request ID')
+    if op=='phone_app_invoke':
+        action=args.get('action')
+        if not isinstance(action,str) or not _PARTNER_ACTION.fullmatch(action):
+            raise ValueError('Invalid signed partner action')
+        payload=args.get('payload',{})
+        if not isinstance(payload,dict) or len(json.dumps(payload,ensure_ascii=False))>4096:
+            raise ValueError('Invalid bounded partner payload')
+    elif type(args.get('cancel',False)) is not bool:
+        raise ValueError('Cancellation requires explicit boolean consent')
 
 def run(request,key):
     op=request['op']
@@ -142,6 +177,8 @@ def run(request,key):
         return pc('/api/v1/commands/'+ident,key)
     if op in PHONE_NATIVE:
         method,path=PHONE_NATIVE[op]
+        if op in ('phone_app_bridges','phone_app_capabilities','phone_app_invoke','phone_app_operation'):
+            validate_partner_operation(op,args)
         if method=='GET' and args:raise ValueError('GET takes no arguments')
         if op=='phone_voice_configure' and (
             not isinstance(args.get('rate'),(int,float)) or not 0.85<=args['rate']<=1.15
