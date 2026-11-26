@@ -2,7 +2,8 @@
 from pathlib import Path
 import subprocess
 import sys
-import time
+import queue
+import threading
 
 import pytest
 
@@ -26,20 +27,12 @@ def test_exclusion_and_release_after_abrupt_process_exit(tmp_path):
             cwd=ROOT, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True)
         try:
-            # Await the real lock without a platform-dependent blocking pipe read.
-            deadline = time.monotonic() + 10
-            observed = False
-            while time.monotonic() < deadline:
-                if child.poll() is not None:
-                    raise AssertionError(child.stderr.read())
-                try:
-                    with worker_process_lock(lock):
-                        pass
-                except WorkerAlreadyRunning:
-                    observed = True
-                    break
-                time.sleep(.025)
-            assert observed, "Child never acquired the OS lock"
+            # Child signals only after taking the actual lock; do not race
+            # the child for ownership while it starts.
+            ready=queue.Queue()
+            reader=threading.Thread(target=lambda: ready.put(child.stdout.readline()),daemon=True)
+            reader.start()
+            assert ready.get(timeout=10).strip()=="locked"
             with pytest.raises(WorkerAlreadyRunning):
                 with worker_process_lock(lock):
                     pytest.fail("Duplicate worker acquired a live queue")
