@@ -11,7 +11,7 @@ final class BrowserNavigationPolicy {
     private BrowserNavigationPolicy(){}
     static String resolve(String raw,String prefix){
         String value=raw==null?"":raw.trim();
-        if(value.isEmpty()||HOME.equals(value))return HOME;
+        if(value.isEmpty()||HOME.equals(value)||TorAddressPolicy.looksOnion(value))return HOME;
         if(value.length()>16384||value.chars().anyMatch(c->c<32||c==127)||value.indexOf('\\')>=0)return HOME;
         String lower=value.toLowerCase(Locale.ROOT);
         if(lower.startsWith("http://")||lower.startsWith("https://"))
