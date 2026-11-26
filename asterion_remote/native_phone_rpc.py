@@ -8,6 +8,8 @@ It is NOT an HTTP MCP gateway and must never listen on a public interface.
 from __future__ import annotations
 
 import hmac
+import base64
+import binascii
 import json
 import re
 import secrets
@@ -25,6 +27,11 @@ router = APIRouter()
 # arbitrary tools, shell commands, URLs, paths or unapproved partner actions.
 ROUTES: dict[tuple[str, str], str] = {
     ("GET", "/health"): "control_phone_health",
+    ("POST", "/transfer/start"): "control_phone_transfer_start",
+    ("POST", "/transfer/chunk"): "control_phone_transfer_chunk",
+    ("POST", "/transfer/status"): "control_phone_transfer_status",
+    ("POST", "/transfer/finish"): "control_phone_transfer_finish",
+    ("POST", "/transfer/cancel"): "control_phone_transfer_cancel",
     ("GET", "/ui"): "control_phone_ui",
     ("GET", "/screen"): "control_phone_screen",
     ("GET", "/apps"): "control_phone_apps",
@@ -81,6 +88,33 @@ class LocalPhoneRequest(BaseModel):
     timeout_seconds: float = Field(default=5.0, ge=0.5, le=22.0)
 
 
+def validate_transfer_arguments(path: str, args: dict):
+    def invalid():
+        raise HTTPException(422,detail={"state":"invalid_transfer_arguments","dispatched":False})
+    if path=="/transfer/start":
+        name,size,digest=args.get("name"),args.get("size"),args.get("sha256")
+        if (set(args)!={"name","size","sha256"} or not isinstance(name,str) or
+            not 1<=len(name)<=180 or name.startswith(".") or
+            any(c in name for c in ("/","\\",":")) or any(ord(c)<32 or ord(c)==127 for c in name) or
+            type(size) is not int or not 0<=size<=2*1024**3 or
+            not isinstance(digest,str) or not re.fullmatch("[a-f0-9]{64}",digest)):
+            invalid()
+        return
+    identity=args.get("transfer_id")
+    if not isinstance(identity,str) or not re.fullmatch("[A-Za-z0-9_-]{8,64}",identity):
+        invalid()
+    if path!="/transfer/chunk":
+        if set(args)!={"transfer_id"}:invalid()
+        return
+    offset,data=args.get("offset"),args.get("data")
+    if (set(args)!={"transfer_id","offset","data"} or type(offset) is not int or
+        not 0<=offset<2*1024**3 or not isinstance(data,str) or not 1<=len(data)<=699052):
+        invalid()
+    try: decoded=base64.b64decode(data,validate=True)
+    except (ValueError,binascii.Error):invalid()
+    if not 1<=len(decoded)<=512*1024 or offset+len(decoded)>2*1024**3:invalid()
+
+
 def resolved_tool(method: str, path: str, payload: dict | None) -> tuple[str, dict]:
     if method == "GET" and payload:
         raise HTTPException(400, detail={"state": "invalid_arguments", "dispatched": False})
@@ -90,6 +124,11 @@ def resolved_tool(method: str, path: str, payload: dict | None) -> tuple[str, di
     if tool is None:
         raise HTTPException(404, detail={"state": "unsupported_route", "dispatched": False})
     args = payload or {}
+    if path.startswith("/transfer/"):
+        # Larger payloads are exclusively allowed for bounded transfer chunks;
+        # every existing non-transfer RPC retains its original 8KiB ceiling.
+        validate_transfer_arguments(path,args)
+        return tool,args
     if len(json.dumps(args, ensure_ascii=False)) > 8192:
         raise HTTPException(413, detail={"state": "arguments_too_large", "dispatched": False})
     return tool, args

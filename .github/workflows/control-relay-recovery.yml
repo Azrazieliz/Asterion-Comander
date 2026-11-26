@@ -7,6 +7,11 @@ on:
       - work/control-native-ai-reconstruction-20261126
     paths:
       - 'asterion_remote/native_transfer.py'
+      - 'asterion_remote/native_phone_rpc.py'
+      - 'asterion_remote/phone_bridge.py'
+      - 'android/app/src/main/java/com/asterion/control/AndroidMcp.java'
+      - 'android/app/src/main/java/com/asterion/control/AgentService.java'
+      - 'tests/test_native_phone_cellular_rpc.py'
       - 'tests/test_v6_native_transfer_finalization.py'
       - 'android/app/src/main/java/com/asterion/control/Transfer*.java'
       - 'tests/java/com/asterion/control/TransferCapacityPolicyTest.java'
@@ -87,7 +92,7 @@ jobs:
         with:
           python-version: '3.11'
       - run: python -m pip install pytest httpx fastapi
-      - run: python -m pytest -q tests/test_v6_native_transfer_finalization.py
+      - run: python -m pytest -q tests/test_v6_native_transfer_finalization.py tests/test_native_phone_cellular_rpc.py
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

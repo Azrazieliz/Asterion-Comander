@@ -46,6 +46,10 @@ public final class AgentService extends Service {
   private final java.util.concurrent.atomic.AtomicInteger liveStreamClients=
       new java.util.concurrent.atomic.AtomicInteger(0);
   private TransferStore transfers;
+  TransferStore transferStore(){
+    if(transfers==null)throw new IllegalStateException("Transfer service unavailable");
+    return transfers;
+  }
   private ContinuationLedger continuation;
   private ContinuationCycle cycles;
   private final java.util.concurrent.ScheduledExecutorService observer =

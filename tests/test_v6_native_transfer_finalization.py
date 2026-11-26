@@ -208,3 +208,52 @@ def test_uncertain_worker_releases_queue_slot(tmp_path,monkeypatch):
     assert t.transfer_status("job")["state"]=="outcome_unknown"
     assert not t.transfer_status("job")["worker_active"]
     assert t.cancel_transfer("job")=={"ok":False,"state":"outcome_unknown"}
+
+
+def test_transfer_falls_back_to_original_wss_on_read_only_probe():
+    from asterion_remote.native_transfer import _TransferTransport
+    import base64
+    seen=[]
+    def handler(req):
+        if req.url.host=='192.168.8.8':
+            seen.append(('LAN',req.method))
+            raise httpx.ConnectError('LAN unavailable')
+        body=__import__('json').loads(req.content)
+        seen.append(('WSS',body['path']))
+        if body['path']=='/transfer/chunk':
+            assert base64.b64decode(body['payload']['data'])==b'abcd'
+            assert body['payload']['offset']==0
+            return httpx.Response(200,json={'kind':'json','value':{'received':4}})
+        return httpx.Response(200,json={'kind':'json','value':{'ok':True}})
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        route=_TransferTransport(client,'http://192.168.8.8:8973','token')
+        route.get('http://192.168.8.8:8973/health').raise_for_status()
+        assert route.route=='native-wss'
+        reply=route.put('http://192.168.8.8:8973/transfer/chunk/valid-id-123',
+                       content=b'abcd',headers={'X-Transfer-Offset':'0'})
+        assert reply.json()['received']==4
+    assert seen==[('LAN','GET'),('WSS','/health'),('WSS','/transfer/chunk')]
+
+
+def test_transport_does_not_switch_after_ambiguous_write():
+    from asterion_remote.native_transfer import _TransferTransport
+    calls=[]
+    def handler(req):
+        calls.append((req.url.host,req.method))
+        raise httpx.ReadTimeout('lost reply')
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        route=_TransferTransport(client,'http://192.168.8.8:8973','token')
+        import pytest
+        with pytest.raises(httpx.ReadTimeout):
+            route.post('http://192.168.8.8:8973/transfer/finish/valid-id-123',json={})
+    assert calls==[('192.168.8.8','POST')]
+
+
+def test_resumed_completed_transfer_reads_receipt_without_finish_replay():
+    client=FakeClient(AssertionError('Must not finish again'),[
+        {'phase':'completed','sha256':EXPECTED,'size':SIZE,'result':LEGACY}])
+    with patch('asterion_remote.native_transfer.time.sleep',return_value=None):
+        reply=finalize_verified_android_transfer(client=client,base='http://127.0.0.1:8765',
+            token='redacted',transfer_id='valid-id-123',checksum=EXPECTED,size=SIZE,
+            publish_state=lambda phase:None,cancel=threading.Event(),initial_phase='completed')
+    assert reply==LEGACY and client.posts==0 and client.gets==1

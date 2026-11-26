@@ -51,7 +51,8 @@ def validate_base(base: str) -> str:
         raise HTTPException(422, 'Only private/VPN IP addresses allowed for direct pairing')
     if not port or not 1024 <= port <= 65535:
         raise HTTPException(422, 'Invalid agent port')
-    return f'http://{u.hostname}:{port}'
+    host='['+str(ip)+']' if ip.version==6 else str(ip)
+    return f'http://{host}:{port}'
 
 def load() -> dict | None:
     with _lock:

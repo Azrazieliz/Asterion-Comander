@@ -43,6 +43,11 @@ final class AndroidMcp {
     tools.put(tool("control_phone_permission_matrix","Read actual Android developer and permission capabilities",null));
     tools.put(tool("control_phone_vpn_status","Read optional owner WireGuard tunnel state without starting VPN",null));
     tools.put(tool("control_phone_health","Android native battery, memory, thermal and screen state",null));
+    tools.put(tool("control_phone_transfer_start","Begin or resume an authenticated checksum-bound file transfer",args("name","string","size","integer","sha256","string"),"name","size","sha256"));
+    tools.put(tool("control_phone_transfer_chunk","Append a bounded file chunk at an exact acknowledged offset",args("transfer_id","string","offset","integer","data","string"),"transfer_id","offset","data"));
+    tools.put(tool("control_phone_transfer_status","Read an existing transfer receipt",args("transfer_id","string"),"transfer_id"));
+    tools.put(tool("control_phone_transfer_finish","Request verified publication of an existing transfer",args("transfer_id","string"),"transfer_id"));
+    tools.put(tool("control_phone_transfer_cancel","Cancel an existing unpublished transfer",args("transfer_id","string"),"transfer_id"));
     tools.put(tool("control_phone_performance_status","Read applied Android workload controls and observed pressure",null));
     tools.put(tool("control_phone_performance_mode","Set bounded phone workload mode: automatic, foreground, full, quiet",
       args("mode","string"),"mode"));
@@ -143,6 +148,22 @@ final class AndroidMcp {
         ControlPermissionMatrix.status(owner));
       case "control_phone_vpn_status":return textContent(ControlPrivateVpn.status(owner));
       case "control_phone_health":return textContent(owner.health());
+      case "control_phone_transfer_start":
+        return textContent(owner.transferStore().start(args));
+      case "control_phone_transfer_chunk":{
+        String id=args.getString("transfer_id");
+        String encoded=args.getString("data");
+        long offset=args.getLong("offset");
+        if(!id.matches("[A-Za-z0-9_-]{8,64}")||encoded.length()>699052||offset<0)
+          throw new IllegalArgumentException("Invalid bounded transfer chunk");
+        byte[] bytes=java.util.Base64.getDecoder().decode(encoded);
+        if(bytes.length<1||bytes.length>512*1024||offset>2L*1024*1024*1024-bytes.length)
+          throw new IllegalArgumentException("Invalid transfer chunk size");
+        return textContent(owner.transferStore().append(id,offset,new java.io.ByteArrayInputStream(bytes),bytes.length));
+      }
+      case "control_phone_transfer_status":return textContent(owner.transferStore().status(args.getString("transfer_id")));
+      case "control_phone_transfer_finish":return textContent(owner.transferStore().finish(args.getString("transfer_id")));
+      case "control_phone_transfer_cancel":return textContent(owner.transferStore().cancel(args.getString("transfer_id")));
       case "control_phone_performance_status":return textContent(PerformanceManager.status(owner));
       case "control_phone_performance_mode":return textContent(
         PerformanceManager.setMode(owner,args.getString("mode")));

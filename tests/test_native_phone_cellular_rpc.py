@@ -186,3 +186,22 @@ def test_wss_roundtrip_probe_requires_real_native_network_response(monkeypatch, 
     monkeypatch.setattr(phone_bridge, "_request_via_outbound_wss",
                         lambda *args, **kwargs: httpx.Response(200, json={"ok":True}))
     assert phone_bridge.probe_native_wss_roundtrip()["verified"] is False
+
+
+def test_transfer_rpc_has_strict_route_specific_chunk_budget(monkeypatch):
+    import base64
+    content=base64.b64encode(b'a'*(512*1024)).decode()
+    payload={'transfer_id':'valid-id-123','offset':0,'data':content}
+    name,args=rpc.resolved_tool('POST','/transfer/chunk',payload)
+    assert name=='control_phone_transfer_chunk' and args==payload
+    for invalid in [dict(payload,data='%%%'),dict(payload,data=content+'AAAA'),
+                    dict(payload,offset=-1),dict(payload,transfer_id='../bad'),
+                    dict(payload,extra='x')]:
+        with pytest.raises(HTTPException):
+            rpc.resolved_tool('POST','/transfer/chunk',invalid)
+    with pytest.raises(HTTPException):
+        rpc.resolved_tool('POST','/input',{'data':content})
+
+
+def test_ipv6_private_pairing_preserves_required_brackets():
+    assert phone_bridge.validate_base('http://[fd00::7]:8973')=='http://[fd00::7]:8973'

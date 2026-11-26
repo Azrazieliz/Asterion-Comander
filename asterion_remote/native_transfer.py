@@ -7,6 +7,7 @@ MediaStore only after a matching SHA-256 checksum is verified.
 """
 from __future__ import annotations
 import hashlib
+import base64
 import os
 import threading
 import time
@@ -44,6 +45,60 @@ def _update(key: str, **values):
         row.update(values)
         row["updated_at"]=time.time()
 
+class _TransferTransport:
+    """Use the existing paired LAN and authenticated native WSS, never GitHub bytes.
+
+    Only read operations may switch paths automatically. After an ambiguous write
+    the chunk state machine reads the committed offset before another write.
+    """
+    def __init__(self,client,base,token):
+        self.client,self.base,self.token=client,base,token
+        self.route="private-wifi"
+
+    def _via(self,route,method,url,**kwargs):
+        if route=="private-wifi":
+            return getattr(self.client,method.lower())(url,**kwargs)
+        path=url[len(self.base):]
+        payload=kwargs.get("json")
+        if method=="PUT":
+            identity=path.rsplit("/",1)[-1]
+            path="/transfer/chunk"
+            payload={"transfer_id":identity,"offset":int(kwargs["headers"]["X-Transfer-Offset"]),
+                "data":base64.b64encode(kwargs["content"]).decode("ascii")}
+            method="POST"
+        elif path.startswith("/transfer/") and path!="/transfer/start":
+            path,identity=path.rsplit("/",1)
+            payload={"transfer_id":identity}
+            method="POST"
+        rsp=self.client.post("http://127.0.0.1:8995/phone/rpc",
+            json={"path":path,"method":method,"payload":payload,"timeout_seconds":22},
+            headers={"Authorization":"Bearer "+self.token},timeout=25)
+        if rsp.status_code>=400:return rsp
+        body=rsp.json()
+        if body.get("kind")!="json" or not isinstance(body.get("value"),dict):
+            raise httpx.RemoteProtocolError("Invalid native transfer receipt")
+        return httpx.Response(200,json=body["value"],request=rsp.request)
+
+    def get(self,url,**kwargs):
+        preferred=self.route
+        alternate="native-wss" if preferred=="private-wifi" else "private-wifi"
+        try:
+            rsp=self._via(preferred,"GET",url,**kwargs)
+            if rsp.status_code not in (502,503,504):return rsp
+        except httpx.TransportError:
+            pass
+        # Safe read fallback; authorization and transfer identity are unchanged.
+        rsp=self._via(alternate,"GET",url,**kwargs)
+        if rsp.is_success:self.route=alternate
+        return rsp
+
+    def post(self,url,**kwargs):
+        return self._via(self.route,"POST",url,**kwargs)
+
+    def put(self,url,**kwargs):
+        return self._via(self.route,"PUT",url,**kwargs)
+
+
 def _post(client: httpx.Client,base: str,token: str,path: str,body: dict):
     response=client.post(base+path,json=body,headers={"Authorization":"Bearer "+token})
     response.raise_for_status()
@@ -53,7 +108,7 @@ def finalize_verified_android_transfer(
     *, client: httpx.Client, base: str, token: str,
     transfer_id: str, checksum: str, size: int,
     publish_state, cancel: threading.Event,
-    max_wait_seconds: float = 900.0,
+    max_wait_seconds: float = 900.0, initial_phase: str = 'receiving',
 ) -> dict:
     """One finalization request, then read-only reconciliation until Android ACK.
 
@@ -65,14 +120,19 @@ def finalize_verified_android_transfer(
     headers={"Authorization":"Bearer "+token}
     issued=time.monotonic()
     envelope=None
-    try:
-        envelope=_post(client,base,token,"/transfer/finish/"+transfer_id,{})
-    except (httpx.TimeoutException,httpx.TransportError):
-        publish_state("outcome_unknown")
-        # Android might have received the command; ONLY safe reads below.
-    except httpx.HTTPStatusError as ex:
-        code=ex.response.status_code
-        raise RuntimeError(f"android_finish_http_{code}") from ex
+    if initial_phase=="receiving":
+        try:
+            envelope=_post(client,base,token,"/transfer/finish/"+transfer_id,{})
+        except (httpx.TimeoutException,httpx.TransportError):
+            publish_state("outcome_unknown")
+            # Android might have received the command; ONLY safe reads below.
+        except httpx.HTTPStatusError as ex:
+            code=ex.response.status_code
+            if code not in (408,500,502,503,504):
+                raise RuntimeError(f"android_finish_http_{code}") from ex
+            publish_state("outcome_unknown")
+    elif initial_phase not in ("verifying","publishing","completed","failed"):
+        raise RuntimeError("android_unknown_initial_transfer_phase")
     if envelope is not None and envelope.get("ok") is True:
         receipt=envelope
     else:
@@ -90,6 +150,9 @@ def finalize_verified_android_transfer(
                 continue
             except httpx.HTTPStatusError as ex:
                 code=ex.response.status_code
+                if code in (408,429,500,502,503,504):
+                    publish_state("outcome_unknown")
+                    continue
                 raise RuntimeError(f"android_transfer_receipt_http_{code}") from ex
             state=probe.json()
             if state.get("sha256")!=checksum or int(state.get("size",-1))!=size:
@@ -184,7 +247,10 @@ def _copy(key: str, path: Path, name: str, paired: dict, cancel: threading.Event
                 if size>TRANSFER_LIMIT:raise ValueError("File exceeds Android transfer limit")
         checksum=expected.hexdigest()
         with httpx.Client(timeout=httpx.Timeout(30.0,connect=5.0),
-                          trust_env=False,follow_redirects=False) as client:
+                          trust_env=False,follow_redirects=False) as http:
+            client=_TransferTransport(http,base,paired["token"])
+            # Select a working authenticated route with a read before any write.
+            client.get(base+"/health",headers=headers).raise_for_status()
             init=_post(client,base,paired["token"],"/transfer/start",
                 {"name":name,"size":size,"sha256":checksum})
             transfer_id=init["id"]
@@ -200,7 +266,7 @@ def _copy(key: str, path: Path, name: str, paired: dict, cancel: threading.Event
             if not 0<=offset<=size:
                 raise RuntimeError("Phone returned invalid transfer offset")
             _update(key,state="transferring",size=size,bytes_sent=offset,
-                    recovered_bytes=offset)
+                    recovered_bytes=offset,transport=client.route)
             with path.open("rb") as file:
                 while offset<size:
                     if cancel.is_set():raise InterruptedError("Cancelled by user")
@@ -210,18 +276,18 @@ def _copy(key: str, path: Path, name: str, paired: dict, cancel: threading.Event
                         raise RuntimeError("Source changed during transfer")
                     offset=_send_verified_chunk(client,base,headers,transfer_id,
                         checksum,size,offset,payload,cancel)
-                    _update(key,bytes_sent=offset)
+                    _update(key,bytes_sent=offset,transport=client.route)
             _update(key,state="verifying")
             done=finalize_verified_android_transfer(
                 client=client,base=base,token=paired["token"],
                 transfer_id=transfer_id,checksum=checksum,size=size,
                 publish_state=lambda phase: _update(key,state=phase),
-                cancel=cancel,
+                cancel=cancel,initial_phase=init.get("phase","receiving"),
             )
             _update(key,state="completed",result={
                 "name":done["name"],"size":done["size"],"sha256":done["sha256"],
                 "location":done["location"],"android_uri":done["uri"],
-                "transport":"private-wifi","verified":True})
+                "transport":client.route,"verified":True})
     except Exception as e:
         aborted=isinstance(e,InterruptedError)
         # A disconnected sender cannot assume the phone did not accept data.
@@ -236,7 +302,9 @@ def _copy(key: str, path: Path, name: str, paired: dict, cancel: threading.Event
         if transfer_id and aborted:
             try:
                 with httpx.Client(timeout=4,trust_env=False,follow_redirects=False) as c:
-                    c.post(base+"/transfer/cancel/"+transfer_id,json={},headers=headers)
+                    route=_TransferTransport(c,base,paired["token"])
+                    route.get(base+"/health",headers=headers).raise_for_status()
+                    route.post(base+"/transfer/cancel/"+transfer_id,json={},headers=headers)
             except Exception:pass
 
 def _run_copy(key,path,name,paired,cancel):
@@ -264,7 +332,7 @@ def start_transfer(data: TransferRequest,safe_path):
         identity=(str(source.resolve()),name)
         for existing,active in _active_sources.items():
             if active==identity:
-                return {"id":existing,"status":"queued","transport":"PC-to-Android private Wi-Fi"}
+                return {"id":existing,"status":"queued","transport":"PC-to-Android paired LAN / native WSS"}
             if active[1]==name:
                 raise HTTPException(409,"Destination filename already has an active transfer")
         if len(_cancels)>=3:
@@ -282,7 +350,7 @@ def start_transfer(data: TransferRequest,safe_path):
             _cancels.pop(key,None);_active_sources.pop(key,None)
             _jobs[key].update(state='failed',error='Transfer worker unavailable')
         raise HTTPException(503,'Transfer worker unavailable')
-    return {"id":key,"status":"queued","transport":"PC-to-Android private Wi-Fi"}
+    return {"id":key,"status":"queued","transport":"PC-to-Android paired LAN / native WSS"}
 
 def transfer_status(key: str):
     with _guard:
