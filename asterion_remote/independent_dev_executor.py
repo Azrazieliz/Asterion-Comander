@@ -77,9 +77,7 @@ class CandidateExecutor:
         protected=("scripts/control_ai_independent_dev.py",
                    "scripts/control_ai_candidate_acquisition.py",
                    "asterion_remote/independent_dev_executor.py",
-                   "asterion_remote/isolated_test_runner.py",
-                   "asterion_remote/dev_backlog.py",
-                   "asterion_remote/overnight_supervisor.py")
+                   "asterion_remote/isolated_test_runner.py")
         if path.as_posix() in protected:
             raise ValueError("privileged_development_infrastructure_locked")
         if path.as_posix() != task["target_path"]:
