@@ -73,8 +73,8 @@ public final class BrowserActivity extends Activity {
             try{
                 if(activeBrowser!=browser)return;
                 BrowserTab tab=browser.current();
-                if(tab==null)return;
-                value[0]=ControlPasswordVault.exactOrigin(tab.web.getUrl());
+                if(tab==null||tab.web.getParent()!=browser.viewport||!BrowserNavigationPolicy.sameDocument(tab.committedUrl,tab.web.getUrl())||tab.web.getCertificate()==null)return;
+                value[0]=ControlPasswordVault.exactOrigin(tab.committedUrl);
             }catch(Exception invalid){value[0]=null;}
         };
         if(Looper.myLooper()==Looper.getMainLooper())read.run();
@@ -238,24 +238,7 @@ public final class BrowserActivity extends Activity {
     }
 
     private String safeAddress(String raw) {
-        String value = raw == null ? "" : raw.trim();
-        if(value.isEmpty()) return START;
-        // Reject WebView-local and privilege-bearing schemes, including javascript:, file:, data:.
-        if(value.matches("(?i)^[a-z][a-z0-9+.-]*:.*") &&
-                !value.startsWith("https://") && !value.startsWith("http://")) return START;
-        if(!value.startsWith("https://") && !value.startsWith("http://")) {
-            if(value.contains(" ") || !value.contains(".")) {
-                return searchPrefix() +
-                    URLEncoder.encode(value, StandardCharsets.UTF_8);
-            }
-            value = "https://" + value;
-        }
-        try {
-            URI parsed = URI.create(value);
-            String host = parsed.getHost();
-            if(host == null || host.isBlank() || parsed.getUserInfo()!=null) return START;
-            return value;
-        } catch(Exception bad) { return START; }
+        return BrowserNavigationPolicy.resolve(raw,searchPrefix());
     }
 
     private BrowserTab current() {
@@ -266,7 +249,8 @@ public final class BrowserActivity extends Activity {
         addTab(START);
         showTab(tabs.size()-1);
     }
-    private void addTab(String url) {
+    private void addTab(String url){addTab(url,true);}
+    private void addTab(String url,boolean load) {
         WebView view = new WebView(this);
         view.setBackgroundColor(Color.WHITE);
         WebSettings s = view.getSettings();
@@ -275,7 +259,7 @@ public final class BrowserActivity extends Activity {
         s.setAllowFileAccess(false);
         s.setAllowContentAccess(false);
         s.setJavaScriptCanOpenWindowsAutomatically(false);
-        s.setSupportMultipleWindows(false);
+        s.setSupportMultipleWindows(true);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         if(Build.VERSION.SDK_INT >= 26) s.setSafeBrowsingEnabled(true);
         s.setBuiltInZoomControls(true);
@@ -284,9 +268,7 @@ public final class BrowserActivity extends Activity {
         tab.pageUrl=url;
         view.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView web, WebResourceRequest request) {
-                String scheme = request.getUrl().getScheme();
-                if(scheme == null || (!scheme.equalsIgnoreCase("http") &&
-                        !scheme.equalsIgnoreCase("https")))return true;
+                if(!BrowserNavigationPolicy.isWeb(request.getUrl().toString()))return true;
                 // Prevent automatic advertising/popunder navigation, never all
                 // cross-origin redirects (legitimate OAuth would be broken).
                 if(request.isForMainFrame()&&!request.hasGesture() &&
@@ -304,6 +286,8 @@ public final class BrowserActivity extends Activity {
             }
             @Override public void onPageStarted(WebView web,String url,
                     android.graphics.Bitmap icon) {
+                if(!tabs.contains(tab))return;
+                tab.committedUrl=null;
                 tab.pageUrl=url;
                 tab.blocked.set(0);
                 if(current()==tab){
@@ -313,10 +297,21 @@ public final class BrowserActivity extends Activity {
                 }
             }
             @Override public void onReceivedSslError(WebView web, SslErrorHandler handler, SslError error) {
+                tab.committedUrl=null;
                 handler.cancel();
                 if(current()==tab) notice("Certificate verification failed; page blocked");
             }
+            @Override public void onPageCommitVisible(WebView web,String url){
+                if(tabs.contains(tab)&&BrowserNavigationPolicy.isWeb(url)&&url.equals(web.getUrl()))tab.committedUrl=url;
+            }
+            @Override public void onReceivedError(WebView web,WebResourceRequest request,android.webkit.WebResourceError error){
+                if(request.isForMainFrame()){
+                    tab.committedUrl=null;
+                    if(current()==tab)notice("Page could not load: "+error.getDescription());
+                }
+            }
             @Override public void onPageFinished(WebView web, String url) {
+                if(!tabs.contains(tab)||!url.equals(web.getUrl()))return;
                 tab.pageUrl=url;
                 protection.applyCosmetic(web,url);
                 CookieManager.getInstance().flush();
@@ -328,11 +323,21 @@ public final class BrowserActivity extends Activity {
         view.setWebChromeClient(new WebChromeClient() {
             @Override public boolean onCreateWindow(WebView web,boolean isDialog,
                     boolean isUserGesture,android.os.Message resultMsg) {
-                // No surprise advertising windows or background tabs.
-                tab.popups.incrementAndGet();
-                if(current()==tab)notice("Unrequested popup blocked");
-                return false;
+                if(!BrowserNavigationPolicy.allowPopup(isUserGesture,current()==tab&&tab.web.getParent()==viewport,tabs.size()<MAX_TABS)){
+                    tab.popups.incrementAndGet();
+                    if(current()==tab)notice("Popup blocked");
+                    return false;
+                }
+                if(!(resultMsg.obj instanceof WebView.WebViewTransport))return false;
+                addTab(START,false);
+                BrowserTab child=tabs.get(tabs.size()-1);
+                child.popup=true;
+                ((WebView.WebViewTransport)resultMsg.obj).setWebView(child.web);
+                resultMsg.sendToTarget();
+                showTab(tabs.size()-1);
+                return true;
             }
+            @Override public void onCloseWindow(WebView web){if(tab.popup&&tabs.contains(tab))closeTab(tabs.indexOf(tab));}
             @Override public void onProgressChanged(WebView web, int amount) {
                 if(current()==tab) {
                     progress.setProgress(amount);
@@ -345,9 +350,9 @@ public final class BrowserActivity extends Activity {
             }
         });
         view.setDownloadListener((address,agent,disposition,type,size) ->
-            confirmDownload(address,agent,type,size));
+            confirmDownload(address,agent,disposition,type,size));
         tabs.add(tab);
-        view.loadUrl(url);
+        if(load)view.loadUrl(url);
     }
     private void showTab(int index) {
         if(index<0||index>=tabs.size()) return;
@@ -437,6 +442,8 @@ public final class BrowserActivity extends Activity {
         BrowserTab tab=current();
         if(tab==null) return;
         String url=safeAddress(value);
+        if(START.equals(url)&&value!=null&&!value.trim().isEmpty()&&!START.equals(value.trim())){notice("Unsupported or invalid address");return;}
+        tab.committedUrl=null;
         tab.pageUrl=url;
         if(START.equals(url)){
             tab.web.stopLoading();tab.web.loadUrl(START);tab.title="New tab";showTab(active);
@@ -452,12 +459,11 @@ public final class BrowserActivity extends Activity {
         if(keyboard!=null)keyboard.hideSoftInputFromWindow(address.getWindowToken(),0);
         refreshToolbar();persistTabs();
     }
-    private void confirmDownload(String url, String agent, String mime, long length) {
+    private void confirmDownload(String url, String agent, String disposition, String mime, long length) {
         Uri uri;
         try {
             uri=Uri.parse(url);
-            if(!"https".equalsIgnoreCase(uri.getScheme()) &&
-                    !"http".equalsIgnoreCase(uri.getScheme()))
+            if(!BrowserNavigationPolicy.isWeb(url))
                 throw new IllegalArgumentException("Unsupported download URI");
         } catch(Exception bad) { notice("Download URL is not supported"); return; }
         String host=uri.getHost()==null?"website":uri.getHost();
@@ -469,6 +475,11 @@ public final class BrowserActivity extends Activity {
             .setPositiveButton("Save", (dialog,which)->{
                 try {
                     DownloadManager.Request req=new DownloadManager.Request(uri);
+                    String filename=android.webkit.URLUtil.guessFileName(url,disposition,mime).replaceAll("[^\\p{L}\\p{N}._ -]","_");
+                    if(filename.isBlank()||filename.equals(".")||filename.equals(".."))filename="download";
+                    if(filename.length()>120)filename=filename.substring(filename.length()-120);
+                    req.setTitle(filename);
+                    req.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS,filename);
                     req.setNotificationVisibility(
                         DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
                     if(mime!=null&&!mime.isBlank()) req.setMimeType(mime);
@@ -580,6 +591,10 @@ public final class BrowserActivity extends Activity {
                                 status==DownloadManager.STATUS_PAUSED?"Paused":"Pending";
                             if(rows.length()>0)rows.append("\n\n");
                             rows.append(hosts.get(ix)).append(" • ").append(state);
+                            if(status==DownloadManager.STATUS_FAILED||status==DownloadManager.STATUS_PAUSED){
+                                int reason=cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON));
+                                rows.append(" (Android reason ").append(reason).append(")");
+                            }
                             if(total>0){
                                 rows.append("\n").append(received/1024).append(" / ")
                                     .append(total/1024).append(" KB");
@@ -739,15 +754,7 @@ public final class BrowserActivity extends Activity {
     }
 
     private static String safeSessionUrl(String value){
-        try{
-            Uri url=Uri.parse(value);
-            String scheme=url.getScheme();
-            if(!"https".equalsIgnoreCase(scheme)&&
-               !"http".equalsIgnoreCase(scheme))return START;
-            Uri.Builder builder=url.buildUpon().clearQuery().fragment(null);
-            String result=builder.build().toString();
-            return result.length()>1200?START:result;
-        }catch(Exception failure){return START;}
+        return BrowserNavigationPolicy.sessionUrl(value);
     }
     private void persistTabs(){
         JSONArray saved=new JSONArray();
@@ -896,7 +903,7 @@ public final class BrowserActivity extends Activity {
         if(tab==null){notice("Open an HTTPS website first");return;}
         String url=tab.web.getUrl();
         final String origin;
-        try{origin=ControlPasswordVault.exactOrigin(url);}
+        try{origin=verifiedActiveHttpsOrigin();if(origin==null)throw new SecurityException("No verified visible HTTPS document");}
         catch(Exception error){
             new AlertDialog.Builder(this).setTitle("Encrypted password vault")
                 .setMessage("Passwords can only be saved and filled for a verified HTTPS origin. Open a secure login page.")
@@ -1018,7 +1025,8 @@ public final class BrowserActivity extends Activity {
         final AtomicInteger popups=new AtomicInteger(0);
         String title="New tab";
         final String mobileUserAgent;
-        boolean desktop;
+        boolean desktop,popup;
+        String committedUrl;
         BrowserTab(WebView view){web=view;mobileUserAgent=view.getSettings().getUserAgentString();}
     }
 }
