@@ -28,8 +28,10 @@ def test_model_profile_has_signed_asset_hash_and_reasonable_budgets():
 def test_on_device_loader_uses_profile_not_named_vendor_constants():
     source = (JAVA / "OnDeviceLlm.java").read_text(encoding="utf-8")
     assert "OnDeviceModelProfile.read(context)" in source
-    assert "profile.prompt(userPrompt)" in source
-    assert "profile.outputTokens,profile.contextTokens" in source
+    assert "profile.prompt(userPrompt," in source
+    assert "ControlAssistantPreferences.promptGuidance(context)" in source
+    assert "ControlAssistantPreferences.outputTokens(context,profile)" in source
+    assert "outputBudget,profile.contextTokens" in source
     assert "profile.sha256.equals(hex(digest.digest()))" in source
     assert "on_device_inference_already_running" in source
     assert "/no_think" not in source
@@ -56,3 +58,14 @@ def test_jobs_keep_durable_receipt_before_work_and_use_profile_budget():
     assert "EXECUTOR.submit(()->execute(app,job,prompt));" in source
     assert "OnDeviceLlm.generate(ctx,prompt)" in source
     assert "previous_process_outcome_unavailable" in source
+
+
+def test_owner_settings_are_local_and_not_tool_permissions():
+    policy=(JAVA/"ControlAssistantPreferences.java").read_text(encoding="utf8")
+    view=(JAVA/"MainActivity.java").read_text(encoding="utf8")
+    assert "MODE_PRIVATE" in policy
+    assert "guidance.length()>2000" in policy
+    assert "outputTokens" in policy
+    assert "authorization and security controls" in policy
+    assert "showPhoneAiPreferences" in view
+    assert "ControlAssistantPreferences.save" in view
