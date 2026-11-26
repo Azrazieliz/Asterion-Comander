@@ -20,6 +20,8 @@ def index():
 def test_source_locked_owner_and_v3_v6_contracts_recover_exactly():
     result=snapshot(ROOT,index(),max_pack_chars=12000)
     assert result["mandatory_count"]==25
+    assert result["indexed_records"]==27
+    assert result["unresolved_ids"]==["V6-R09-OPEN","V3-N01-N30-OPEN"]
     assert result["source_count"]==7
     assert len(result["partitions"])>=2
     assert result["original_source_spans_verified"]
@@ -40,6 +42,8 @@ def test_source_locked_owner_and_v3_v6_contracts_recover_exactly():
               if x["id"]=="OAI-05")
     assert "50,000 unique sealed holdout" in next(x["text"] for x in all_records
               if x["id"]=="OAI-12")
+    assert "Continue all independently actionable work" in next(
+        x["text"] for x in all_records if x["id"]=="OAI-15")
 
 
 def test_locked_source_modified_refuses_silent_reconciliation(tmp_path):
