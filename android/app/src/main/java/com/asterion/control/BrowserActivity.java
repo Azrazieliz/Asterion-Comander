@@ -91,10 +91,12 @@ public final class BrowserActivity extends Activity {
     private static final int MAX_TABS = 8;
     private static final String START = "about:blank";
     private final List<BrowserTab> tabs = new ArrayList<>();
-    private LinearLayout root, tabStrip;
+    private LinearLayout root, navigation;
+    private static boolean webDirectoryConfigured;
     private FrameLayout viewport;
     private EditText address;
-    private TextView status, counter, back, forward;
+    private TextView status, counter, site;
+    private View back, forward;
     private ProgressBar progress;
     private int active = -1;
     private BrowserProtection protection;
@@ -116,11 +118,38 @@ public final class BrowserActivity extends Activity {
         item.setOnClickListener(v -> action.run());
         return item;
     }
-    private void tool(LinearLayout parent, String name, Runnable action) {
-        TextView item = control(name, action);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(44), 1);
-        lp.setMargins(dp(3), 0, dp(3), 0);
-        parent.addView(item, lp);
+    private View iconButton(String kind,String description,Runnable action){
+        FrameLayout target=new FrameLayout(this);
+        target.setMinimumWidth(dp(48));target.setMinimumHeight(dp(48));
+        DesignSystem.clickable(target,this,DesignSystem.SURFACE,0,12);
+        target.setContentDescription(description);target.setFocusable(true);
+        View icon=new BrowserIcon(kind);
+        target.addView(icon,new FrameLayout.LayoutParams(dp(23),dp(23),Gravity.CENTER));
+        target.setOnClickListener(v->action.run());return target;
+    }
+    private View navButton(String kind,String description,Runnable action){
+        View target=iconButton(kind,description,action);
+        navigation.addView(target,new LinearLayout.LayoutParams(0,dp(48),1));return target;
+    }
+    private final class BrowserIcon extends View {
+        private final String kind;
+        private final android.graphics.Paint p=new android.graphics.Paint(3);
+        BrowserIcon(String kind){super(BrowserActivity.this);this.kind=kind;}
+        private void line(android.graphics.Canvas c,float x,float y,float a,float b){c.drawLine(x,y,a,b,p);}
+        @Override protected void onDraw(android.graphics.Canvas c){
+            super.onDraw(c);c.save();c.scale(getWidth()/24f,getHeight()/24f);
+            p.setColor(DesignSystem.TEXT);p.setStyle(android.graphics.Paint.Style.STROKE);
+            p.setStrokeWidth(1.8f);p.setStrokeCap(android.graphics.Paint.Cap.ROUND);p.setStrokeJoin(android.graphics.Paint.Join.ROUND);
+            switch(kind){
+                case "back":line(c,19,12,5,12);line(c,5,12,11,6);line(c,5,12,11,18);break;
+                case "forward":case "go":line(c,5,12,19,12);line(c,19,12,13,6);line(c,19,12,13,18);break;
+                case "home":line(c,3,11,12,3);line(c,12,3,21,11);line(c,5,10,5,21);line(c,19,10,19,21);line(c,5,21,19,21);c.drawRect(10,14,14,21,p);break;
+                case "reload":c.drawArc(4,4,20,20,-45,300,false,p);line(c,20,3,20,9);line(c,14,9,20,9);break;
+                case "download":line(c,12,3,12,16);line(c,7,11,12,16);line(c,12,16,17,11);line(c,4,20,20,20);break;
+                case "menu":line(c,4,6,20,6);line(c,4,12,20,12);line(c,4,18,20,18);break;
+                default:c.drawCircle(12,12,9,p);line(c,12,10,12,17);c.drawCircle(12,6.5f,.5f,p);
+            }c.restore();
+        }
     }
 
     @Override public void onCreate(Bundle saved) {
@@ -130,83 +159,68 @@ public final class BrowserActivity extends Activity {
         protection.refresh(false,(updated,reason)->{
             if(!isFinishing()&&status!=null)refreshToolbar();
         });
-        // Must be set before any WebView exists in this dedicated :asterion_browser process.
-        if (Build.VERSION.SDK_INT >= 28) WebView.setDataDirectorySuffix("asterion_browser");
-        getWindow().setStatusBarColor(DesignSystem.BG);
-        getWindow().setNavigationBarColor(DesignSystem.BG);
-        root = DesignSystem.vertical(this);
-        root.setBackgroundColor(DesignSystem.BG);
-        setContentView(root);
-
-        LinearLayout heading = DesignSystem.horizontal(this);
-        heading.setPadding(dp(15), dp(13), dp(15), dp(11));
-        heading.setBackground(DesignSystem.gradient(this, 0xFF30264E, 0xFF183348, 0));
-        DesignSystem.AsterionMark mark = new DesignSystem.AsterionMark(this);
-        heading.addView(mark, new LinearLayout.LayoutParams(dp(38), dp(38)));
-        LinearLayout titles = DesignSystem.vertical(this);
-        titles.setPadding(dp(11), 0, 0, 0);
-        add(titles, label("ASTERION", 15, DesignSystem.TEXT, true));
-        add(titles, label("BROWSER", 10, DesignSystem.TEAL, true));
-        heading.addView(titles, new LinearLayout.LayoutParams(0, -2, 1));
-        counter = control("Tabs", this::newTab);
-        heading.addView(counter);
-        add(root, heading);
-
-        LinearLayout search = DesignSystem.horizontal(this);
-        search.setPadding(dp(11), dp(12), dp(11), dp(10));
-        address = new EditText(this);
-        address.setSingleLine(true);
-        address.setTextColor(DesignSystem.TEXT);
-        address.setHintTextColor(DesignSystem.MUTED);
-        address.setHint("Search or enter an address");
-        address.setTextSize(13);
-        address.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-        address.setImeOptions(EditorInfo.IME_ACTION_GO);
-        address.setPadding(dp(13), dp(9), dp(13), dp(9));
-        address.setSelectAllOnFocus(true);
-        address.setBackground(DesignSystem.shape(this, DesignSystem.SURFACE2, DesignSystem.EDGE, 15));
-        address.setOnEditorActionListener((view, action, event) -> {
-            if (action == EditorInfo.IME_ACTION_GO ||
-                    (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER)) {
-                navigate(address.getText().toString());
-                return true;
+        // The WebView suffix is process-global; recreating this Activity must not reset it.
+        if(!webDirectoryConfigured){WebView.setDataDirectorySuffix("asterion_browser");webDirectoryConfigured=true;}
+        boolean dark=(getResources().getConfiguration().uiMode &
+            android.content.res.Configuration.UI_MODE_NIGHT_MASK)==android.content.res.Configuration.UI_MODE_NIGHT_YES;
+        getWindow().setStatusBarColor(Color.TRANSPARENT);getWindow().setNavigationBarColor(Color.TRANSPARENT);
+        getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        root=DesignSystem.vertical(this);root.setBackgroundColor(DesignSystem.BG);root.setFocusableInTouchMode(true);
+        if(Build.VERSION.SDK_INT>=30){
+            getWindow().setDecorFitsSystemWindows(false);
+            android.view.WindowInsetsController controller=getWindow().getInsetsController();
+            if(controller!=null){
+                int flags=android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS |
+                    android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
+                controller.setSystemBarsAppearance(dark?0:flags,flags);
             }
-            return false;
+            root.setOnApplyWindowInsetsListener((v,insets)->{
+                android.graphics.Insets bars=insets.getInsets(android.view.WindowInsets.Type.systemBars()|
+                    android.view.WindowInsets.Type.displayCutout());
+                android.graphics.Insets ime=insets.getInsets(android.view.WindowInsets.Type.ime());
+                root.setPadding(bars.left,bars.top,bars.right,Math.max(bars.bottom,ime.bottom));
+                if(navigation!=null)navigation.setVisibility(insets.isVisible(android.view.WindowInsets.Type.ime())?View.GONE:View.VISIBLE);
+                return insets;
+            });
+        }else{
+            getWindow().setStatusBarColor(DesignSystem.BG);getWindow().setNavigationBarColor(DesignSystem.BG);
+            root.setSystemUiVisibility(dark?0:View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR|View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+        }
+        setContentView(root);
+        LinearLayout search=DesignSystem.horizontal(this);search.setPadding(dp(8),dp(4),dp(8),dp(4));
+        search.setBackgroundColor(DesignSystem.SURFACE);
+        site=control("Site",this::showSiteInfo);site.setMinWidth(dp(48));site.setPadding(dp(5),0,dp(5),0);
+        search.addView(site,new LinearLayout.LayoutParams(dp(54),dp(48)));
+        address=new EditText(this);address.setSingleLine(true);address.setTextSize(15);
+        address.setTextColor(DesignSystem.TEXT);address.setHintTextColor(DesignSystem.MUTED);
+        address.setHint("Search with "+providerName()+" or enter URL");address.setContentDescription("Address and search");
+        address.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_URI);
+        address.setImeOptions(EditorInfo.IME_ACTION_GO);address.setPadding(dp(12),0,dp(12),0);address.setSelectAllOnFocus(true);
+        address.setBackground(DesignSystem.shape(this,DesignSystem.SURFACE2,DesignSystem.EDGE,16));
+        address.setOnEditorActionListener((view,action,event)->{
+            if(action==EditorInfo.IME_ACTION_GO||(event!=null&&event.getKeyCode()==KeyEvent.KEYCODE_ENTER&&event.getAction()==KeyEvent.ACTION_DOWN)){
+                navigate(address.getText().toString());return true;
+            }return false;
         });
-        search.addView(address, new LinearLayout.LayoutParams(0, dp(45), 1));
-        TextView go = control("Go", () -> navigate(address.getText().toString()));
-        LinearLayout.LayoutParams goLp = new LinearLayout.LayoutParams(dp(54), dp(45));
-        goLp.leftMargin = dp(8);
-        search.addView(go, goLp);
-        add(root, search);
-
-        HorizontalScrollView scroll = new HorizontalScrollView(this);
-        scroll.setHorizontalScrollBarEnabled(false);
-        tabStrip = DesignSystem.horizontal(this);
-        tabStrip.setPadding(dp(10), dp(5), dp(10), dp(7));
-        scroll.addView(tabStrip);
-        add(root, scroll);
-
-        progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
-        progress.setMax(100);
-        add(root, progress);
-        viewport = new FrameLayout(this);
-        root.addView(viewport, new LinearLayout.LayoutParams(-1, 0, 1));
-
-        LinearLayout nav = DesignSystem.horizontal(this);
-        nav.setPadding(dp(5), dp(8), dp(5), dp(9));
-        back = control("Back", () -> { BrowserTab tab = current(); if(tab!=null&&tab.web.canGoBack()) tab.web.goBack(); });
-        forward = control("Next", () -> { BrowserTab tab = current(); if(tab!=null&&tab.web.canGoForward()) tab.web.goForward(); });
-        nav.addView(back, new LinearLayout.LayoutParams(0, dp(45), 1));
-        nav.addView(forward, new LinearLayout.LayoutParams(0, dp(45), 1));
-        tool(nav, "Reload", () -> { BrowserTab tab = current(); if(tab!=null) tab.web.reload(); });
-        tool(nav, "+ Tab", this::newTab);
-        tool(nav, "More", this::showBrowserMenu);
-        add(root, nav);
-
-        status = label("Ready", 11, DesignSystem.MUTED, false);
-        status.setPadding(dp(17), dp(1), dp(13), dp(9));
-        add(root, status);
+        LinearLayout.LayoutParams addressLp=new LinearLayout.LayoutParams(0,dp(48),1);
+        addressLp.leftMargin=dp(4);search.addView(address,addressLp);
+        search.addView(iconButton("go","Open address or search",()->navigate(address.getText().toString())),new LinearLayout.LayoutParams(dp(48),dp(48)));
+        add(root,search);
+        progress=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);
+        progress.setMax(100);progress.setVisibility(View.GONE);
+        root.addView(progress,new LinearLayout.LayoutParams(-1,dp(2)));
+        viewport=new FrameLayout(this);root.addView(viewport,new LinearLayout.LayoutParams(-1,0,1));
+        navigation=DesignSystem.horizontal(this);navigation.setBackgroundColor(DesignSystem.SURFACE);
+        back=navButton("back","Back",()->{BrowserTab t=current();if(t!=null&&t.web.canGoBack())t.web.goBack();});
+        forward=navButton("forward","Forward",()->{BrowserTab t=current();if(t!=null&&t.web.canGoForward())t.web.goForward();});
+        navButton("home","Home",()->navigate(""));
+        navButton("reload","Reload",()->{BrowserTab t=current();if(t!=null&&!START.equals(t.pageUrl))t.web.reload();});
+        navButton("download","Downloads",this::showDownloadProgress);
+        counter=control("1",this::showTabSwitcher);counter.setTextSize(16);counter.setPadding(0,0,0,0);
+        navigation.addView(counter,new LinearLayout.LayoutParams(0,dp(48),1));
+        navButton("menu","Browser menu",this::showBrowserMenu);
+        status=label("",11,DesignSystem.MUTED,false);
+        add(root,navigation);root.requestFocus();root.requestApplyInsets();
 
         if(saved != null) {
             ArrayList<String> urls = saved.getStringArrayList("urls");
@@ -292,7 +306,11 @@ public final class BrowserActivity extends Activity {
                     android.graphics.Bitmap icon) {
                 tab.pageUrl=url;
                 tab.blocked.set(0);
-                if(current()==tab)refreshToolbar();
+                if(current()==tab){
+                    if(!START.equals(url)&&tab.web.getParent()!=viewport)showTab(active);
+                    else if(START.equals(url)&&tab.web.getParent()==viewport)showTab(active);
+                    refreshToolbar();
+                }
             }
             @Override public void onReceivedSslError(WebView web, SslErrorHandler handler, SslError error) {
                 handler.cancel();
@@ -304,7 +322,7 @@ public final class BrowserActivity extends Activity {
                 CookieManager.getInstance().flush();
                 rememberPage(url,tab.title);
                 if(current()==tab) refreshToolbar();
-                refreshTabs();
+                refreshTabs();persistTabs();
             }
         });
         view.setWebChromeClient(new WebChromeClient() {
@@ -341,7 +359,7 @@ public final class BrowserActivity extends Activity {
         viewport.removeAllViews();
         active=index;
         BrowserTab selected=current();
-        if(START.equals(selected.pageUrl)||START.equals(selected.web.getUrl())){
+        if(START.equals(selected.pageUrl)){
             viewport.addView(createNativeHome(),new FrameLayout.LayoutParams(-1,-1));
         }else{
             if(selected.web.getParent()!=null)
@@ -351,6 +369,7 @@ public final class BrowserActivity extends Activity {
         }
         refreshToolbar();
         refreshTabs();
+        persistTabs();
     }
     private void closeTab(int index) {
         if(index<0||index>=tabs.size()) return;
@@ -366,38 +385,39 @@ public final class BrowserActivity extends Activity {
         active=-1;
         showTab(selected);
     }
-    private void refreshTabs() {
-        if(tabStrip==null) return;
-        tabStrip.removeAllViews();
-        for(int i=0;i<tabs.size();i++) {
-            final int selected=i;
-            BrowserTab t=tabs.get(i);
-            LinearLayout chip=DesignSystem.horizontal(this);
-            chip.setPadding(dp(8),dp(4),dp(6),dp(4));
-            chip.setBackground(DesignSystem.shape(this,
-                i==active?0xFF322B52:DesignSystem.SURFACE,
-                i==active?DesignSystem.PURPLE:DesignSystem.EDGE,13));
-            String title=t.title.length()>19?t.title.substring(0,18)+"…":t.title;
-            TextView name=label(title,11,i==active?DesignSystem.TEXT:DesignSystem.MUTED,true);
-            name.setPadding(dp(4),dp(6),dp(7),dp(6));
-            name.setOnClickListener(v->showTab(selected));
-            chip.addView(name);
-            TextView close=label("×",19,DesignSystem.MUTED,false);
-            close.setPadding(dp(4),dp(1),dp(4),dp(1));
-            close.setContentDescription("Close tab "+(i+1));
-            close.setOnClickListener(v->closeTab(selected));
-            chip.addView(close);
-            LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-2,-2);
-            lp.rightMargin=dp(7);
-            tabStrip.addView(chip,lp);
-        }
-        if(counter!=null) counter.setText(tabs.size()+" tabs");
+    private void refreshTabs(){
+        if(counter!=null){counter.setText(Integer.toString(tabs.size()));counter.setContentDescription(tabs.size()==1?"1 tab":tabs.size()+" tabs");}
+    }
+    private void showTabSwitcher(){
+        LinearLayout list=DesignSystem.vertical(this);list.setPadding(dp(12),dp(8),dp(12),dp(8));
+        ScrollView scroll=new ScrollView(this);scroll.addView(list);
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle(tabs.size()==1?"1 tab":tabs.size()+" tabs")
+            .setView(scroll).setPositiveButton("New tab",(d,w)->newTab()).setNegativeButton("Close",null).create();
+        for(int i=0;i<tabs.size();i++){
+            final int index=i;BrowserTab tab=tabs.get(i);LinearLayout row=DesignSystem.horizontal(this);
+            TextView title=label((i==active?"●  ":"")+tab.title,15,DesignSystem.TEXT,true);
+            title.setMaxLines(2);title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            title.setMinHeight(dp(56));title.setGravity(Gravity.CENTER_VERTICAL);title.setPadding(dp(10),0,dp(8),0);
+            title.setOnClickListener(v->{dialog.dismiss();showTab(index);});row.addView(title,new LinearLayout.LayoutParams(0,-2,1));
+            TextView close=control("×",()->{dialog.dismiss();closeTab(index);showTabSwitcher();});
+            close.setContentDescription("Close tab "+(i+1));row.addView(close,new LinearLayout.LayoutParams(dp(48),dp(48)));add(list,row);
+        }dialog.show();
+    }
+    private void showSiteInfo(){
+        BrowserTab t=current();String url=t==null?START:t.pageUrl;String scheme=Uri.parse(url).getScheme();
+        String origin=START.equals(url)?"Home":("https".equalsIgnoreCase(scheme)?"HTTPS address":"HTTP address (not encrypted)");
+        new AlertDialog.Builder(this).setTitle("Site information")
+            .setMessage(origin+"\n"+(START.equals(url)?"":url+"\n")+status.getText())
+            .setPositiveButton("Shields",(d,w)->showProtectionDetails()).setNegativeButton("Close",null).show();
     }
     private void refreshToolbar() {
         BrowserTab tab=current();
         if(tab==null) return;
-        String url=tab.web.getUrl();
+        String url=tab.pageUrl;
+        address.setHint("Search with "+providerName()+" or enter URL");
         if(url!=null && !address.hasFocus()) address.setText(START.equals(url)?"":url);
+        site.setText(START.equals(url)?"Site":("https".equalsIgnoreCase(Uri.parse(url).getScheme())?"HTTPS":"HTTP"));
+        site.setContentDescription("Site information and protection");
         back.setEnabled(tab.web.canGoBack());
         forward.setEnabled(tab.web.canGoForward());
         back.setAlpha(tab.web.canGoBack()?1f:0.4f);
@@ -419,18 +439,18 @@ public final class BrowserActivity extends Activity {
         String url=safeAddress(value);
         tab.pageUrl=url;
         if(START.equals(url)){
-            showTab(active);
+            tab.web.stopLoading();tab.web.loadUrl(START);tab.title="New tab";showTab(active);
         }else{
             if(tab.web.getParent()!=viewport){
                 viewport.removeAllViews();
-                if(tab.web.getParent()!=null)
-                    ((android.view.ViewGroup)tab.web.getParent()).removeView(tab.web);
-                viewport.addView(tab.web,new FrameLayout.LayoutParams(-1,-1));
-                tab.web.onResume();
-            }
-            tab.web.loadUrl(url);
+                if(tab.web.getParent()!=null)((android.view.ViewGroup)tab.web.getParent()).removeView(tab.web);
+                viewport.addView(tab.web,new FrameLayout.LayoutParams(-1,-1));tab.web.onResume();
+            }tab.web.loadUrl(url);
         }
-        address.clearFocus();
+        address.clearFocus();root.requestFocus();
+        android.view.inputmethod.InputMethodManager keyboard=(android.view.inputmethod.InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);
+        if(keyboard!=null)keyboard.hideSoftInputFromWindow(address.getWindowToken(),0);
+        refreshToolbar();persistTabs();
     }
     private void confirmDownload(String url, String agent, String mime, long length) {
         Uri uri;
@@ -641,7 +661,7 @@ public final class BrowserActivity extends Activity {
             "Home","Search engine • "+providerName(),
             "Shields and trackers","Encrypted vault",
             "Bookmarks and history","Extract page evidence",
-            "Android downloads","Desktop site"};
+            "Android downloads","Desktop site","Asterion assistant"};
         new AlertDialog.Builder(this).setTitle("Asterion Browser")
             .setItems(actions,(d,choice)->{
                 switch(choice){
@@ -656,72 +676,66 @@ public final class BrowserActivity extends Activity {
                         BrowserTab t=current();
                         if(t==null)break;
                         WebSettings settings=t.web.getSettings();
-                        boolean desktop=!settings.getUseWideViewPort();
+                        boolean desktop=!t.desktop;
+                        t.desktop=desktop;
+                        settings.setUserAgentString(desktop?"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36":t.mobileUserAgent);
                         settings.setUseWideViewPort(desktop);
                         settings.setLoadWithOverviewMode(desktop);
                         notice(desktop?"Desktop viewport enabled":"Mobile viewport enabled");
                         if(!START.equals(t.pageUrl))t.web.reload();
                         break;
                     }
+                    case 8:startActivity(new Intent(this,AssistantActivity.class));break;
                 }
             }).setNegativeButton("Close",null).show();
     }
     private View createNativeHome(){
-        ScrollView scroll=new ScrollView(this);
-        scroll.setFillViewport(true);
-        scroll.setBackgroundColor(DesignSystem.BG);
-        LinearLayout body=DesignSystem.vertical(this);
-        body.setPadding(dp(24),dp(35),dp(24),dp(22));
-        scroll.addView(body);
-        LinearLayout hero=DesignSystem.vertical(this);
-        hero.setPadding(dp(25),dp(30),dp(25),dp(28));
-        hero.setBackground(DesignSystem.gradient(this,0xFF33245A,0xFF15374F,26));
+        ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);scroll.setBackgroundColor(DesignSystem.BG);
+        LinearLayout body=DesignSystem.vertical(this);body.setPadding(dp(20),dp(24),dp(20),dp(24));scroll.addView(body);
+        LinearLayout heading=DesignSystem.horizontal(this);
         DesignSystem.AsterionMark mark=new DesignSystem.AsterionMark(this);
-        hero.addView(mark,new LinearLayout.LayoutParams(dp(54),dp(54)));
-        TextView kicker=label("ASTERION  /  THE OPEN WEB",11,0xFFA4EDE7,true);
-        kicker.setLetterSpacing(.10f);
-        kicker.setPadding(0,dp(17),0,dp(9));
-        add(hero,kicker);
-        TextView title=label("Explore without limits.",26,DesignSystem.TEXT,true);
-        add(hero,title);
-        TextView subtitle=label(
-            "One place for research, browsing, bookmarks and downloads. Private shields stay in your control.",
-            13,0xFFD0D8EA,false);
-        subtitle.setPadding(0,dp(12),0,dp(19));
-        add(hero,subtitle);
-        TextView search=control("Search the web",()->{
+        heading.addView(mark,new LinearLayout.LayoutParams(dp(38),dp(38)));
+        TextView title=label("Asterion Browser",22,DesignSystem.TEXT,true);title.setPadding(dp(12),0,0,0);
+        heading.addView(title,new LinearLayout.LayoutParams(0,-2,1));add(body,heading);
+        TextView search=control("Search with "+providerName(),()->{
             address.requestFocus();
-            android.view.inputmethod.InputMethodManager keyboard=
-                (android.view.inputmethod.InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);
-            if(keyboard!=null)keyboard.showSoftInput(address,
-                android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+            android.view.inputmethod.InputMethodManager keyboard=(android.view.inputmethod.InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);
+            if(keyboard!=null)keyboard.showSoftInput(address,android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
         });
-        search.setBackground(DesignSystem.gradient(this,0xFF7862E8,0xFF288DC5,16));
-        add(hero,search);
-        TextView provider=label("Search provider: "+providerName()+"  •  Change",12,
-            DesignSystem.TEXT,true);
-        provider.setPadding(0,dp(17),0,0);
-        provider.setOnClickListener(v->chooseSearchProvider());
-        add(hero,provider);
-        add(body,hero);
-        TextView library=label("YOUR WORKSPACE",11,DesignSystem.TEAL,true);
-        library.setLetterSpacing(.10f);
-        library.setPadding(0,dp(29),0,dp(13));
-        add(body,library);
-        LinearLayout cards=DesignSystem.vertical(this);
-        cards.setPadding(dp(16),dp(8),dp(16),dp(12));
-        cards.setBackground(DesignSystem.shape(this,DesignSystem.SURFACE,
-            DesignSystem.EDGE,20));
-        add(cards,control("Bookmarks & history",this::showSavedPages));
-        add(cards,control("Private browsing shields",this::showProtectionDetails));
-        add(cards,control("Downloads",this::showDownloadProgress));
-        add(cards,control("Password vault",this::showVault));
-        add(body,cards);
-        TextView foot=label("No provider account or custom home server required.",11,
-            DesignSystem.MUTED,false);
-        foot.setPadding(0,dp(22),0,0);
-        add(body,foot);
-        return scroll;
+        LinearLayout.LayoutParams searchLp=new LinearLayout.LayoutParams(-1,dp(52));searchLp.topMargin=dp(20);body.addView(search,searchLp);
+        homeSection(body,"Bookmarks","bookmarks",8);
+        homeSection(body,"Recent activity","history",5);
+        TextView settings=control("Search engine · "+providerName(),this::chooseSearchProvider);
+        add(body,settings);return scroll;
+    }
+    private void homeSection(LinearLayout body,String heading,String key,int limit){
+        LinearLayout bar=DesignSystem.horizontal(this);bar.setPadding(0,dp(20),0,dp(4));
+        TextView label=label(heading,17,DesignSystem.TEXT,true);bar.addView(label,new LinearLayout.LayoutParams(0,-2,1));
+        bar.addView(control("View all",()->showEntryList(key,heading)));add(body,bar);
+        try{
+            JSONArray entries=new JSONArray(browserPrefs.getString(key,"[]"));
+            if(entries.length()==0){
+                TextView empty=label(key.equals("bookmarks")?"No bookmarks saved":"No recent pages",13,DesignSystem.MUTED,false);
+                empty.setPadding(0,dp(8),0,dp(12));add(body,empty);return;
+            }
+            for(int i=0;i<Math.min(limit,entries.length());i++){
+                JSONObject entry=entries.optJSONObject(i);if(entry==null)continue;
+                String url=entry.optString("url",START);String name=entry.optString("title","");
+                if(name.isBlank())name=url;
+                TextView shortcut=control(name,()->navigate(url));shortcut.setGravity(Gravity.START|Gravity.CENTER_VERTICAL);
+                shortcut.setSingleLine(true);shortcut.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                shortcut.setMinHeight(dp(48));shortcut.setContentDescription(name+", "+Uri.parse(url).getHost());
+                LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=dp(5);body.addView(shortcut,lp);
+                if(key.equals("bookmarks"))shortcut.setOnLongClickListener(v->{
+                    new AlertDialog.Builder(this).setTitle("Remove bookmark?").setPositiveButton("Remove",(d,w)->{
+                        try{JSONArray old=new JSONArray(browserPrefs.getString("bookmarks","[]"));JSONArray next=new JSONArray();
+                            for(int j=0;j<old.length();j++){JSONObject e=old.optJSONObject(j);if(e!=null&&!url.equals(e.optString("url")))next.put(e);}
+                            browserPrefs.edit().putString("bookmarks",next.toString()).apply();showTab(active);
+                        }catch(Exception ignored){notice("Unable to remove bookmark");}
+                    }).setNegativeButton("Cancel",null).show();return true;
+                });
+            }
+        }catch(Exception ignored){notice("Saved pages unavailable");}
     }
 
     private static String safeSessionUrl(String value){
@@ -738,7 +752,7 @@ public final class BrowserActivity extends Activity {
     private void persistTabs(){
         JSONArray saved=new JSONArray();
         for(BrowserTab tab:tabs)
-            saved.put(safeSessionUrl(tab.web.getUrl()==null?START:tab.web.getUrl()));
+            saved.put(safeSessionUrl(tab.pageUrl));
         browserPrefs.edit().putString("tabs",saved.toString())
             .putInt("active",active).apply();
     }
@@ -823,7 +837,7 @@ public final class BrowserActivity extends Activity {
             new AlertDialog.Builder(this).setTitle(heading)
                 .setItems(titles,(dialog,which)->{
                     BrowserTab tab=current();
-                    if(tab!=null)tab.web.loadUrl(safeAddress(urls[which]));
+                    if(tab!=null)navigate(urls[which]);
                 }).setNegativeButton("Close",null).show();
         }catch(Exception ignored){notice("Saved pages unavailable");}
     }
@@ -983,7 +997,7 @@ public final class BrowserActivity extends Activity {
     @Override protected void onSaveInstanceState(Bundle out) {
         super.onSaveInstanceState(out);
         ArrayList<String> urls=new ArrayList<>();
-        for(BrowserTab tab:tabs) urls.add(tab.web.getUrl()==null?START:tab.web.getUrl());
+        for(BrowserTab tab:tabs) urls.add(safeSessionUrl(tab.pageUrl));
         out.putStringArrayList("urls",urls);
         out.putInt("current",active);
     }
@@ -1003,6 +1017,8 @@ public final class BrowserActivity extends Activity {
         final AtomicInteger blocked=new AtomicInteger(0);
         final AtomicInteger popups=new AtomicInteger(0);
         String title="New tab";
-        BrowserTab(WebView view){web=view;}
+        final String mobileUserAgent;
+        boolean desktop;
+        BrowserTab(WebView view){web=view;mobileUserAgent=view.getSettings().getUserAgentString();}
     }
 }
