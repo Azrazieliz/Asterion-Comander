@@ -3,11 +3,20 @@ on:
   push:
     branches:
       - fix/control-browser-atomic-filter-cache-20261126
+      - work/control-non-ai-browser-20261126
       - work/control-native-ai-reconstruction-20261126
     paths:
-      - 'android/app/src/main/java/com/asterion/control/BrowserFilterCacheStore.java'
+      - 'android/app/src/main/java/com/asterion/control/Browser*.java'
+      - 'tests/java/com/asterion/control/Browser*.java'
       - 'android/app/src/main/java/com/asterion/control/BrowserProtection.java'
       - 'tests/java/com/asterion/control/BrowserFilterCacheStoreTest.java'
+      - '.github/workflows/control-browser-atomic-filter.yml'
+  pull_request:
+    branches:
+      - work/control-native-ai-reconstruction-20261126
+    paths:
+      - 'android/app/src/main/java/com/asterion/control/Browser*.java'
+      - 'tests/java/com/asterion/control/Browser*.java'
       - '.github/workflows/control-browser-atomic-filter.yml'
   workflow_dispatch:
 permissions:
@@ -37,6 +46,13 @@ jobs:
             tests/java/com/asterion/control/BrowserCosmeticFiltersTest.java
           java -cp /tmp/asterion-browser-atomic-classes \
             com.asterion.control.BrowserCosmeticFiltersTest
+      - name: Execute Browser navigation and privacy regressions
+        run: |
+          javac -encoding UTF-8 -d /tmp/asterion-browser-atomic-classes \
+            android/app/src/main/java/com/asterion/control/BrowserNavigationPolicy.java \
+            tests/java/com/asterion/control/BrowserNavigationPolicyTest.java
+          java -cp /tmp/asterion-browser-atomic-classes \
+            com.asterion.control.BrowserNavigationPolicyTest
   android-source-only:
     needs: browser-cache-jvm
     runs-on: ubuntu-latest
