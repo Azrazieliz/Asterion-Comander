@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "description": "P0 first actionable independently verified Control AI source tasks; not the full V3-V6 acceptance backlog",
+  "tasks": [
+    {
+      "id": "ai_model_execution",
+      "priority": 0,
+      "component": "M4 Android inference",
+      "goal": "Improve model-native decoding and measured reasoning without forced suppression while preserving JNI cancellations, signed weights and existing WSS jobs.",
+      "target_path": "android/app/src/main/java/com/asterion/control/OnDeviceLlm.java",
+      "depends_on": []
+    },
+    {
+      "id": "ai_local_provider",
+      "priority": 0,
+      "component": "M10 local autonomy",
+      "goal": "Make the local PC model provider robust to structured source-edit responses, missing inference servers and checkpoint resumption without cloud dependencies.",
+      "target_path": "asterion_remote/local_model_provider.py",
+      "depends_on": []
+    },
+    {
+      "id": "ai_model_evaluation",
+      "priority": 1,
+      "component": "M4 Model Lab",
+      "goal": "Implement genuinely independent holdout measurement and contamination-safe evidence handling with no invented evaluation scores.",
+      "target_path": "asterion_remote/model_evaluation.py",
+      "depends_on": []
+    },
+    {
+      "id": "ai_adaptation_validation",
+      "priority": 1,
+      "component": "M4 weight adaptation",
+      "goal": "Harden reviewed licensed dataset preparation and genuine adapter-training validation without training on holdout cases or silently downloading weights.",
+      "target_path": "scripts/control_ai_adaptation.py",
+      "depends_on": []
+    },
+    {
+      "id": "ai_durable_backlog",
+      "priority": 0,
+      "component": "M10 supervised development",
+      "goal": "Improve deterministic dependency selection, persistence and crash reconciliation while preserving existing overnight supervisor and human override.",
+      "target_path": "asterion_remote/dev_backlog.py",
+      "depends_on": []
+    },
+    {
+      "id": "ai_native_tool_receipts",
+      "priority": 1,
+      "component": "M2/M3 native verified tools",
+      "goal": "Verify signed WSS tool allowlists and receipt postconditions, keeping specialist engines delegated rather than duplicating their work.",
+      "target_path": "asterion_remote/native_routes.py",
+      "depends_on": [
+        "ai_local_provider"
+      ]
+    }
+  ],
+  "trusted_tests": {
+    "ai_model_execution": [
+      "tests/test_control_ai_model_profile.py"
+    ],
+    "ai_local_provider": [
+      "tests/test_overnight_supervisor.py"
+    ],
+    "ai_model_evaluation": [
+      "tests/test_model_evaluation.py"
+    ],
+    "ai_adaptation_validation": [
+      "tests/test_control_ai_adaptation.py"
+    ],
+    "ai_durable_backlog": [
+      "tests/test_control_ai_dev_backlog.py"
+    ],
+    "ai_native_tool_receipts": [
+      "tests/test_v6_native_ai_wss.py"
+    ]
+  }
+}
