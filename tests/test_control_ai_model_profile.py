@@ -19,8 +19,8 @@ def test_model_profile_has_signed_asset_hash_and_reasonable_budgets():
     assert profile["max_input_chars"] > 1800
     assert profile["max_new_tokens"] > 192
     assert profile["context_tokens"] >= profile["max_new_tokens"] + 256
-    assert all(profile["chat_format"][k] for k in
-               ("system_prefix", "user_prefix", "assistant_prefix"))
+    assert "chat_format" not in profile  # native backend selects GGUF template
+    assert len(profile["system_text"]) > 40
     assert "/no_think" not in profile["system_text"]
     assert "cannot autonomously operate" not in profile["system_text"].lower()
 
@@ -28,7 +28,8 @@ def test_model_profile_has_signed_asset_hash_and_reasonable_budgets():
 def test_on_device_loader_uses_profile_not_named_vendor_constants():
     source = (JAVA / "OnDeviceLlm.java").read_text(encoding="utf-8")
     assert "OnDeviceModelProfile.read(context)" in source
-    assert "profile.prompt(userPrompt," in source
+    assert "profile.systemInstructions(guidance)" in source
+    assert "nativeGenerate(systemText,userPrompt.trim()," in source
     assert "ControlAssistantPreferences.promptGuidance(context)" in source
     assert "ControlAssistantPreferences.outputTokens(context,profile)" in source
     assert "outputBudget,profile.contextTokens" in source
@@ -42,6 +43,9 @@ def test_on_device_loader_uses_profile_not_named_vendor_constants():
 def test_jni_preserves_cancellation_and_rejects_context_overflow():
     code = NATIVE.read_text(encoding="utf-8")
     assert "jint context_limit" in code
+    assert "jstring jsystem,jstring juser" in code
+    assert "llama_model_chat_template(model,nullptr)" in code
+    assert "llama_chat_apply_template(chatTemplate,messages,2,true" in code
     assert "limit>2048" in code
     assert "prompt.size()>262144" in code
     assert "tokens.size()+static_cast<size_t>(limit)+32u" in code
