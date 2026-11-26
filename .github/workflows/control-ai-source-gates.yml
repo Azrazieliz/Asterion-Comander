@@ -1,0 +1,60 @@
+name: Control native AI reconstruction — source gates only
+on:
+  push:
+    branches:
+      - work/control-native-ai-reconstruction-20261126
+      - 'ai-candidate/**'
+    paths:
+      - 'android/app/src/main/**'
+      - 'asterion_remote/**'
+      - 'scripts/control_ai_*.py'
+      - 'tests/test_control_ai_*.py'
+      - '.github/workflows/control-ai-source-gates.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: control-ai-source-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  python-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify executable AI source contracts, adaptation and persistence
+        run: |
+          python -m pip install --disable-pip-version-check pytest
+          python -m pytest -q \
+            tests/test_control_ai_model_profile.py \
+            tests/test_control_ai_adaptation.py \
+            tests/test_control_ai_dev_backlog.py \
+            tests/test_control_ai_executor.py
+  android-java-only:
+    needs: python-contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - name: Ensure required Android SDK platform is installed
+        run: |
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          if [ ! -f "$SDK/platforms/android-35/android.jar" ]; then
+            SDKMGR="$SDK/cmdline-tools/latest/bin/sdkmanager"
+            yes | "$SDKMGR" --sdk_root="$SDK" 'platforms;android-35' || true
+          fi
+          test -s "$SDK/platforms/android-35/android.jar"
+      - name: Java source compilation only — never assemble, sign or install APK
+        working-directory: android
+        run: gradle --no-daemon --console=plain :app:compileDebugJavaWithJavac
