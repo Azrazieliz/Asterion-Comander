@@ -271,7 +271,7 @@ def _prompt(row: sqlite3.Row, n: int, request_id: str,
     )
 
 
-def claim(cycle_id: str) -> dict:
+def claim(cycle_id: str, *, reserve=None) -> dict | None:
     """Durably reserve ONE turn before any provider/tool call.
 
     An uncertain caller crash after claiming prevents automatic re-submission.
@@ -291,6 +291,10 @@ def claim(cycle_id: str) -> dict:
             if row["max_turns"] and number > row["max_turns"]:
                 raise RuntimeError("cycle_turn_limit_reached")
             ident = f"{cycle_id}-turn-{number}"
+            task = reserve(con,cycle_id,ident) if reserve is not None else None
+            if reserve is not None and task is None:
+                con.execute("COMMIT")
+                return None
             previous = con.execute("""SELECT work_summary,evidence_sha256 FROM turns
                 WHERE cycle_id=? AND state='verified'
                 ORDER BY turn_index DESC LIMIT 1""", (cycle_id,)).fetchone()
@@ -314,7 +318,7 @@ def claim(cycle_id: str) -> dict:
     return {"cycle_id":cycle_id, "turn_index":number, "request_id":ident,
             "provider":row["provider"], "prompt":prompt,
             "prompt_sha256":_digest(prompt), "replay_allowed":False,
-            "state":"dispatch_uncertain"}
+            "state":"dispatch_uncertain", **({"task":task} if task is not None else {})}
 
 
 def response(cycle_id: str, request_id: str, *, provider_receipt: str,
@@ -371,7 +375,7 @@ def review(cycle_id: str, *, error_code: str = "UncertainExternalOperation") -> 
 def verify(cycle_id: str, request_id: str, *,
            evidence_sha256: str, work_summary: str,
            next_work: str, done: bool = False,
-           acceptance_verified: bool = False) -> dict:
+           acceptance_verified: bool = False, commit_work=None) -> dict:
     """Trusted work verifier confirms actual project progress.
 
     This cannot validate evidence itself. Only an authorized executor should
@@ -407,6 +411,11 @@ def verify(cycle_id: str, request_id: str, *,
                  int(acceptance_verified),now,cycle_id,request_id))
             if match.rowcount!=1:
                 raise RuntimeError("no_matching_turn_to_verify")
+            if commit_work is not None:
+                # Trusted local callback writes the task evidence in this exact
+                # transaction; a crash cannot leave a verified turn with a
+                # missing backlog result or vice versa.
+                commit_work(con,cycle_id,request_id,evidence_sha256)
             reached_limit=(row["max_turns"]>0 and
                            row["turn_index"] >= row["max_turns"])
             new_state=("stopped" if row["stop_requested"] else
@@ -432,7 +441,7 @@ def verify(cycle_id: str, request_id: str, *,
 
 def advance_once(cycle_id: str,
                  provider: Callable[[str,str],dict],
-                 executor: Callable[[str,str,str],dict] | None = None) -> dict:
+                 executor: Callable[[str,str,str],dict] | None = None, *, reserve=None, commit_work=None) -> dict:
     """Run one owner-authorized development turn using injected real adapters.
 
     Provider(prompt,request_id) -> {message_id,content}. Executor(content,
@@ -440,7 +449,8 @@ def advance_once(cycle_id: str,
     done?,acceptance_verified?}. Neither adapter is silently simulated here.
     No executor: the cycle correctly stops at awaiting_verification.
     """
-    turn = claim(cycle_id)
+    turn = claim(cycle_id,reserve=reserve)
+    if turn is None:return {**status(cycle_id),"no_dependency_ready_task":True}
     ident=turn["request_id"]
     try:
         output=provider(turn["prompt"],ident)
@@ -457,7 +467,7 @@ def advance_once(cycle_id: str,
         outcome=executor(body,cycle_id,ident)
         if not isinstance(outcome,dict):
             raise TypeError("executor_did_not_return_receipt")
-        return verify(cycle_id,ident,**outcome)
+        return verify(cycle_id,ident,**outcome,commit_work=commit_work)
     except Exception as exc:
         return review(cycle_id,error_code=type(exc).__name__)
 
