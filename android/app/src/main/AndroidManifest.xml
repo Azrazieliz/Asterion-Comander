@@ -37,6 +37,10 @@
       <!-- Isolate website cookies/storage from the authenticated Control dashboard. -->
       <activity android:name=".BrowserActivity" android:exported="false"
           android:process=":asterion_browser" android:screenOrientation="unspecified"/>
+      <activity android:name=".TorBrowserActivity" android:exported="false"
+          android:process=":asterion_tor" android:screenOrientation="unspecified"/>
+      <service android:name="org.torproject.jni.TorService" android:exported="false"
+          android:process=":asterion_tor"/>
       <!-- Same-UID internal access to the existing main-process signed transfer authority. -->
       <provider android:name=".BrowserDownloadProvider"
           android:authorities="${applicationId}.browser.download.internal"
