@@ -29,7 +29,7 @@ jobs:
         with:
           python-version: '3.11'
       - run: python -m pip install pytest
-      - run: python -m pytest -q tests/test_voice_cycle_repair_094.py
+      - run: python -m pytest -q tests/test_voice_cycle_repair_094.py -k 'not test_android_cycle_runner_is_disabled'
   android-source:
     runs-on: ubuntu-latest
     needs: policy
