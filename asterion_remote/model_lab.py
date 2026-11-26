@@ -6,6 +6,7 @@ A newer upstream SHA is a candidate for *evaluation*, never an automatic upgrade
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import sqlite3
@@ -215,3 +216,165 @@ def recommendations(app:str)->dict:
             "automatic_update":False,
             "needs_owner_approval":verdict=="owner_review_recommended"})
     return {"ok":True,"app":app,"items":findings}
+
+
+# Owner-tailored Control AI: experimental candidates live in this existing
+# Model Laboratory database, not a second registry or automatic model picker.
+_CANDIDATE_ID=re.compile(r"^[a-z][a-z0-9_.-]{3,95}$")
+_DIGEST=re.compile(r"^[0-9a-f]{64}$")
+_REVISION=re.compile(r"^[0-9a-f]{40,64}$")
+_ARCHITECTURES={"dense","moe","hybrid","ssm","recurrent","unknown"}
+_BACKENDS={"android_cpu","android_gpu","android_npu","windows_cpu","windows_gpu"}
+_MAX_BYTES=2**47  # input bounds are for integer integrity, not model tier selection
+
+def _candidate_db():
+    db=_db()
+    db.executescript("""
+    CREATE TABLE IF NOT EXISTS model_candidate_experiments (
+      id TEXT PRIMARY KEY, app TEXT NOT NULL, repo TEXT NOT NULL,
+      revision TEXT NOT NULL, artifact_sha256 TEXT NOT NULL,
+      architecture TEXT NOT NULL, parameters_total_b REAL NOT NULL,
+      parameters_active_b REAL, artifact_bytes INTEGER NOT NULL,
+      license TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'staged',
+      created_ms INTEGER NOT NULL, UNIQUE(app,repo,revision,artifact_sha256));
+    CREATE TABLE IF NOT EXISTS model_candidate_probes (
+      candidate_id TEXT NOT NULL, device TEXT NOT NULL,
+      backend TEXT NOT NULL, context_tokens INTEGER NOT NULL,
+      weight_resident_bytes INTEGER NOT NULL,
+      kv_cache_bytes INTEGER NOT NULL,
+      scratch_bytes INTEGER NOT NULL,
+      process_overhead_bytes INTEGER NOT NULL,
+      system_headroom_bytes INTEGER NOT NULL,
+      measured_free_bytes INTEGER NOT NULL,
+      peak_pss_bytes INTEGER NOT NULL, prefill_tokens_s REAL NOT NULL,
+      decode_tokens_s REAL NOT NULL, thermal_state INTEGER NOT NULL,
+      elapsed_s REAL NOT NULL, evidence_sha256 TEXT NOT NULL,
+      verified INTEGER NOT NULL DEFAULT 0,
+      created_ms INTEGER NOT NULL,
+      PRIMARY KEY(candidate_id,device,backend,context_tokens,evidence_sha256),
+      FOREIGN KEY(candidate_id) REFERENCES model_candidate_experiments(id));
+    """)
+    db.execute("PRAGMA foreign_keys=ON")
+    return db
+
+def register_candidate(candidate_id:str,app:str,repo:str,revision:str,
+                       artifact_sha256:str,architecture:str,
+                       parameters_total_b:float,parameters_active_b:float|None,
+                       artifact_bytes:int,license:str)->dict:
+    """Register any parameter tier; no implication of phone compatibility."""
+    _valid(app,repo)
+    if (not _CANDIDATE_ID.fullmatch(candidate_id) or
+        not _REVISION.fullmatch(revision) or
+        not _DIGEST.fullmatch(artifact_sha256) or
+        architecture not in _ARCHITECTURES or
+        not isinstance(artifact_bytes,int) or
+        not 1_000_000<=artifact_bytes<=_MAX_BYTES or
+        not isinstance(parameters_total_b,(int,float)) or
+        not math.isfinite(parameters_total_b) or parameters_total_b<=0 or
+        parameters_total_b>10000 or
+        (parameters_active_b is not None and
+         (not isinstance(parameters_active_b,(int,float)) or
+          not math.isfinite(parameters_active_b) or
+          parameters_active_b<=0 or parameters_active_b>parameters_total_b)) or
+        not isinstance(license,str) or
+        not re.fullmatch(r"[A-Za-z0-9_.+-]{2,60}",license)):
+        raise ValueError("invalid_candidate_provenance_or_structure")
+    db=_candidate_db()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        row=db.execute("SELECT * FROM model_candidate_experiments WHERE id=?",
+                       (candidate_id,)).fetchone()
+        proposed=(app,repo,revision,artifact_sha256,architecture,
+                  float(parameters_total_b),float(parameters_active_b) if
+                  parameters_active_b is not None else None,artifact_bytes,license)
+        if row:
+            actual=tuple(row[k] for k in ("app","repo","revision","artifact_sha256",
+                    "architecture","parameters_total_b","parameters_active_b",
+                    "artifact_bytes","license"))
+            if actual!=proposed:
+                raise ValueError("candidate_identity_cannot_be_rewritten")
+        else:
+            db.execute("""INSERT INTO model_candidate_experiments
+                (id,app,repo,revision,artifact_sha256,architecture,
+                 parameters_total_b,parameters_active_b,artifact_bytes,license,created_ms)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                (candidate_id,*proposed,time.time_ns()//1_000_000))
+        db.execute("COMMIT")
+    except BaseException:
+        db.execute("ROLLBACK")
+        raise
+    finally:
+        db.close()
+    return {"id":candidate_id,"registered":True,
+            "performance_qualified":False,"approved_for_phone":False,
+            "automatically_promoted":False}
+
+def record_candidate_probe(candidate_id:str,device:str,backend:str,
+                           context_tokens:int,*,weight_resident_bytes:int,
+                           kv_cache_bytes:int,scratch_bytes:int,
+                           process_overhead_bytes:int,system_headroom_bytes:int,
+                           measured_free_bytes:int,peak_pss_bytes:int,
+                           prefill_tokens_s:float,decode_tokens_s:float,
+                           thermal_state:int,elapsed_s:float,
+                           evidence_sha256:str,verified:bool)->dict:
+    """Store externally sourced measurements; never infer certification from speed."""
+    if (not _CANDIDATE_ID.fullmatch(candidate_id) or
+        not isinstance(device,str) or
+        not re.fullmatch(r"[A-Za-z0-9_.-]{3,90}",device) or
+        backend not in _BACKENDS or
+        not type(context_tokens) is int or not 256<=context_tokens<=2**22 or
+        not _DIGEST.fullmatch(evidence_sha256) or type(verified) is not bool or
+        type(thermal_state) is not int or not 0<=thermal_state<=9):
+        raise ValueError("invalid_candidate_probe_identity")
+    sizes=(weight_resident_bytes,kv_cache_bytes,scratch_bytes,
+           process_overhead_bytes,system_headroom_bytes,measured_free_bytes,peak_pss_bytes)
+    if any(type(n) is not int or n<0 or n>_MAX_BYTES for n in sizes) or weight_resident_bytes==0:
+        raise ValueError("invalid_resource_ledger")
+    rates=(prefill_tokens_s,decode_tokens_s,elapsed_s)
+    if any(not isinstance(v,(int,float)) or not math.isfinite(v) or v<0 for v in rates) or elapsed_s==0:
+        raise ValueError("invalid_measured_latency")
+    admission=sum(sizes[:5])
+    # This is a measurement-based conservative admission heuristic, NOT proof
+    # of Android memory availability. PSS and measured free have different roles.
+    would_fit=admission<=measured_free_bytes
+    db=_candidate_db()
+    try:
+        with db:
+            if not db.execute("SELECT id FROM model_candidate_experiments WHERE id=?",
+                              (candidate_id,)).fetchone():
+                raise ValueError("candidate_not_registered")
+            db.execute("""INSERT OR IGNORE INTO model_candidate_probes
+                (candidate_id,device,backend,context_tokens,
+                 weight_resident_bytes,kv_cache_bytes,scratch_bytes,process_overhead_bytes,
+                 system_headroom_bytes,measured_free_bytes,peak_pss_bytes,
+                 prefill_tokens_s,decode_tokens_s,thermal_state,elapsed_s,
+                 evidence_sha256,verified,created_ms)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (candidate_id,device,backend,context_tokens,*sizes,
+                 float(prefill_tokens_s),float(decode_tokens_s),thermal_state,
+                 float(elapsed_s),evidence_sha256,int(verified),time.time_ns()//1_000_000))
+    finally: db.close()
+    return {"candidate_id":candidate_id,"admission_ledger_bytes":admission,
+            "headroom_observed_bytes":measured_free_bytes,
+            "admission_estimate_fits":would_fit,
+            "receipt_verified":verified,
+            "reasoning_quality_verified":False,
+            "owner_workflow_certified":False,"promoted":False}
+
+def candidate_matrix(app:str="")->dict:
+    if app and not _APP.fullmatch(app):raise ValueError("invalid_app")
+    db=_candidate_db()
+    try:
+        rows=[dict(r) for r in db.execute(
+            "SELECT * FROM model_candidate_experiments"+
+            (" WHERE app=?" if app else "")+
+            " ORDER BY created_ms,id LIMIT 500",(app,) if app else ())]
+        for row in rows:
+            row["probes"]=[dict(r) for r in db.execute(
+                "SELECT * FROM model_candidate_probes WHERE candidate_id=? "
+                "ORDER BY created_ms DESC LIMIT 40",(row["id"],))]
+            row["phone_qualified"]=False
+            row["reasoning_quality_certified"]=False
+            row["no_automatic_model_selection"]=True
+    finally:db.close()
+    return {"candidates":rows,"count":len(rows),"phone_certification_open":True}
