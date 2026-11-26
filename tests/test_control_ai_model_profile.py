@@ -47,7 +47,7 @@ def test_jni_preserves_cancellation_and_rejects_context_overflow():
     assert "llama_model_chat_template(model,nullptr)" in code
     assert "llama_chat_apply_template(chatTemplate,messages,2,true" in code
     assert "limit>2048" in code
-    assert "prompt.size()>262144" in code
+    assert "systemText.size()+userText.size()>262144" in code
     assert "tokens.size()+static_cast<size_t>(limit)+32u" in code
     assert "cp.n_ctx=context_limit;" in code
     assert "cancel_generation.load" in code
