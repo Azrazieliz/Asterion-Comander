@@ -6,11 +6,13 @@ on:
       - work/control-non-ai-browser-20261126
       - work/control-non-ai-browser-permissions-20261126
       - work/control-non-ai-download-integration-20261126
+      - work/control-non-ai-private-browser-20261126
       - work/control-native-ai-reconstruction-20261126
     paths:
       - 'android/app/src/main/java/com/asterion/control/Browser*.java'
       - 'android/app/src/main/java/com/asterion/control/ControlSecurityPolicy.java'
       - 'android/app/src/main/AndroidManifest.xml'
+      - 'android/app/build.gradle'
       - 'tests/java/com/asterion/control/Browser*.java'
       - 'android/app/src/main/java/com/asterion/control/BrowserProtection.java'
       - 'tests/java/com/asterion/control/BrowserFilterCacheStoreTest.java'
@@ -22,6 +24,7 @@ on:
       - 'android/app/src/main/java/com/asterion/control/Browser*.java'
       - 'android/app/src/main/java/com/asterion/control/ControlSecurityPolicy.java'
       - 'android/app/src/main/AndroidManifest.xml'
+      - 'android/app/build.gradle'
       - 'tests/java/com/asterion/control/Browser*.java'
       - '.github/workflows/control-browser-atomic-filter.yml'
   workflow_dispatch:
