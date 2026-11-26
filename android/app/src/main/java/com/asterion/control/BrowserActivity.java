@@ -287,7 +287,7 @@ public final class BrowserActivity extends Activity {
             @Override public boolean shouldOverrideUrlLoading(WebView web, WebResourceRequest request) {
                 if(TorRoutePolicy.onionHost(request.getUrl().toString())){
                     String onion=TorRoutePolicy.onionAddress(request.getUrl().toString());
-                    if(onion!=null&&request.isForMainFrame()&&request.hasGesture()&&current()==tab)ControlTorRoute.offer(BrowserActivity.this,onion);
+                    if(onion!=null&&request.isForMainFrame()&&request.hasGesture()&&current()==tab)openEmbeddedTor(onion);
                     return true;
                 }
                 if(!BrowserNavigationPolicy.isWeb(request.getUrl().toString()))return true;
@@ -487,11 +487,23 @@ public final class BrowserActivity extends Activity {
             }catch(Exception ignored){status.setText("Browser");}
         }
     }
+    private void openEmbeddedTor(String url){
+        Intent intent=new Intent(this,TorActivity.class);
+        if(url!=null)intent.putExtra("tor_url",url);
+        startActivity(intent);
+    }
+    private void showTorOptions(){
+        new AlertDialog.Builder(this).setTitle("Tor network")
+            .setItems(new String[]{"Embedded Tor (restricted browsing)","Official Tor Browser / Tor VPN"},(d,choice)->{
+                if(choice==0)openEmbeddedTor(null);else ControlTorRoute.panel(this);
+            }).setNegativeButton("Cancel",null).show();
+    }
     private void navigate(String value) {
         BrowserTab tab=current();
         if(tab==null) return;
         String onion=TorRoutePolicy.onionAddress(value);
-        if(onion!=null){ControlTorRoute.offer(this,onion);return;}
+        if(onion!=null){openEmbeddedTor(onion);return;}
+        if(TorAddressPolicy.looksOnion(value)){notice("Invalid onion address; not sent to search");return;}
         String url=safeAddress(value);
         if(START.equals(url)&&value!=null&&!value.trim().isEmpty()&&!START.equals(value.trim())){notice("Unsupported or invalid address");return;}
         if(pendingSiteRequest!=null)finishSiteRequest(false);
@@ -832,7 +844,7 @@ public final class BrowserActivity extends Activity {
                     }
                     case 8:startActivity(new Intent(this,AssistantActivity.class));break;
                     case 9:newPrivateTab();break;
-                    case 10:ControlTorRoute.panel(this);break;
+                    case 10:showTorOptions();break;
                 }
             }).setNegativeButton("Close",null).show();
     }

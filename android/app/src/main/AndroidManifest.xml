@@ -1,4 +1,4 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <!-- B09: optional site camera/location, only after origin-specific owner
@@ -58,6 +58,10 @@
       <service android:name=".AgentService" android:exported="false" android:stopWithTask="false" android:foregroundServiceType="connectedDevice" />
       <!-- The official WireGuard AAR supplies and secures its own VpnService.
            Do not redeclare it or override its explicit exported=false policy. -->
+      <activity android:name=".TorActivity" android:exported="false"
+          android:process=":asterion_tor" android:configChanges="orientation|screenSize|keyboardHidden"/>
+      <service android:name="org.torproject.jni.TorService" android:exported="false"
+          android:process=":asterion_tor" tools:replace="android:exported,android:process"/>
       <receiver android:name=".RestoreReceiver" android:enabled="true" android:exported="false">
         <intent-filter>
           <action android:name="android.intent.action.BOOT_COMPLETED"/>

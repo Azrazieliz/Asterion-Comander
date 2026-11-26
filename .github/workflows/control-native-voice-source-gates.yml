@@ -19,7 +19,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: '25'
       - run: |
           mkdir -p /tmp/voice-policy
           javac -encoding UTF-8 -d /tmp/voice-policy android/app/src/main/java/com/asterion/control/VoiceReplyPolicy.java tests/java/com/asterion/control/VoiceReplyPolicyTest.java android/app/src/main/java/com/asterion/control/VoiceWakeWords.java tests/java/com/asterion/control/VoiceWakeWordsTest.java
@@ -38,10 +38,17 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: '25'
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.13'
+          gradle-version: '9.3.1'
+      - name: Ensure Android 37.0 platform
+        run: |
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          if [ ! -f "$SDK/platforms/android-37.0/android.jar" ]; then
+            yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" --channel=3 'platforms;android-37.0' || true
+          fi
+          test -s "$SDK/platforms/android-37.0/android.jar"
       - name: Compile integrated Android source
         working-directory: android
         run: gradle --no-daemon --console=plain :app:compileDebugJavaWithJavac
