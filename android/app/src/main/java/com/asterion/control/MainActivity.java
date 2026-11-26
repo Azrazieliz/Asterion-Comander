@@ -41,6 +41,7 @@ import android.webkit.WebViewClient;
 import android.widget.EditText;
 import android.widget.ArrayAdapter;
 import android.widget.ListView;
+import android.widget.Spinner;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -1208,6 +1209,9 @@ public final class MainActivity extends Activity {
     gap(intelligence,9);
     twoActions(intelligence,"Model status","check",this::showPhoneAiStatus,
       "App integrations","settings",this::showAppBridgeApprovals);
+    gap(intelligence,9);
+    button(intelligence,"Local AI behavior & reasoning","settings",false,
+      this::showPhoneAiPreferences);
     wide(toolsBody,intelligence);
     LinearLayout advancedPanel=v();gap(advancedPanel,12);LinearLayout incidents=card();
     rowTitle(incidents,"Incident investigation",
@@ -1319,6 +1323,49 @@ public final class MainActivity extends Activity {
     return scroll(toolsBody);
   }
 
+  /** Explicit owner action. Preferences stay in this signed app's private data. */
+  private void showPhoneAiPreferences(){
+    LinearLayout panel=new LinearLayout(this);
+    panel.setOrientation(LinearLayout.VERTICAL);
+    panel.setPadding(dp(18),dp(10),dp(18),dp(4));
+    TextView hint=t("Reasoning effort and topics are owner-controlled locally. "+
+      "These preferences do not grant device permissions or authorize actions.",
+      12,DesignSystem.MUTED,false);
+    panel.addView(hint);
+    String[] labels={"Fast","Balanced","Deep"};
+    Spinner effortChoice=new Spinner(this);
+    ArrayAdapter<String> adapter=new ArrayAdapter<>(this,
+      android.R.layout.simple_spinner_item,labels);
+    adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+    effortChoice.setAdapter(adapter);
+    String current=ControlAssistantPreferences.effort(this);
+    effortChoice.setSelection("fast".equals(current)?0:"deep".equals(current)?2:1);
+    panel.addView(effortChoice);
+    EditText guidance=input(ControlAssistantPreferences.guidance(this),false,
+      "Optional guidance about response style, creative topics and detail");
+    guidance.setSingleLine(false);
+    guidance.setMinLines(3);
+    guidance.setMaxLines(5);
+    guidance.setInputType(InputType.TYPE_CLASS_TEXT|
+      InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+    panel.addView(guidance);
+    new AlertDialog.Builder(this)
+      .setTitle("Local Asterion AI preferences")
+      .setView(panel)
+      .setPositiveButton("Save locally",(dialog,which)->{
+        try{
+          String level=new String[]{"fast","balanced","deep"}[
+            effortChoice.getSelectedItemPosition()];
+          ControlAssistantPreferences.save(this,level,
+            guidance.getText().toString());
+          toast("Local AI preferences saved");
+        }catch(Exception e){
+          toast("Could not save local preferences: "+e.getClass().getSimpleName());
+        }
+      })
+      .setNegativeButton("Cancel",null).show();
+  }
+
   /** Phone is the AI head. No PC or cloud model endpoint is consulted. */
   private void showPhoneAiStatus(){
     io.execute(()->{
@@ -1332,6 +1379,9 @@ public final class MainActivity extends Activity {
           "\nPrivate verified model loaded: "+
             data.optBoolean("model_loaded",false)+
           "\nModel source: "+data.optString("model_source","unavailable")+
+          "\nMaximum input characters: "+data.optInt("max_input_chars",0)+
+          "\nConfigured context tokens: "+data.optInt("model_context_tokens",0)+
+          "\nOwner reasoning effort: "+data.optString("reasoning_effort","balanced")+
           "\nWindows inference required: No"+
           "\nInternet inference required: No"+
           "\nLast local failure: "+data.optString("last_failure_code","none")+
