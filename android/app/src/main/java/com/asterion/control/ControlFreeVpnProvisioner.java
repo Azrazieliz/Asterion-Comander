@@ -104,7 +104,7 @@ final class ControlFreeVpnProvisioner {
         if(ip==null||ip.length()>90||ip.contains("%")||
            !ip.matches("[a-fA-F0-9:.]+"))
             throw new IllegalStateException("provider_invalid_tunnel_address");
-        InetAddress resolved=InetAddress.getByName(ip);
+        InetAddress resolved=android.net.InetAddresses.parseNumericAddress(ip);
         if(resolved.isAnyLocalAddress()||resolved.isLoopbackAddress()||
             resolved.isMulticastAddress())
             throw new IllegalStateException("provider_invalid_address_range");
@@ -113,12 +113,12 @@ final class ControlFreeVpnProvisioner {
     private static String endpoint(JSONObject obj)throws Exception{
         String supplied=obj.optString("host","");
         if(!supplied.isEmpty()){
-            if(supplied.length()>230||supplied.contains("/")||
-               supplied.contains("@")||supplied.contains(" ")||
-               supplied.indexOf('\n')>=0)
+            if(supplied.length()>230||!supplied.matches("[a-zA-Z0-9.:-]+|\\[[a-fA-F0-9:]+\\]:[0-9]+"))
                 throw new IllegalStateException("provider_invalid_endpoint");
             // A provider-published host can include its own port.
             if(!supplied.contains(":"))supplied=supplied+":2408";
+            java.net.URI parsed=java.net.URI.create("https://"+supplied);
+            if(parsed.getHost()==null||parsed.getPort()<1||parsed.getPort()>65535||parsed.getRawUserInfo()!=null||!parsed.getRawPath().isEmpty())throw new IllegalStateException("provider_invalid_endpoint");
             return supplied;
         }
         String ip=ipAddress(obj.optString("v4",""));
@@ -177,10 +177,10 @@ final class ControlFreeVpnProvisioner {
             JSONObject first=peers.getJSONObject(0);
             String ipv4=ipAddress(iface.getString("v4"));
             String ipv6=iface.optString("v6","");
+            if(ipv6.isEmpty())throw new IllegalStateException("provider_invalid_missing_ipv6_route");
             String addresses=ipv4+"/32";
             String routes="0.0.0.0/0";
             String dns="1.1.1.1,1.0.0.1";
-            if(ipv6.isEmpty())throw new IllegalStateException("provider_invalid_missing_ipv6_configuration");
             if(!ipv6.isEmpty()){
                 addresses+=", "+ipAddress(ipv6)+"/128";
                 routes+=", ::/0";
