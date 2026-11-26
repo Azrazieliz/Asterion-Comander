@@ -3,12 +3,20 @@ on:
   push:
     branches:
       - fix/control-browser-atomic-filter-cache-20261126
+      - work/control-non-ai-browser-20261126
       - work/control-native-ai-reconstruction-20261126
     paths:
       - 'android/app/src/main/java/com/asterion/control/Browser*.java'
       - 'tests/java/com/asterion/control/Browser*.java'
       - 'android/app/src/main/java/com/asterion/control/BrowserProtection.java'
       - 'tests/java/com/asterion/control/BrowserFilterCacheStoreTest.java'
+      - '.github/workflows/control-browser-atomic-filter.yml'
+  pull_request:
+    branches:
+      - work/control-native-ai-reconstruction-20261126
+    paths:
+      - 'android/app/src/main/java/com/asterion/control/Browser*.java'
+      - 'tests/java/com/asterion/control/Browser*.java'
       - '.github/workflows/control-browser-atomic-filter.yml'
   workflow_dispatch:
 permissions:
