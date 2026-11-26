@@ -18,6 +18,7 @@ import uuid
 import zipfile
 from pathlib import Path
 from typing import Callable
+from .bridge_worker_lock import worker_process_lock, WorkerAlreadyRunning
 
 _CHUNK = 1024 * 1024
 _MAX_FILE = 512 * 1024 * 1024
@@ -34,13 +35,42 @@ _SAFE_ID = re.compile(r"^[0-9a-f]{32}$")
 
 
 def _sha256(path: Path, size_cap: int = _MAX_FILE) -> str:
-    if path.stat().st_size > size_cap:
-        raise ValueError("file_too_large_for_safe_scan")
+    initial=path.lstat()
+    if not stat.S_ISREG(initial.st_mode) or initial.st_size>size_cap:
+        raise ValueError("regular_bounded_file_required")
     digest=hashlib.sha256()
-    with path.open("rb") as handle:
+    flags=os.O_RDONLY|getattr(os,"O_NOFOLLOW",0)|getattr(os,"O_BINARY",0)
+    fd=os.open(path,flags)
+    with os.fdopen(fd,"rb") as handle:
+        opened=os.fstat(handle.fileno())
+        if _fingerprint(opened)!=_fingerprint(initial):raise ValueError("file_changed_before_scan")
+        total=0
         while part:=handle.read(_CHUNK):
+            total+=len(part)
+            if total>size_cap:raise ValueError("file_grew_during_scan")
             digest.update(part)
+        if _fingerprint(os.fstat(handle.fileno()))!=_fingerprint(initial):
+            raise ValueError("file_changed_during_scan")
+    if _fingerprint(path.lstat())!=_fingerprint(initial):
+        raise ValueError("file_changed_during_scan")
     return digest.hexdigest()
+
+
+def _fingerprint(info):
+    return (info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns,info.st_ctime_ns)
+
+
+def _same_file(a: Path,b: Path) -> bool:
+    try:return os.path.samestat(a.lstat(),b.lstat())
+    except OSError:return False
+
+
+def _regular(path: Path) -> Path:
+    path=Path(path).absolute()
+    info=path.lstat()
+    if not stat.S_ISREG(info.st_mode) or getattr(info,"st_file_attributes",0)&getattr(stat,"FILE_ATTRIBUTE_REPARSE_POINT",0):
+        raise ValueError("regular_non_link_file_required")
+    return path.resolve(strict=True)
 
 
 def _kind(head: bytes) -> str:
@@ -64,6 +94,7 @@ def _zip_findings(path: Path) -> tuple[list[str],dict]:
             if len(entries)>_MAX_ARCHIVE_ITEMS:
                 return ["archive_entry_count_exceeds_limit"],meta
             total=0
+            seen=set()
             for entry in entries:
                 total+=entry.file_size
                 if total>_MAX_UNPACKED:
@@ -75,6 +106,11 @@ def _zip_findings(path: Path) -> tuple[list[str],dict]:
                 segments=[x for x in name.split("/") if x]
                 if name.startswith("/") or ".." in segments or re.match(r"^[a-zA-Z]:",name):
                     findings.append("archive_path_traversal")
+                normalized="/".join(segments).casefold()
+                if normalized in seen:findings.append("archive_duplicate_path")
+                seen.add(normalized)
+                if stat.S_ISLNK(entry.external_attr>>16):findings.append("archive_symlink")
+                if entry.flag_bits&1:findings.append("archive_encrypted_entry_not_inspected")
                 ext=Path(name).suffix.lower()
                 if ext in _EXEC:
                     findings.append("archive_contains_executable")
@@ -91,9 +127,8 @@ def scan(path: Path, *, level: str = "auto", antivirus: str | None = None) -> di
     """Bounded non-destructive scan. Passing files does not imply virus-free."""
     if level not in {"auto","quick","standard","deep"}:
         raise ValueError("unsupported_scan_level")
-    path=Path(path).resolve(strict=True)
-    if not path.is_file() or not stat.S_ISREG(path.stat().st_mode):
-        raise ValueError("regular_file_required")
+    path=_regular(path)
+    initial=_fingerprint(path.lstat())
     ext=path.suffix.lower()
     selected=("deep" if ext in _RISKY else "standard") if level=="auto" else level
     size=path.stat().st_size
@@ -134,6 +169,8 @@ def scan(path: Path, *, level: str = "auto", antivirus: str | None = None) -> di
                 engine_status="scanner_error"
         except (OSError,subprocess.TimeoutExpired):
             engine_status="scanner_error"
+    if _fingerprint(path.lstat())!=initial or _sha256(path)!=digest:
+        return {"ok":False,"verdict":"incomplete","reason":"file_changed_during_scan","safe_guarantee":False,"cloud_upload":False}
     if "antivirus_signature_match" in findings:
         verdict="malicious"
     elif findings:
@@ -156,68 +193,102 @@ def scan(path: Path, *, level: str = "auto", antivirus: str | None = None) -> di
 def _vault(root: Path) -> Path:
     vault=root.resolve()/"quarantine"
     vault.mkdir(parents=True,exist_ok=True)
+    if vault.is_symlink() or not vault.is_dir():raise ValueError("unsafe_quarantine_directory")
     return vault
 
 
+def _metadata(path: Path, entry: dict) -> None:
+    with path.open("x",encoding="utf-8") as handle:
+        json.dump(entry,handle,sort_keys=True)
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def _read_entry(meta: Path, item_id: str) -> dict:
+    if meta.is_symlink():raise ValueError("unsafe_quarantine_metadata")
+    entry=json.loads(meta.read_text("utf-8"))
+    if entry.get("id")!=item_id or not re.fullmatch(r"[0-9a-f]{64}",str(entry.get("sha256",""))):
+        raise ValueError("quarantine_metadata_invalid")
+    if not isinstance(entry.get("source"),str) or not Path(entry["source"]).is_absolute():
+        raise ValueError("quarantine_source_invalid")
+    return entry
+
+
 def quarantine(source: Path, vault_root: Path, expected_sha256: str) -> dict:
-    """Explicit owner-requested, hash-bound atomic move; no automatic deletion."""
-    source=Path(source).resolve(strict=True)
+    """Hash-bound no-overwrite move. Hard-link staging stays on the same volume.
+    A crash between link and unlink preserves both names, not an unknown deletion.
+    """
+    source=_regular(source)
     if not re.fullmatch(r"[0-9a-f]{64}",expected_sha256):
         raise ValueError("expected_sha256_required")
-    if not source.is_file() or source.is_symlink():
-        raise ValueError("invalid_source")
     root=_vault(Path(vault_root))
-    if source.is_relative_to(root):
-        raise ValueError("already_quarantined")
-    with _LOCK:
-        if _sha256(source)!=expected_sha256:
-            raise ValueError("file_changed_before_quarantine")
-        token=uuid.uuid4().hex
-        # Quarantine is staged on the SAME filesystem only. No silent overwrite.
-        destination=root/(token+".blob")
-        meta=root/(token+".json")
-        original=str(source)
-        if meta.exists() or destination.exists(): raise FileExistsError(token)
-        # Metadata is protected from accidental overwrite and contains original
-        # path locally; remote status must never return it.
-        meta.write_text(json.dumps({"id":token,"source":original,
-            "sha256":expected_sha256,"size":source.stat().st_size,
-            "created_at_ms":time.time_ns()//1000000},sort_keys=True),"utf-8")
-        try: source.replace(destination)
+    if source.is_relative_to(root):raise ValueError("already_quarantined")
+    with _LOCK,worker_process_lock(root/".vault.lock"):
+        info=source.lstat()
+        if info.st_nlink!=1:raise ValueError("multiple_hardlinks_require_review")
+        if _sha256(source)!=expected_sha256:raise ValueError("file_changed_before_quarantine")
+        token=uuid.uuid4().hex;destination=root/(token+".blob");meta=root/(token+".json")
+        _metadata(meta,{"id":token,"source":str(source),"sha256":expected_sha256,
+                        "size":info.st_size,"created_at_ms":time.time_ns()//1000000})
+        linked=False
+        try:
+            # Unlike replace(), link() fails if any target already exists.
+            os.link(source,destination,follow_symlinks=False);linked=True
+            if not _same_file(source,destination) or _sha256(destination)!=expected_sha256:
+                raise ValueError("quarantine_source_changed")
+            source.unlink()
         except BaseException:
-            meta.unlink(missing_ok=True)
+            # If we already linked the bytes, retain the receipt and blob for
+            # explicit recovery; never assume the original name is safe to delete.
+            if not linked:meta.unlink(missing_ok=True)
             raise
-    return {"ok":True,"id":token,"sha256":expected_sha256,
-            "state":"quarantined","reversible":True}
+        if _sha256(destination)!=expected_sha256:raise ValueError("quarantine_integrity_failed")
+    return {"ok":True,"id":token,"sha256":expected_sha256,"state":"quarantined","reversible":True}
 
 
-def restore(item_id: str, vault_root: Path, approved_destination: Path | None = None) -> dict:
-    """Return original bytes only if original destination is still free."""
-    if not _SAFE_ID.fullmatch(item_id): raise ValueError("invalid_quarantine_id")
-    root=_vault(Path(vault_root))
-    meta=root/(item_id+".json")
-    blob=root/(item_id+".blob")
-    with _LOCK:
-        entry=json.loads(meta.read_text("utf-8"))
-        dest=Path(entry["source"]).resolve() if approved_destination is None else Path(approved_destination).resolve()
-        if dest.exists(): raise FileExistsError("destination_already_exists")
-        if not dest.parent.is_dir(): raise FileNotFoundError("destination_parent_missing")
-        if _sha256(blob)!=entry["sha256"]:
+def restore(item_id: str, vault_root: Path, approved_destination: Path | None = None,
+            authorize: Callable[[Path],Path] | None = None) -> dict:
+    """Restore only the original/explicitly approved path; never replace any file."""
+    if not _SAFE_ID.fullmatch(item_id):raise ValueError("invalid_quarantine_id")
+    root=_vault(Path(vault_root));meta=root/(item_id+".json");blob=root/(item_id+".blob")
+    with _LOCK,worker_process_lock(root/".vault.lock"):
+        entry=_read_entry(meta,item_id)
+        dest=Path(entry["source"]) if approved_destination is None else Path(approved_destination).absolute()
+        if authorize is not None and authorize(dest)!=dest:
+            raise ValueError("restore_scope_changed")
+        if dest.is_relative_to(root) or not dest.parent.is_dir() or dest.parent.resolve()!=dest.parent:
+            raise ValueError("unsafe_restore_destination")
+        if not blob.exists():
+            # Prior restore may have completed before metadata cleanup.
+            if dest.is_file() and not dest.is_symlink() and _sha256(dest)==entry["sha256"]:
+                meta.unlink()
+                return {"ok":True,"id":item_id,"state":"restored","sha256":entry["sha256"],"reconciled":True}
+            raise FileNotFoundError("quarantine_blob_missing")
+        if _regular(blob)!=blob or _sha256(blob)!=entry["sha256"]:
             raise ValueError("quarantine_integrity_failed")
-        blob.replace(dest)
+        if os.path.lexists(dest):
+            # Recover a crash in either move direction only when it is the exact
+            # same underlying file and digest. An unrelated file is never touched.
+            if not _same_file(blob,dest):raise FileExistsError("destination_already_exists")
+        else:os.link(blob,dest,follow_symlinks=False)
+        if not _same_file(blob,dest) or _sha256(dest)!=entry["sha256"]:
+            raise ValueError("restore_integrity_failed")
+        blob.unlink()
         meta.unlink()
     return {"ok":True,"id":item_id,"state":"restored","sha256":entry["sha256"]}
 
 
 def inventory(vault_root: Path, limit: int = 50) -> dict:
-    if not 1<=limit<=100: raise ValueError("invalid_limit")
-    root=_vault(Path(vault_root))
-    rows=[]
+    if not 1<=limit<=100:raise ValueError("invalid_limit")
+    root=_vault(Path(vault_root));rows=[]
     for file in sorted(root.glob("*.json"),key=lambda p:p.stat().st_mtime,reverse=True)[:limit]:
         try:
-            entry=json.loads(file.read_text("utf-8"))
-            if not _SAFE_ID.fullmatch(entry.get("id","")):continue
-            rows.append({"id":entry["id"],"sha256":entry["sha256"],
-                         "size":entry["size"],"created_at_ms":entry["created_at_ms"]})
+            if not _SAFE_ID.fullmatch(file.stem):continue
+            entry=_read_entry(file,file.stem)
+            blob=root/(file.stem+".blob");source=Path(entry["source"])
+            state=("quarantine_or_restore_interrupted" if _same_file(blob,source) else
+                   "quarantined" if blob.is_file() and not blob.is_symlink() else "receipt_requires_reconciliation")
+            rows.append({"id":entry["id"],"sha256":entry["sha256"],"size":entry["size"],
+                         "created_at_ms":entry["created_at_ms"],"state":state})
         except (ValueError,KeyError,OSError):continue
     return {"ok":True,"items":rows,"count":len(rows)}
