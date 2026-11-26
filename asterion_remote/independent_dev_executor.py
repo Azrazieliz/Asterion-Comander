@@ -70,8 +70,18 @@ class CandidateExecutor:
         path = Path(task["target_path"])
         if path.is_absolute() or ".." in path.parts or path.suffix not in _ALLOWED_EXT:
             raise ValueError("target_not_in_verified_source_allowlist")
-        if not (path.parts[0] in {"asterion_remote","android","scripts","tests"}):
+        if not (path.parts[0] in {"asterion_remote","android","scripts"}):
             raise ValueError("unapproved_source_root")
+        # The candidate model must never rewrite the tests used to judge its
+        # own edits, or production signing, deployment and runtime supervisors.
+        protected=("scripts/control_ai_independent_dev.py",
+                   "scripts/control_ai_candidate_acquisition.py",
+                   "asterion_remote/independent_dev_executor.py",
+                   "asterion_remote/isolated_test_runner.py",
+                   "asterion_remote/dev_backlog.py",
+                   "asterion_remote/overnight_supervisor.py")
+        if path.as_posix() in protected:
+            raise ValueError("privileged_development_infrastructure_locked")
         if path.as_posix() != task["target_path"]:
             raise ValueError("noncanonical_target_path")
         if not _HASH.fullmatch(edit["expected_sha256"]):
