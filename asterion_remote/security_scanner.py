@@ -238,6 +238,24 @@ def _sync_directory(path: Path):
         finally:os.close(fd)
 
 
+def _rename_noreplace(source: Path, destination: Path):
+    # Windows rename is no-replace. Linux renameat2 provides the same
+    # atomic contract; never fall back to a check-then-overwrite sequence.
+    if os.name=="nt":
+        os.rename(source,destination)
+        return
+    import ctypes
+    import errno
+    libc=ctypes.CDLL(None,use_errno=True)
+    rename=getattr(libc,"renameat2",None)
+    if rename is None:raise OSError(errno.ENOTSUP,"atomic no-replace move unavailable")
+    rename.argtypes=[ctypes.c_int,ctypes.c_char_p,ctypes.c_int,ctypes.c_char_p,ctypes.c_uint]
+    rename.restype=ctypes.c_int
+    if rename(-100,os.fsencode(source),-100,os.fsencode(destination),1)!=0:
+        code=ctypes.get_errno()
+        raise OSError(code,os.strerror(code))
+
+
 def quarantine(source: Path, vault_root: Path, expected_sha256: str) -> dict:
     """Hash-bound same-volume quarantine with non-overwriting durable staging."""
     source=Path(os.path.abspath(source))
@@ -254,19 +272,15 @@ def quarantine(source: Path, vault_root: Path, expected_sha256: str) -> dict:
         _write_metadata(meta,{"id":token,"source":str(source),"sha256":expected_sha256,
                               "size":original.st_size,"created_at_ms":time.time_ns()//1000000})
         _sync_directory(root)
-        # Hard-link creation fails if destination exists or is on another volume.
-        # If interrupted after linking, BOTH names remain recoverable.
         try:
-            os.link(source,destination,follow_symlinks=False)
+            _rename_noreplace(source,destination)
         except BaseException:
             meta.unlink(missing_ok=True);raise
-        _sync_directory(root)
+        _sync_directory(root);_sync_directory(source.parent)
+        # If a concurrent writer changed the file, do not delete any bytes.
+        # Retain the journal and moved content for explicit recovery.
         if _identity(_regular(destination))!=_identity(original) or _sha256(destination)!=expected_sha256:
             raise ValueError("quarantine_staged_integrity_failed")
-        if _identity(_regular(source))!=_identity(original):
-            raise ValueError("quarantine_source_changed_staged")
-        source.unlink()
-        _sync_directory(source.parent)
     return {"ok":True,"id":token,"sha256":expected_sha256,
             "state":"quarantined","reversible":True}
 
@@ -296,14 +310,12 @@ def restore(item_id: str, vault_root: Path, approved_destination: Path | None = 
         blob_info=_regular(blob)
         if _sha256(blob)!=entry["sha256"]:raise ValueError("quarantine_integrity_failed")
         if dest.exists() or dest.is_symlink():
-            if _identity(_regular(dest))!=_identity(blob_info):
-                raise FileExistsError("destination_already_exists")
-        else:
-            os.link(blob,dest,follow_symlinks=False)
-        _sync_directory(dest.parent)
+            raise FileExistsError("destination_already_exists")
+        _rename_noreplace(blob,dest)
+        _sync_directory(dest.parent);_sync_directory(root)
         if _identity(_regular(dest))!=_identity(blob_info) or _sha256(dest)!=entry["sha256"]:
             raise ValueError("restore_staged_integrity_failed")
-        blob.unlink();_sync_directory(root);meta.unlink();_sync_directory(root)
+        meta.unlink();_sync_directory(root)
     return {"ok":True,"id":item_id,"state":"restored","sha256":entry["sha256"]}
 
 
