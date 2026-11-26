@@ -41,3 +41,26 @@ def test_prompt_leakage_and_provenance(tmp_path):
 def test_actual_weight_training_is_not_faked():
     assert hasattr(module,"train_adapter")
     assert "CUDA accelerator unavailable" in (ROOT/"scripts/control_ai_adaptation.py").read_text()
+
+
+def test_cpu_diagnostic_is_explicit_and_default_fails_closed():
+    assert module.training_device("cpu",False)=="cpu"
+    with pytest.raises(RuntimeError,match="requires explicit"):
+        module.training_device("auto",False)
+    assert module.training_device("auto",True)=="cuda"
+    with pytest.raises(ValueError):module.training_device("remote",True)
+
+
+def test_owner_corpus_targets_have_exact_source_spans_and_no_teacher_outputs(tmp_path):
+    from scripts.control_ai_owner_corpus import build
+    metadata=build(tmp_path)
+    source=(tmp_path/"owner-quotations.txt").read_text()
+    for split in ("train.jsonl","holdout.jsonl"):
+        for _,row in module.read_examples(tmp_path/split):
+            if row["target_origin"]=="verbatim_owner_instruction":
+                assert source[row["source_char_start"]:row["source_char_end"]]==row["messages"][-1]["content"]
+    _,_,receipt=module.validate(tmp_path/"train.jsonl",tmp_path/"holdout.jsonl")
+    assert receipt["training"]["count"]==20
+    assert receipt["holdout"]["count"]==12
+    assert not metadata["proprietary_teacher_outputs"]
+    assert not receipt["maturity_certified"]

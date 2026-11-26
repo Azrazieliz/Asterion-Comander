@@ -8,3 +8,6 @@
 # JNI symbol names are bound to this exact class and native method names.
 # R8 must not rename these entry points in owner-signed release APKs.
 -keep class com.asterion.control.OnDeviceLlm { *; }
+
+# JNI invokes these callbacks by exact name; preserve them in owner release.
+-keep class com.asterion.control.OnDeviceLlm$NativeStream { public void onStart(boolean,int,int); public void onToken(byte[]); }

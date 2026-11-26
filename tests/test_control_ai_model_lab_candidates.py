@@ -66,3 +66,18 @@ def test_reject_fake_hardware_and_bad_provenance(lab):
           measured_free_bytes=0,peak_pss_bytes=0,prefill_tokens_s=0.0,
           decode_tokens_s=0.0,thermal_state=0,elapsed_s=1.0,
           evidence_sha256=SHA,verified=False)
+
+
+def test_adapters_link_to_full_weight_candidate_without_rewriting_evidence(lab):
+    add()
+    def record(training='b'*64):return model_lab.register_adaptation('owner-lora-01','control-14b',
+        adapter_sha256=SHA,training_record_sha256=training,
+        evaluation_record_sha256='c'*64,weights_changed=True)
+    receipt=record();assert receipt['weights_changed_recorded']
+    assert not receipt['owner_behavior_certified']
+    record()
+    with pytest.raises(ValueError,match='cannot_be_rewritten'):record('d'*64)
+    with pytest.raises(ValueError,match='not_registered'):
+        model_lab.register_adaptation('owner-lora-02','missing-base',adapter_sha256=SHA,
+            training_record_sha256='b'*64,evaluation_record_sha256='c'*64,weights_changed=True)
+    assert model_lab.candidate_matrix('control')['count']==1

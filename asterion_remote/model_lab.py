@@ -378,3 +378,47 @@ def candidate_matrix(app:str="")->dict:
             row["no_automatic_model_selection"]=True
     finally:db.close()
     return {"candidates":rows,"count":len(rows),"phone_certification_open":True}
+
+
+def register_adaptation(adaptation_id:str,base_candidate_id:str,*,
+                        adapter_sha256:str,training_record_sha256:str,
+                        evaluation_record_sha256:str,weights_changed:bool)->dict:
+    """Link an adapter experiment to a real full-weight candidate in the SAME lab.
+
+    Adapter bytes are never misrepresented as total model residency. Evidence
+    is immutable and says nothing about promotion or owner-workflow quality.
+    """
+    if (not _CANDIDATE_ID.fullmatch(adaptation_id) or
+        not _CANDIDATE_ID.fullmatch(base_candidate_id) or
+        any(not isinstance(x,str) or not _DIGEST.fullmatch(x) for x in (
+            adapter_sha256,training_record_sha256,evaluation_record_sha256)) or
+        type(weights_changed) is not bool):
+        raise ValueError('invalid_adaptation_lineage')
+    db=_candidate_db()
+    try:
+        db.execute('''CREATE TABLE IF NOT EXISTS model_adaptation_experiments(
+            id TEXT PRIMARY KEY,base_candidate_id TEXT NOT NULL,
+            adapter_sha256 TEXT NOT NULL,training_record_sha256 TEXT NOT NULL,
+            evaluation_record_sha256 TEXT NOT NULL,weights_changed INTEGER NOT NULL,
+            created_ms INTEGER NOT NULL,
+            FOREIGN KEY(base_candidate_id) REFERENCES model_candidate_experiments(id))''')
+        db.execute('BEGIN IMMEDIATE')
+        if not db.execute('SELECT id FROM model_candidate_experiments WHERE id=?',
+                          (base_candidate_id,)).fetchone():raise ValueError('base_candidate_not_registered')
+        proposed=(base_candidate_id,adapter_sha256,training_record_sha256,
+                  evaluation_record_sha256,int(weights_changed))
+        existing=db.execute('SELECT * FROM model_adaptation_experiments WHERE id=?',(adaptation_id,)).fetchone()
+        if existing:
+            if tuple(existing[k] for k in ('base_candidate_id','adapter_sha256',
+                'training_record_sha256','evaluation_record_sha256','weights_changed'))!=proposed:
+                raise ValueError('adaptation_identity_cannot_be_rewritten')
+        else:db.execute('INSERT INTO model_adaptation_experiments VALUES(?,?,?,?,?,?,?)',
+                        (adaptation_id,*proposed,time.time_ns()//1_000_000))
+        db.execute('COMMIT')
+    except BaseException:
+        db.execute('ROLLBACK');raise
+    finally:db.close()
+    return {'id':adaptation_id,'base_candidate_id':base_candidate_id,
+            'adapter_sha256':adapter_sha256,'training_record_sha256':training_record_sha256,
+            'evaluation_record_sha256':evaluation_record_sha256,'weights_changed_recorded':weights_changed,
+            'owner_behavior_certified':False,'phone_qualified':False,'automatically_promoted':False}

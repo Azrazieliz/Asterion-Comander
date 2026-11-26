@@ -1,0 +1,13 @@
+{
+  "purpose": "owner_instruction_recall_diagnostic",
+  "owner_quotes_train": 12,
+  "owner_quotes_held_out": 4,
+  "arithmetic_train": 8,
+  "arithmetic_held_out": 8,
+  "source_sha256": "2666c04c618897191d0f8c8ecea962576592ed739ba71e3f47443ceab685fa0f",
+  "rights_scope": "Owner-supplied instructions and deterministic exact solver targets only",
+  "proprietary_teacher_outputs": false,
+  "behavior_adaptation_certified": false,
+  "semantic_independence_certified": false,
+  "maturity_certified": false
+}

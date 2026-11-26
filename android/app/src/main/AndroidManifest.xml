@@ -26,6 +26,7 @@
       <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="unspecified">
         <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
       </activity>
+      <activity android:name=".AssistantActivity" android:exported="false" android:windowSoftInputMode="adjustResize"/>
       <!-- Isolate website cookies/storage from the authenticated Control dashboard. -->
       <activity android:name=".BrowserActivity" android:exported="false"
           android:process=":asterion_browser" android:screenOrientation="unspecified"/>

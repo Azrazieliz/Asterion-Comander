@@ -1,3 +1,16 @@
+# 2026-11-26 — P0 native assistant workspace and first hash-proven diagnostic LoRA
+
+**Not a release. All V3–V6/M0–M13 and Nexus requirements remain mandatory.**
+Implemented the integrated native assistant workspace, encrypted conversation/revision storage in the original memory database, true JNI streaming and multi-turn templates, token-counted context packing, output-channel filtering, signed capability discovery/authorized proposal execution and provider status observation. Shared theme/dialog/touch-target improvements preserve existing tools. API35 Java compiled; 37 pytest cases and 523 executable JVM assertions passed. Android UI, voice, provider outcomes and full app acceptance remain unverified.
+
+**Actual neural update, diagnostic only:** pinned Apache-2.0 Qwen3 legacy baseline, local CPU attention LoRA, 12 steps, 1,146,880 trainable parameters changed with before/after hashes. Separate 12-case held-out likelihood measurement: mean NLL 3.809297 → 2.075416. Owner-behavior quality, free-generation improvement, mature case counts and phone deployment are NOT established. The licensed adapter package is retained in the existing Model Laboratory artifact path; no final model selected.
+
+Live original-bridge receipts confirm Control0.9.38/native WSS on Wi-Fi, loaded verified 484,220,288-byte baseline, available phone RAM3.86GB, battery16% unplugged. Windows still lacks installed Docker/WSL and ML packages. No installed app, signer, pairing or production worker changed; no intermediate APK produced.
+
+Exact source/evidence/unfinished criteria: [P0 execution state](docs/CONTROL_P0_WORKSPACE_AND_ADAPTATION_STATE_20261126.md), [machine evidence](reports/control-p0-20261126/verified-state.json). Host JNI passed actual streamed generation (91 pieces), complete-exchange context packing, cancellation and nonblocking readiness. The checksum-pinned 8B candidate loaded on the host; its bounded generation experiment was interrupted without a quality verdict. No phone acceptance inferred.
+
+---
+
 # 2026-11-26 — Control native AI reconstruction: highest priority, source changes and verified device/worker evidence
 
 **Owner priority supersession:** Before December, **Asterion Control's independent native AI and persistent autonomous development are absolute P0**. The whole existing owner-approved V3–V6 scope (including P−1 connection recovery), specialist ownership boundaries, B06/B09, R01–R08/R10, VPN/Browser/English voice/security/premium UI and December Nexus merge remain binding. This does **not** release the owner's no-intermediate-APK hold or authorize rebuilding other app engines. Continue branch `work/control-native-ai-reconstruction-20261126`, not `main`.

@@ -124,7 +124,7 @@ public final class BrowserActivity extends Activity {
     }
 
     @Override public void onCreate(Bundle saved) {
-        super.onCreate(saved);
+        super.onCreate(saved);DesignSystem.configure(this);
         protection=new BrowserProtection(this);
         browserPrefs=getSharedPreferences("asterion_browser_session_v1",Context.MODE_PRIVATE);
         protection.refresh(false,(updated,reason)->{

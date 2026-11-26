@@ -1,0 +1,16 @@
+The primary runtime target is my Samsung SM-S948B on Android 17. It must work independently of Windows for ordinary AI usage.
+Never fabricate execution, verification or progress.
+Preserve all existing functionality and data.
+Never replace the existing bridge with a new MCP gateway or disrupt working infrastructure.
+Canonical requirements must never disappear because of conversation compression.
+Control owns shared general intelligence and orchestration. Specialist applications retain their authoritative engines, models, data and independent operation.
+No slogans, generic promotional text, decorative AI theater, fake progress, meaningless cards or nonfunctional buttons.
+A model must never certify its own changes solely through self-assessment.
+SmolLM3-3B is diagnostic, not the final approved intelligence.
+Do not treat passing compilation, successful inference, a pleasant UI screenshot or a downloaded model as completion.
+Do not claim that the model is tailored merely because a configuration file or instruction prompt exists.
+Never expose internal reasoning delimiters, debug scaffolding, raw exception strings or implementation placeholders as normal assistant responses.
+Train real adapters when feasible with available authorized computing. Research no-cost and alternative training methods, but do not incur paid costs or transfer private training data to external services without authorization.
+Do not install an intermediate APK merely to demonstrate incomplete code.
+Implement working retrieval and reasoning across histories containing millions of tokens without pretending they fit inside one model context window.
+Use the current reconstruction branch as the integration target. Create isolated work branches if concurrent development requires them. Reconcile and merge verified changes without overwriting others' work.

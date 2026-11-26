@@ -29,7 +29,7 @@ def test_on_device_loader_uses_profile_not_named_vendor_constants():
     source = (JAVA / "OnDeviceLlm.java").read_text(encoding="utf-8")
     assert "OnDeviceModelProfile.read(context)" in source
     assert "profile.systemInstructions(guidance)" in source
-    assert "nativeGenerate(systemText,userPrompt.trim()," in source
+    assert "nativeGenerate(systemText.getBytes(StandardCharsets.UTF_8),roles,content," in source
     assert "ControlAssistantPreferences.promptGuidance(context)" in source
     assert "ControlAssistantPreferences.outputTokens(context,profile)" in source
     assert "outputBudget,profile.contextTokens" in source
@@ -43,12 +43,12 @@ def test_on_device_loader_uses_profile_not_named_vendor_constants():
 def test_jni_preserves_cancellation_and_rejects_context_overflow():
     code = NATIVE.read_text(encoding="utf-8")
     assert "jint context_limit" in code
-    assert "jstring jsystem,jstring juser" in code
+    assert "jbyteArray jsystem,jobjectArray jroles,jobjectArray jcontent" in code
     assert "llama_model_chat_template(model,nullptr)" in code
-    assert "llama_chat_apply_template(chatTemplate,messages,2,true" in code
+    assert "llama_chat_apply_template(chatTemplate,messages.data(),messages.size(),true" in code
     assert "limit>2048" in code
-    assert "systemText.size()+userText.size()>262144" in code
-    assert "tokens.size()+static_cast<size_t>(limit)+32u" in code
+    assert "if(bytes>262144)" in code
+    assert "static_cast<size_t>(-n)+static_cast<size_t>(limit)+32u" in code
     assert "cp.n_ctx=context_limit;" in code
     assert "cancel_generation.load" in code
     assert "n_gpu_layers=0" in code  # fallback remains CPU; GPU acceleration unverified
@@ -85,22 +85,28 @@ def test_encrypted_memory_contract_and_owner_review_controls():
     assert 'if(!explicitlyOwnerApproved)' in code
     assert 'db.delete("memory","id=?",new String[]{id})' in code
     assert 'SELECT id,project,origin,nonce,payload' in code
-    assert "ControlAssistantMemory.relevant(context,userPrompt)" in model
+    assert "ControlAssistantMemory.relevant(context,userPrompt,project)" in model
     assert "ControlAssistantMemory.remember" in ui
     assert "ControlAssistantMemory.recent" in ui
     assert "ControlAssistantMemory.forget" in ui
     assert "new AlertDialog.Builder(this)" in ui
 
 
-def test_offline_chat_turns_persist_only_after_real_generation():
+def test_workspace_uses_existing_encrypted_store_and_retains_failed_turns():
     prefs=(JAVA/"ControlAssistantPreferences.java").read_text(encoding="utf8")
     view=(JAVA/"MainActivity.java").read_text(encoding="utf8")
+    workspace=(JAVA/"AssistantActivity.java").read_text(encoding="utf8")
+    session=(JAVA/"AssistantSession.java").read_text(encoding="utf8")
     memory=(JAVA/"ControlAssistantMemory.java").read_text(encoding="utf8")
     assert "encrypted_local_chat_history_enabled" in prefs
     assert "keepHistory.isChecked()" in view
-    assert "ControlAssistantPreferences.saveHistory(this)" in view
-    assert "ControlAssistantMemory.remember(this,\"General\"" in view
-    assert view.index("answer=OnDeviceLlm.generate(getApplicationContext(),prompt);") < view.index(
-        '"local_conversation_verified_generation"')
-    assert "Local history could not be saved" in view
-    assert "private static final int MAX_RECORDS=4096;" in memory
+    assert "new Intent(this,AssistantActivity.class)" in view
+    assert "Ask Asterion · on this phone" not in view
+    assert "response does not execute app commands" not in view
+    assert "ControlAssistantMemory.saveConversation" in session
+    assert "response incomplete" in workspace
+    assert "cipher.updateAAD(conversation.id" in memory
+    assert 'CREATE TABLE IF NOT EXISTS conversation' in memory
+    assert 'super(c,DB,null,2)' in memory
+    assert "oldVersion==1&&newVersion==2" in memory
+    assert "session.conversation.fork()" in workspace

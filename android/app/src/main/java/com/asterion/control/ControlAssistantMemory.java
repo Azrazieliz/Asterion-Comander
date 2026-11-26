@@ -36,15 +36,90 @@ final class ControlAssistantMemory {
     private ControlAssistantMemory(){}
 
     private static final class Database extends SQLiteOpenHelper {
-        Database(Context c){super(c,DB,null,1);}
+        Database(Context c){super(c,DB,null,2);}
         @Override public void onCreate(SQLiteDatabase db){
             db.execSQL("CREATE TABLE IF NOT EXISTS memory("+
                 "id TEXT PRIMARY KEY, project TEXT NOT NULL, origin TEXT NOT NULL,"+
                 "nonce BLOB NOT NULL, payload BLOB NOT NULL, created_ms INTEGER NOT NULL)");
             db.execSQL("CREATE INDEX IF NOT EXISTS memory_recent ON memory(created_ms DESC)");
+            createConversations(db);
         }
         @Override public void onUpgrade(SQLiteDatabase db,int oldVersion,int newVersion){
+            if(oldVersion==1&&newVersion==2){createConversations(db);return;}
             throw new IllegalStateException("memory_schema_requires_migration");
+        }
+    }
+    private static void createConversations(SQLiteDatabase db){
+        db.execSQL("CREATE TABLE IF NOT EXISTS conversation("+
+            "id TEXT PRIMARY KEY, nonce BLOB NOT NULL, payload BLOB NOT NULL, updated_ms INTEGER NOT NULL)");
+        db.execSQL("CREATE INDEX IF NOT EXISTS conversation_recent ON conversation(updated_ms DESC)");
+    }
+    static void saveConversation(Context context,AssistantConversation conversation)throws Exception{
+        if(!ControlAssistantPreferences.saveHistory(context))return;
+        synchronized(LOCK){
+            JSONArray messages=new JSONArray();
+            for(AssistantConversation.Message m:conversation.messages)messages.put(new JSONObject()
+                .put("id",m.id).put("role",m.role).put("text",m.text).put("state",m.state)
+                .put("omitted_context_messages",m.omittedContextMessages));
+            byte[] plain=new JSONObject().put("title",conversation.title).put("project",conversation.project)
+                .put("messages",messages).toString().getBytes(StandardCharsets.UTF_8);
+            if(plain.length>1_000_000)throw new IllegalStateException("conversation_storage_budget_exceeded");
+            Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.ENCRYPT_MODE,key());
+            cipher.updateAAD(conversation.id.getBytes(StandardCharsets.UTF_8));
+            ContentValues row=new ContentValues();row.put("id",conversation.id);
+            row.put("nonce",cipher.getIV());row.put("payload",cipher.doFinal(plain));
+            row.put("updated_ms",System.currentTimeMillis());
+            Database helper=new Database(context.getApplicationContext());
+            try(SQLiteDatabase db=helper.getWritableDatabase()){
+                if(db.insertWithOnConflict("conversation",null,row,SQLiteDatabase.CONFLICT_REPLACE)<0)
+                    throw new IllegalStateException("conversation_not_saved");
+            }finally{helper.close();}
+        }
+    }
+    static AssistantConversation loadConversation(Context context,String id)throws Exception{
+        synchronized(LOCK){
+            Database helper=new Database(context.getApplicationContext());
+            try(SQLiteDatabase db=helper.getReadableDatabase();Cursor cursor=db.rawQuery(
+                "SELECT nonce,payload FROM conversation WHERE id=?",new String[]{id})){
+                if(!cursor.moveToFirst())throw new IllegalArgumentException("conversation_missing");
+                Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");
+                cipher.init(Cipher.DECRYPT_MODE,key(),new GCMParameterSpec(128,cursor.getBlob(0)));
+                cipher.updateAAD(id.getBytes(StandardCharsets.UTF_8));
+                JSONObject saved=new JSONObject(new String(cipher.doFinal(cursor.getBlob(1)),StandardCharsets.UTF_8));
+                AssistantConversation out=new AssistantConversation(id);
+                out.title=saved.getString("title");out.project=saved.getString("project");
+                JSONArray messages=saved.getJSONArray("messages");
+                for(int i=0;i<messages.length();i++){
+                    JSONObject m=messages.getJSONObject(i);
+                    out.messages.add(new AssistantConversation.Message(m.getString("id"),m.getString("role"),
+                        m.getString("text"),m.getString("state")));
+                    out.messages.get(out.messages.size()-1).omittedContextMessages=m.optInt("omitted_context_messages",0);
+                }
+                out.recover();return out;
+            }finally{helper.close();}
+        }
+    }
+    static JSONArray conversations(Context context)throws Exception{
+        synchronized(LOCK){
+            ArrayList<String> ids=new ArrayList<>();
+            Database helper=new Database(context.getApplicationContext());
+            try(SQLiteDatabase db=helper.getReadableDatabase();Cursor c=db.rawQuery(
+                "SELECT id FROM conversation ORDER BY updated_ms DESC LIMIT 100",null)){
+                while(c.moveToNext())ids.add(c.getString(0));
+            }finally{helper.close();}
+            JSONArray result=new JSONArray();
+            for(String id:ids){AssistantConversation c=loadConversation(context,id);
+                result.put(new JSONObject().put("id",id).put("title",c.title).put("project",c.project));}
+            return result;
+        }
+    }
+    static boolean deleteConversation(Context context,String id){
+        synchronized(LOCK){
+            Database helper=new Database(context.getApplicationContext());
+            try(SQLiteDatabase db=helper.getWritableDatabase()){
+                return db.delete("conversation","id=?",new String[]{id})==1;
+            }finally{helper.close();}
         }
     }
     private static SecretKey key() throws Exception {
@@ -148,7 +223,8 @@ final class ControlAssistantMemory {
             this.content=content;this.score=score;
         }
     }
-    static String relevant(Context context,String query)throws Exception{
+    static String relevant(Context context,String query)throws Exception{return relevant(context,query,"General");}
+    static String relevant(Context context,String query,String selectedProject)throws Exception{
         if(query==null||query.isBlank())return "";
         Set<String> words=terms(query);
         if(words.isEmpty())return "";
@@ -159,7 +235,7 @@ final class ControlAssistantMemory {
             try(SQLiteDatabase db=helper.getReadableDatabase();
                 Cursor cursor=db.rawQuery(
                     "SELECT id,project,origin,nonce,payload FROM memory "+
-                    "ORDER BY created_ms DESC LIMIT 128",null)){
+                    "WHERE (project=? OR project='General') ORDER BY created_ms DESC LIMIT 128",new String[]{selectedProject})){
                 while(cursor.moveToNext()){
                     String content=decrypt(secret,cursor.getBlob(3),cursor.getBlob(4));
                     String project=cursor.getString(1);

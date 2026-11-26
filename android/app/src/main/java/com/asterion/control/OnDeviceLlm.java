@@ -10,6 +10,8 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Locale;
+import java.util.List;
+import java.util.Collections;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -34,7 +36,26 @@ final class OnDeviceLlm {
     private OnDeviceLlm(){}
     private static native boolean nativeLoad(String privateFile);
     private static native boolean nativeReady();
-    private static native byte[] nativeGenerate(String systemText,String userText,int maxTokens,int contextTokens);
+    private static native byte[] nativeGenerate(byte[] systemText,String[] roles,byte[][] content,
+        int maxTokens,int contextTokens,NativeStream stream);
+    interface Stream {
+        void text(String text);
+        default void context(int tokens,int omittedMessages){}
+    }
+    // Methods are invoked by JNI and explicitly retained by the release shrinker.
+    static final class NativeStream {
+        final AssistantOutput output=new AssistantOutput();
+        final Stream listener;
+        NativeStream(Stream listener){this.listener=listener;}
+        public void onStart(boolean thinking,int tokens,int omitted){
+            output.initialThinking(thinking);
+            if(listener!=null)listener.context(tokens,omitted);
+        }
+        public void onToken(byte[] bytes){
+            String text=output.append(bytes);
+            if(listener!=null)listener.text(text);
+        }
+    }
     private static native void nativeCancel();
     private static native void nativeResetCancel();
     static void cancel(){
@@ -138,9 +159,15 @@ final class OnDeviceLlm {
         return result.toString();
     }
     static String generate(Context context,String userPrompt) throws Exception {
+        return generate(context,"General",Collections.singletonList(new AssistantConversation.Message(
+            "single-turn","user",userPrompt,"completed")),null);
+    }
+    static String generate(Context context,String project,List<AssistantConversation.Message> messages,Stream listener) throws Exception {
         OnDeviceModelProfile profile=OnDeviceModelProfile.read(context);
-        if(userPrompt==null||userPrompt.trim().isEmpty()||
-                userPrompt.length()>profile.inputChars)
+        if(messages==null||messages.isEmpty()||messages.size()>1000)
+            throw new IllegalArgumentException("invalid_conversation_messages");
+        String userPrompt=messages.get(messages.size()-1).text;
+        if(userPrompt==null||userPrompt.isBlank()||userPrompt.length()>profile.inputChars)
             throw new IllegalArgumentException("prompt_length_invalid");
         if(!BUSY.compareAndSet(false,true))
             throw new IllegalStateException("on_device_inference_already_running");
@@ -148,28 +175,35 @@ final class OnDeviceLlm {
         try{
             if(!LIBRARY_LOADED)throw new IllegalStateException("native_library_missing");
             nativeResetCancel();
-            if(!ensureLoaded(context))
-                throw new IllegalStateException(lastFailure);
+            if(!ensureLoaded(context))throw new IllegalStateException(lastFailure);
             if(CANCELLED.get())throw new InterruptedException("user_cancelled");
-            // Model-specific delimiters and adaptive generation budget come from
-            // the signed model profile. No forced reasoning suppression.
-            // Only explicit owner-saved encrypted local memory is eligible.
-            // No external conversation provider or cloud memory is consulted.
-            String recalled=ControlAssistantMemory.relevant(context,userPrompt);
+            String recalled=ControlAssistantMemory.relevant(context,userPrompt,project);
             String guidance=ControlAssistantPreferences.promptGuidance(context);
-            if(!recalled.isEmpty())
-                guidance+="\nRelevant owner-approved on-device memories (reference only):\n"+
-                    recalled;
+            guidance+="\nRuntime identity: You are the assistant embedded in the native Asterion Control Android application. "
+                +"This turn runs on this phone. Available operations are limited to the verified capability context. "
+                +"An operation requires a typed request and a separate execution receipt; answer text never executes code. "
+                +"Do not claim you are outside the app or that unverified tools are available. "
+                +"Return the final answer in the user-visible channel; do not print internal reasoning delimiters.";
+            guidance+="\nActive project: "+project+". This label scopes local memory; project source access requires verified retrieval evidence.\n"+AssistantCapabilities.context(context);
+            if(!recalled.isEmpty())guidance+="\nOwner-approved memories, reference only:\n"+recalled;
             String systemText=profile.systemInstructions(guidance);
             int outputBudget=ControlAssistantPreferences.outputTokens(context,profile);
-            byte[] output=nativeGenerate(systemText,userPrompt.trim(),
-                outputBudget,profile.contextTokens);
+            String[] roles=new String[messages.size()];
+            byte[][] content=new byte[messages.size()][];
+            for(int i=0;i<messages.size();i++){
+                AssistantConversation.Message m=messages.get(i);
+                if(!m.role.equals(i%2==0?"user":"assistant")||m.text==null)
+                    throw new IllegalArgumentException("invalid_dialogue_order");
+                roles[i]=m.role;content[i]=m.text.getBytes(StandardCharsets.UTF_8);
+            }
+            NativeStream stream=new NativeStream(listener);
+            byte[] output=nativeGenerate(systemText.getBytes(StandardCharsets.UTF_8),roles,content,
+                outputBudget,profile.contextTokens,stream);
             if(CANCELLED.get())throw new InterruptedException("user_cancelled");
-            if(output==null||output.length==0)
-                throw new IllegalStateException("native_context_or_generation_failed");
-            return new String(output,StandardCharsets.UTF_8).trim();
-        }finally{
-            BUSY.set(false);
-        }
+            if(output==null||output.length==0)throw new IllegalStateException("native_context_or_generation_failed");
+            String result=stream.output.finish(output);
+            if(result.isBlank())throw new IllegalStateException("no_visible_model_answer");
+            return result;
+        }finally{BUSY.set(false);}
     }
 }

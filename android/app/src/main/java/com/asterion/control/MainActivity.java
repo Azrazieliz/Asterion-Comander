@@ -135,17 +135,17 @@ public final class MainActivity extends Activity {
   private void sectionTitle(LinearLayout parent,String title,String subtitle){TextView a=t(title,27,DesignSystem.TEXT,true);margin(parent,a,3);if(subtitle!=null&&!subtitle.isEmpty()){TextView b=t(subtitle,12.5f,DesignSystem.MUTED,false);margin(parent,b,7);}}
   private TextView action(LinearLayout row,String name,String iconName,boolean primary,Runnable run){
     LinearLayout wrap=h();wrap.setGravity(Gravity.CENTER);wrap.setPadding(dp(13),dp(12),dp(13),dp(12));
-    if(primary)wrap.setBackground(DesignSystem.gradient(this,0xFF755CF6,0xFF2B88CD,15));
+    if(primary)DesignSystem.clickable(wrap,this,0xFF6045BE,0,15);
     else DesignSystem.clickable(wrap,this,DesignSystem.SURFACE2,DesignSystem.EDGE,15);
     if(iconName!=null){wrap.addView(icon(iconName,primary?Color.WHITE:DesignSystem.PURPLE,17));View space=new View(this);wrap.addView(space,new LinearLayout.LayoutParams(dp(8),1));}
-    TextView label=t(name,12.5f,DesignSystem.TEXT,true);wrap.addView(label);wrap.setOnClickListener(w->run.run());
-    row.addView(wrap,new LinearLayout.LayoutParams(0,dp(45),1));return label;
+    TextView label=t(name,12.5f,primary?Color.WHITE:DesignSystem.TEXT,true);wrap.addView(label);wrap.setOnClickListener(w->run.run());
+    wrap.setMinimumHeight(dp(48));row.addView(wrap,new LinearLayout.LayoutParams(0,-2,1));return label;
   }
   private void button(LinearLayout parent,String label,String iconName,boolean primary,Runnable run){LinearLayout outer=h();action(outer,label,iconName,primary,run);wide(parent,outer);}
   private void twoActions(LinearLayout parent,String label1,String icon1,Runnable click1,String label2,String icon2,Runnable click2){
     LinearLayout r=h();action(r,label1,icon1,true,click1);View sp=new View(this);r.addView(sp,new LinearLayout.LayoutParams(dp(9),1));action(r,label2,icon2,false,click2);wide(parent,r);
   }
-  private LinearLayout squareIcon(String name,int tint){LinearLayout box=h();box.setGravity(Gravity.CENTER);box.setBackground(DesignSystem.shape(this,0xFF282743,0,16));box.addView(icon(name,tint,25));box.setLayoutParams(new LinearLayout.LayoutParams(dp(52),dp(52)));return box;}
+  private LinearLayout squareIcon(String name,int tint){LinearLayout box=h();box.setGravity(Gravity.CENTER);box.setBackground(DesignSystem.shape(this,DesignSystem.SURFACE2,0,16));box.addView(icon(name,tint,25));box.setLayoutParams(new LinearLayout.LayoutParams(dp(52),dp(52)));return box;}
   private void rowTitle(LinearLayout parent,String head,String sub,View trailing){
     LinearLayout r=h();LinearLayout labels=v();labels.addView(t(head,17,DesignSystem.TEXT,true));TextView s=t(sub,12,DesignSystem.MUTED,false);s.setMaxLines(2);margin(labels,s,5);r.addView(labels,new LinearLayout.LayoutParams(0,-2,1));
     if(trailing!=null){r.addView(trailing);}wide(parent,r);
@@ -153,7 +153,7 @@ public final class MainActivity extends Activity {
   private void metricRow(LinearLayout parent,String title,String desc,TextView current,int color){
     LinearLayout r=h();DesignSystem.Icon ic=icon("activity",color,19);r.addView(ic);LinearLayout values=v();values.setPadding(dp(12),0,0,0);values.addView(t(title,13,DesignSystem.MUTED,false));margin(values,current,4);r.addView(values,new LinearLayout.LayoutParams(0,-2,1));if(desc!=null){TextView tag=t(desc,11,DesignSystem.MUTED,false);r.addView(tag);}wide(parent,r);
   }
-  @Override public void onCreate(Bundle b){super.onCreate(b);
+  @Override public void onCreate(Bundle b){super.onCreate(b);DesignSystem.configure(this);
     getWindow().setStatusBarColor(DesignSystem.BG);getWindow().setNavigationBarColor(DesignSystem.BG);
     prefs=getSharedPreferences("control",MODE_PRIVATE);
     // Existing pre-v0.6 keys may have been exposed on the former connections page.
@@ -162,7 +162,7 @@ public final class MainActivity extends Activity {
       AgentService.rotateToken(this);
       prefs.edit().putBoolean("agent_key_rotated_v06",true).apply();
     }
-    root=v();root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,new int[]{0xFF10162A,0xFF090D1C,0xFF070A14}));
+    root=v();root.setBackgroundColor(DesignSystem.BG);
     // Android 15+ forces edge-to-edge. Honor live system-bar insets instead
     // of covering the brand/header or burying navigation behind Samsung's bar.
     root.setOnApplyWindowInsetsListener((view,insets)->{
@@ -175,7 +175,7 @@ public final class MainActivity extends Activity {
     buildHeader();stage=new FrameLayout(this);root.addView(stage,new LinearLayout.LayoutParams(-1,0,1));
     pages[0]=scrollHome();pages[1]=remotePage();pages[2]=scrollHealth();pages[3]=scrollDevices();pages[4]=scrollTools();
     for(View page:pages){page.setVisibility(View.GONE);stage.addView(page,new FrameLayout.LayoutParams(-1,-1));}
-    buildNav();show(0);updateHealth();handler.postDelayed(ticker,3500);
+    buildNav();show(getIntent().getBooleanExtra("assistant_settings",false)?4:0);updateHealth();handler.postDelayed(ticker,3500);
     // Owner-authorized continuation is persistent and controlled by the internal
     // ledger. No diagnostic/transport toggles belong on the everyday UI.
     if(!prefs.getBoolean("continuation_initial_default_v0913",false)){
@@ -202,7 +202,7 @@ public final class MainActivity extends Activity {
   }
   private void buildNav(){
     View separator=line();root.addView(separator,new LinearLayout.LayoutParams(-1,dp(1)));
-    navbar=h();navbar.setBackgroundColor(0xFF101526);navbar.setPadding(dp(9),dp(7),dp(9),dp(9));
+    navbar=h();navbar.setBackgroundColor(DesignSystem.BG);navbar.setPadding(dp(9),dp(7),dp(9),dp(9));
     String[] names={"Home","Screen","Health","Connect","Tools"};String[] images={"home","monitor","pulse","devices","settings"};
     for(int i=0;i<pages.length;i++){final int index=i;LinearLayout slot=v();slot.setGravity(Gravity.CENTER);slot.setPadding(dp(1),dp(7),dp(1),dp(6));
       DesignSystem.Icon ic=icon(images[i],DesignSystem.MUTED,22);slot.addView(ic);
@@ -215,8 +215,9 @@ public final class MainActivity extends Activity {
   private ScrollView scroll(LinearLayout body){ScrollView view=new ScrollView(this);view.setFillViewport(false);view.setVerticalScrollBarEnabled(false);body.setPadding(dp(19),dp(14),dp(19),dp(28));view.addView(body);return view;}
   private View scrollHome(){homeBody=v();
     wide(homeBody,eyebrow("YOUR DEVICES · LIVE STATUS"));
-    sectionTitle(homeBody,"Your devices.","Phone and Windows control, with live status.");gap(homeBody,19);
-    LinearLayout hero=card();hero.setBackground(DesignSystem.gradient(this,0xFF342754,0xFF172A42,25));
+    sectionTitle(homeBody,"Devices","");gap(homeBody,19);
+    button(homeBody,"Open assistant","activity",true,this::showPhoneAiChat);gap(homeBody,12);
+    LinearLayout hero=card();hero.setBackground(DesignSystem.shape(this,DesignSystem.SURFACE,DesignSystem.EDGE,22));
     LinearLayout r=h();r.addView(squareIcon("monitor",0xFFD4C9FF));LinearLayout copy=v();copy.setPadding(dp(13),0,0,0);
     copy.addView(eyebrow("WINDOWS COMPUTER"));margin(copy,t("LAPTOP-1LI4VRCJ",17,DesignSystem.TEXT,true),5);r.addView(copy,new LinearLayout.LayoutParams(0,-2,1));wide(hero,r);
     pcConnection=t("Checking your computer…",12.5f,DesignSystem.MUTED,false);margin(hero,pcConnection,17);
@@ -230,14 +231,14 @@ public final class MainActivity extends Activity {
     homeConnectionIssue=t("Checking native connection…",12,DesignSystem.MUTED,false);
     homeConnectionIssue.setMaxLines(6);margin(homeBody,homeConnectionIssue,8);
     gap(homeBody,26);LinearLayout healthTitle=h();healthTitle.addView(eyebrow("PHONE HEALTH"),new LinearLayout.LayoutParams(0,-2,1));
-    TextView details=t("VIEW ALL  ›",11,DesignSystem.PURPLE,true);details.setOnClickListener(w->show(2));healthTitle.addView(details);wide(homeBody,healthTitle);gap(homeBody,11);
+    TextView details=t("VIEW ALL  ›",11,DesignSystem.PURPLE,true);details.setMinimumHeight(dp(48));details.setGravity(Gravity.CENTER_VERTICAL);details.setOnClickListener(w->show(2));healthTitle.addView(details);wide(homeBody,healthTitle);gap(homeBody,11);
     LinearLayout metrics=h();metrics.setGravity(Gravity.TOP);
     homeBattery=smallMetric(metrics,"BATTERY","—",DesignSystem.TEAL);
     homeThermal=smallMetric(metrics,"THERMAL","—",DesignSystem.PURPLE);
     homeMemory=smallMetric(metrics,"FREE RAM","—",DesignSystem.WARNING);wide(homeBody,metrics);
     gap(homeBody,13);
     LinearLayout quick=card();
-    rowTitle(quick,"What do you want to do?","Capabilities and real incidents, without another setup screen",icon("settings",DesignSystem.TEAL,22));
+    rowTitle(quick,"Applications & tools","",icon("settings",DesignSystem.TEAL,22));
     gap(quick,13);
     twoActions(quick,"Add app","devices",this::showAppBridgeApprovals,
       "Tools","settings",()->show(4));
@@ -248,7 +249,7 @@ public final class MainActivity extends Activity {
       "Permissions","shield",this::showPermissionsHub);
     wide(homeBody,quick);
     gap(homeBody,20);
-    LinearLayout privacy=card();rowTitle(privacy,"Private by design","No account, no subscription. Access is yours to authorize.",icon("shield",DesignSystem.TEAL,24));wide(homeBody,privacy);
+    LinearLayout privacy=card();rowTitle(privacy,"Permissions","Device access and connected applications",icon("shield",DesignSystem.TEAL,24));wide(homeBody,privacy);
     return scroll(homeBody);
   }
   private TextView smallMetric(LinearLayout p,String name,String initial,int color){
@@ -288,8 +289,8 @@ public final class MainActivity extends Activity {
     gap(emptyRemote,22);button(emptyRemote,"Set up Windows link","devices",true,()->show(3));frame.addView(emptyRemote,new FrameLayout.LayoutParams(-1,-1));
     layout.addView(frame,new LinearLayout.LayoutParams(-1,0,1));return layout;
   }
-  private View scrollHealth(){healthBody=v();wide(healthBody,eyebrow("LIVE DEVICE DIAGNOSTICS"));sectionTitle(healthBody,"Health & performance.","What your phone actually reports, in real time.");gap(healthBody,21);
-    LinearLayout therm=card();therm.setBackground(DesignSystem.gradient(this,0xFF272844,0xFF17363A,23));
+  private View scrollHealth(){healthBody=v();wide(healthBody,eyebrow("LIVE DEVICE DIAGNOSTICS"));sectionTitle(healthBody,"Health & performance","");gap(healthBody,21);
+    LinearLayout therm=card();therm.setBackground(DesignSystem.shape(this,DesignSystem.SURFACE,DesignSystem.EDGE,22));
     rowTitle(therm,"Thermal pressure","Android operating-system status",icon("pulse",DesignSystem.TEAL,25));
     healthThermal=t("Reading…",27,DesignSystem.TEAL,true);margin(therm,healthThermal,19);
     TextView note=t("Thermal pressure is reported by Android; it is not a CPU-temperature estimate.",11,DesignSystem.MUTED,false);margin(therm,note,8);wide(healthBody,therm);gap(healthBody,11);
@@ -1128,7 +1129,7 @@ public final class MainActivity extends Activity {
   }
   private View scrollDevices(){
     devicesBody=v();wide(devicesBody,eyebrow("SECURE DEVICE ACCESS"));
-    sectionTitle(devicesBody,"Your connections.","Control your own devices without cables or repeated setup.");gap(devicesBody,18);
+    sectionTitle(devicesBody,"Connections","");gap(devicesBody,18);
 
     // Clear device status first. No access tokens, IPs, terminals or logs in this primary view.
     LinearLayout summary=card();summary.setBackground(DesignSystem.gradient(this,0xFF28334B,0xFF182A38,23));
@@ -1197,15 +1198,14 @@ public final class MainActivity extends Activity {
   private View scrollTools(){
     LinearLayout toolsBody=v();
     wide(toolsBody,eyebrow("CONTROL CAPABILITIES"));
-    sectionTitle(toolsBody,"Your workspace.",
-      "Voice, intelligence, network and your connected applications.");
+    sectionTitle(toolsBody,"Tools","");
     gap(toolsBody,15);
     LinearLayout intelligence=card();
     rowTitle(intelligence,"Asterion intelligence",
       "Local AI workspace • verified model status is available separately",
       icon("activity",DesignSystem.PURPLE,23));
     gap(intelligence,12);
-    button(intelligence,"Ask the phone AI","activity",true,
+    button(intelligence,"Open assistant","activity",true,
       this::showPhoneAiChat);
     gap(intelligence,9);
     twoActions(intelligence,"Model status","check",this::showPhoneAiStatus,
@@ -1493,64 +1493,7 @@ public final class MainActivity extends Activity {
     });
   }
   private void showPhoneAiChat(){
-    EditText field=input("",false,"Ask the on-device model");
-    field.setSingleLine(false);
-    field.setMinLines(3);
-    field.setMaxLines(7);
-    field.setInputType(InputType.TYPE_CLASS_TEXT|
-      InputType.TYPE_TEXT_FLAG_MULTI_LINE);
-    new AlertDialog.Builder(this)
-      .setTitle("Ask Asterion · on this phone")
-      .setMessage("Inference runs locally using the model bundled in this "+
-        "signed APK. The response does not execute app commands.")
-      .setView(field)
-      .setPositiveButton("Generate locally",(dialog,which)->{
-        String prompt=field.getText().toString().trim();
-        if(prompt.isEmpty()){toast("Enter a question");return;}
-        java.util.concurrent.atomic.AtomicBoolean abandoned=
-          new java.util.concurrent.atomic.AtomicBoolean(false);
-        AlertDialog working=new AlertDialog.Builder(this)
-          .setTitle("Running on-device inference")
-          .setMessage("Loading the verified local model and decoding "+
-            "on this phone. Windows and cloud inference are not used.")
-          .setNegativeButton("Stop",(d,w)->{
-            abandoned.set(true);
-            OnDeviceLlm.cancel();
-          })
-          .setCancelable(false).create();
-        working.show();
-        io.execute(()->{
-          String answer;
-          String memoryState="";
-          try{
-            answer=OnDeviceLlm.generate(getApplicationContext(),prompt);
-            if(!abandoned.get()&&ControlAssistantPreferences.saveHistory(this)){
-              try{
-                String history="User:\n"+prompt+"\n\nAsterion:\n"+answer;
-                if(history.length()>11800)
-                  history=history.substring(0,11800)+"\n[entry truncated]";
-                ControlAssistantMemory.remember(this,"General",
-                  "local_conversation_verified_generation",history,true);
-                memoryState="\n\nSaved to encrypted local conversation history.";
-              }catch(Exception failedSave){
-                memoryState="\n\nLocal history could not be saved: "+
-                  failedSave.getClass().getSimpleName();
-              }
-            }
-          }catch(Exception|LinkageError error){
-            answer="Local model execution failed: "+
-              error.getClass().getSimpleName()+
-              ". No text result or completed operation is claimed.";
-          }
-          final String text=answer+memoryState;
-          runOnUiThread(()->{
-            if(working.isShowing())working.dismiss();
-            if(destroyed||abandoned.get())return;
-            new AlertDialog.Builder(this).setTitle("On-device AI result")
-              .setMessage(text).setPositiveButton("Close",null).show();
-          });
-        });
-      }).setNegativeButton("Cancel",null).show();
+    startActivity(new Intent(this,AssistantActivity.class));
   }
 
   private void showWindowsIntelligence(){

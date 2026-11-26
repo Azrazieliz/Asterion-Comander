@@ -1,0 +1,63 @@
+{
+  "model_lab": {
+    "candidates": [
+      {
+        "id": "control-qwen3-baseline-c1899de2",
+        "app": "control",
+        "repo": "Qwen/Qwen3-0.6B",
+        "revision": "c1899de289a04d12100db370d81485cdf75e47ca",
+        "artifact_sha256": "f47f71177f32bcd101b7573ec9171e6a57f4f4d31148d38e382306f42996874b",
+        "architecture": "dense",
+        "parameters_total_b": 0.751632384,
+        "parameters_active_b": null,
+        "artifact_bytes": 1503300328,
+        "license": "apache-2.0",
+        "status": "staged",
+        "created_ms": 1795699839735,
+        "probes": [],
+        "phone_qualified": false,
+        "reasoning_quality_certified": false,
+        "no_automatic_model_selection": true
+      },
+      {
+        "id": "control-qwen3-8b-q4km-7c41481f",
+        "app": "control",
+        "repo": "Qwen/Qwen3-8B-GGUF",
+        "revision": "7c41481f57cb95916b40956ab2f0b139b296d974",
+        "artifact_sha256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
+        "architecture": "dense",
+        "parameters_total_b": 8.19,
+        "parameters_active_b": null,
+        "artifact_bytes": 5027783488,
+        "license": "apache-2.0",
+        "status": "staged",
+        "created_ms": 1795700417352,
+        "probes": [],
+        "phone_qualified": false,
+        "reasoning_quality_certified": false,
+        "no_automatic_model_selection": true
+      }
+    ],
+    "count": 2,
+    "phone_certification_open": true
+  },
+  "adaptation": {
+    "id": "control-owner-lora-diagnostic-20261126",
+    "base_candidate_id": "control-qwen3-baseline-c1899de2",
+    "adapter_sha256": "a8656be539ac27cec8525b4bf3c5afc650f69e6adc81479bb597f13a9045352e",
+    "training_record_sha256": "7be502570be230fb625b0a6b37da31f988532ce014f435bd01db37fccff2377c",
+    "evaluation_record_sha256": "636cc90dfd478bae3c9e4a62301965f23ca022971a4456528aef95d69ce21f72",
+    "weights_changed_recorded": true,
+    "owner_behavior_certified": false,
+    "phone_qualified": false,
+    "automatically_promoted": false
+  },
+  "eight_b_experiment": {
+    "artifact_sha_verified": true,
+    "host_model_and_context_loaded": true,
+    "generation_completed": false,
+    "experiment_interrupted": true,
+    "reason": "384-token reasoning generation exceeded bounded host diagnostic time; not a throughput measurement or quality verdict",
+    "phone_qualified": false
+  }
+}

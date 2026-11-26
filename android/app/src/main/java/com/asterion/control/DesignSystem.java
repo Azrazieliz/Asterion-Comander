@@ -20,9 +20,15 @@ import android.widget.TextView;
 /** Original Asterion Control visual language, entirely native Android. */
 public final class DesignSystem {
   private DesignSystem() {}
-  public static final int BG=0xFF080B16,SURFACE=0xFF151B30,SURFACE2=0xFF232B45;
-  public static final int EDGE=0xFF343C59,TEXT=0xFFF7F8FF,MUTED=0xFFA0ADC7;
-  public static final int PURPLE=Color.rgb(161,143,255),TEAL=Color.rgb(76,227,206),WARNING=Color.rgb(255,187,112),BAD=Color.rgb(255,118,143);
+  public static int BG=0xFF0D1015,SURFACE=0xFF191D25,SURFACE2=0xFF242A35;
+  public static int EDGE=0xFF343B48,TEXT=0xFFF1F2F5,MUTED=0xFFA7AFBD;
+  public static int PURPLE=Color.rgb(161,143,255),TEAL=Color.rgb(76,227,206),WARNING=Color.rgb(255,187,112),BAD=Color.rgb(255,118,143);
+  public static void configure(Context c){
+    boolean dark=(c.getResources().getConfiguration().uiMode&android.content.res.Configuration.UI_MODE_NIGHT_MASK)==android.content.res.Configuration.UI_MODE_NIGHT_YES;
+    PURPLE=dark?0xFFC5B5FF:0xFF6546C7;TEAL=dark?0xFF4CE3CE:0xFF087769;WARNING=dark?0xFFFFBB70:0xFF8F5900;BAD=dark?0xFFFF768F:0xFFB52443;
+    BG=dark?0xFF0D1015:0xFFF7F8FA;SURFACE=dark?0xFF191D25:0xFFFFFFFF;SURFACE2=dark?0xFF242A35:0xFFEEF0F5;
+    EDGE=dark?0xFF343B48:0xFFDADEE6;TEXT=dark?0xFFF1F2F5:0xFF181D26;MUTED=dark?0xFFA7AFBD:0xFF566174;
+  }
   public static int dp(Context c,float x){return (int)(x*c.getResources().getDisplayMetrics().density+0.5f);}
   public static GradientDrawable shape(Context c,int base,int stroke,int radius){
     GradientDrawable d=new GradientDrawable();d.setColor(base);d.setCornerRadius(dp(c,radius));if(stroke!=0)d.setStroke(dp(c,1),stroke);return d;
@@ -47,7 +53,7 @@ public final class DesignSystem {
   }
   public static TextView pill(Context c,String label,int color){
     TextView t=text(c,label,11,color,true);t.setGravity(Gravity.CENTER);t.setPadding(dp(c,11),dp(c,7),dp(c,11),dp(c,7));
-    GradientDrawable b=shape(c,color==TEAL?0xFF143835:color==BAD?0xFF3A2033:0xFF2F2949,0,40);
+    GradientDrawable b=shape(c,SURFACE2,EDGE,40);
     t.setBackground(b);return t;
   }
 

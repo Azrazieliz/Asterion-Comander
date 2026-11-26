@@ -26,6 +26,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
       - name: Verify executable AI source contracts, adaptation and persistence
         run: |
           python -m pip install --disable-pip-version-check pytest httpx
@@ -36,7 +40,9 @@ jobs:
             tests/test_control_ai_executor.py \
             tests/test_control_ai_daemon.py \
             tests/test_control_ai_model_lab_candidates.py \
-            tests/test_control_ai_context_requirements.py
+            tests/test_control_ai_context_requirements.py \
+            tests/test_control_ai_workspace.py \
+            tests/test_control_ai_requirements_snapshot.py
   android-java-only:
     needs: python-contracts
     runs-on: ubuntu-latest

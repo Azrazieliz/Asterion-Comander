@@ -1,0 +1,114 @@
+{
+  "evaluation_kind": "teacher_forced_reference_likelihood",
+  "case_count": 12,
+  "holdout_sha256": "038705b5fb9ee6b936d00d1d644583b8be0bbd3c219694169cb6c315d4188f4d",
+  "adapter_manifest_sha256": "7be502570be230fb625b0a6b37da31f988532ce014f435bd01db37fccff2377c",
+  "adapter_file_sha256": "a8656be539ac27cec8525b4bf3c5afc650f69e6adc81479bb597f13a9045352e",
+  "base_mean_nll": 3.8092970053354898,
+  "adapted_mean_nll": 2.0754159167408943,
+  "cases": [
+    {
+      "prompt_sha256": "8afc282c6d8f6d501f5deb186833f5a6080963c6463446cd94d10b5148bae7dd",
+      "domain": "research",
+      "source": "owner-execution-directive-20261126:training_privacy",
+      "base_nll": 5.02730655670166,
+      "adapted_nll": 4.567412376403809,
+      "target_tokens": 41
+    },
+    {
+      "prompt_sha256": "c88bfaabb684c8aac3f3b5a781d3bac7149116a7ec73a2c368d9a8a22d3cceb9",
+      "domain": "cycles",
+      "source": "owner-execution-directive-20261126:intermediate_release",
+      "base_nll": 5.238325119018555,
+      "adapted_nll": 4.146738052368164,
+      "target_tokens": 18
+    },
+    {
+      "prompt_sha256": "2c5ae23139f257a80760b643f93da4667e4bed7d1759a9479d6f344c5c9d9364",
+      "domain": "memory",
+      "source": "owner-execution-directive-20261126:history_scale",
+      "base_nll": 6.478640556335449,
+      "adapted_nll": 5.706944942474365,
+      "target_tokens": 27
+    },
+    {
+      "prompt_sha256": "5723778501924d27e62e23b9023e11bc348e282ca0df7005d3f77dfcefc542cc",
+      "domain": "coding",
+      "source": "owner-execution-directive-20261126:source_target",
+      "base_nll": 4.849785804748535,
+      "adapted_nll": 4.386380195617676,
+      "target_tokens": 40
+    },
+    {
+      "prompt_sha256": "96ce73e1f26c75481a062e8301d74abb847289b105a46c34bec91fbeca6c7616",
+      "domain": "reasoning",
+      "source": "deterministic-integer-multiplication-v1",
+      "base_nll": 3.578873872756958,
+      "adapted_nll": 0.5658228397369385,
+      "target_tokens": 9
+    },
+    {
+      "prompt_sha256": "054e435d72bcf9f858bfd4eb97c1d7da8a7821e316e5a97bbd5c10040bf2e4d6",
+      "domain": "reasoning",
+      "source": "deterministic-integer-multiplication-v1",
+      "base_nll": 2.5284132957458496,
+      "adapted_nll": 0.3237093389034271,
+      "target_tokens": 9
+    },
+    {
+      "prompt_sha256": "3d7d5cfa07bf9c0b8c5c2559fbb312e2b16115e496d10a1db5babc13498141ae",
+      "domain": "reasoning",
+      "source": "deterministic-integer-multiplication-v1",
+      "base_nll": 2.958127021789551,
+      "adapted_nll": 0.75124591588974,
+      "target_tokens": 9
+    },
+    {
+      "prompt_sha256": "1db09a5ba5dcb10869425777d166f8f716b28e8c0a2a33935470dde5c8632843",
+      "domain": "reasoning",
+      "source": "deterministic-integer-multiplication-v1",
+      "base_nll": 2.7358222007751465,
+      "adapted_nll": 0.6787399053573608,
+      "target_tokens": 9
+    },
+    {
+      "prompt_sha256": "400347cea126444a9eef1da10ee720452f7dfe88c2ac89dd15f4365aafd276bd",
+      "domain": "reasoning",
+      "source": "deterministic-integer-multiplication-v1",
+      "base_nll": 3.228226900100708,
+      "adapted_nll": 1.1404258012771606,
+      "target_tokens": 9
+    },
+    {
+      "prompt_sha256": "aa51b8a05b054c2011383520538f37d8b9b9bac0d898454dd40dede23a86f8b5",
+      "domain": "reasoning",
+      "source": "deterministic-integer-multiplication-v1",
+      "base_nll": 2.9039926528930664,
+      "adapted_nll": 0.834765613079071,
+      "target_tokens": 9
+    },
+    {
+      "prompt_sha256": "6307394c78d090e717c2b7d5b400ab491c695d8ad2375155fd082f4e7b4cf5b7",
+      "domain": "reasoning",
+      "source": "deterministic-integer-multiplication-v1",
+      "base_nll": 2.9302079677581787,
+      "adapted_nll": 0.9426592588424683,
+      "target_tokens": 9
+    },
+    {
+      "prompt_sha256": "6233d97cf6fc9bb80ada0de615c65d140b40349e84a7a7c1564ad1c68e476e6a",
+      "domain": "reasoning",
+      "source": "deterministic-integer-multiplication-v1",
+      "base_nll": 3.2538421154022217,
+      "adapted_nll": 0.8601467609405518,
+      "target_tokens": 9
+    }
+  ],
+  "elapsed_s": 10.10110068321228,
+  "free_generation_evaluated": false,
+  "human_reviewed_count": 0,
+  "independent_maturity_holdout_count": 0,
+  "owner_behavior_certified": false,
+  "phone_accepted": false,
+  "production_promoted": false
+}
