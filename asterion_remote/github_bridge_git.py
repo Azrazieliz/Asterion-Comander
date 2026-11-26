@@ -7,11 +7,14 @@ from urllib.parse import urlsplit
 from pathlib import Path
 from . import github_bridge
 from .github_bridge import NAME,local_token,run
+from .bridge_worker_lock import worker_process_lock, WorkerAlreadyRunning
 
 REPO='Azrazieliz/Asterion-Control-Bridge'
 URL='https://github.com/'+REPO+'.git'
 ROOT=Path(os.environ.get('ASTERION_BRIDGE_GIT_WORKTREE',str(Path(os.environ.get('LOCALAPPDATA',str(Path.home()))) / 'AsterionControl' / 'private-bridge-repo')))
 STAMP=ROOT.parent/'git-bridge-migration-v1.done'
+# Stable owner-state lock, independent of optional worktree overrides.
+WORKER_LOCK=Path(os.environ.get('LOCALAPPDATA',str(Path.home()))) / 'AsterionControl' / 'control-git-bridge-worker.lock'
 
 # Persistent, sanitized liveness journal. The watchdog must check progress,
 # not merely the existence of a python.exe process. Never write credentials,
@@ -471,7 +474,10 @@ def cycle(key):
         identity=request.stem
         health('processing',inflight_id=identity)
         # This receipt prevents replay after crashes but is not a success claim.
-        write_result(identity,{'id':identity,'ok':False,'status':'running'},publish_now=False)
+        if not write_result(identity,{'id':identity,'ok':False,'status':'running'},publish_now=False):
+            # Even an unexpectedly discovered receipt must suppress dispatch.
+            health('idle',inflight_id=None)
+            continue
         started=time.monotonic()
         try:
             task=json.loads(request.read_text('utf8'))
@@ -506,7 +512,7 @@ def cycle(key):
                pending_count=max(0,len(tasks)-len(batch)),inflight_id=None)
     return len(batch)
 
-def main():
+def _run_owned_worker():
     health('starting')
     try:
         health('setup')
@@ -545,6 +551,14 @@ def main():
                    error_kind=type(exc).__name__)
             print('Bridge retry:',type(exc).__name__,str(exc)[:180],flush=True)
             time.sleep(min(45,failures*5))
+
+def main():
+    try:
+        with worker_process_lock(WORKER_LOCK):
+            _run_owned_worker()
+    except WorkerAlreadyRunning:
+        # Never overwrite the real owner's heartbeat or result journal.
+        print('Asterion Control relay already owns the queue; duplicate refused',flush=True)
 
 if __name__=='__main__':main()
 
