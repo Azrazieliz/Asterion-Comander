@@ -1,3 +1,17 @@
+# 2026-11-26 — Relay recurrence and transfer reliability
+
+Owner requested completion of non-neural Control, especially recurring November 22–23 relay outages and file transfers. Original authenticated bridge retained. No replacement bridge, additional PC checkout or recovery backup created, no existing project jobs terminated.
+
+Live private bridge evidence: control-reliability-20261126-pc-health-01 and phone-status-01 completed (39/351 ms native execution). installed-audit-01 returned HTTP 429; native-jobs-01 recorded 1,113 jobs, three running at sample time. installed-audit-02 exited 0: 12,572 active-directory commands, 12,770 results, 3,410 receipt-recovery files and zero consecutive relay errors. Historical receipt files not deleted without reconciliation. Exact cause of final November 22 recurrence not proven.
+
+Source commits: e4976f1f (fast-forward publication, Git-native receipt preservation), 8e396377 (capacity and safe offset recovery), ef9e809e (native transfer and terminal reconciliation independent of shell slots), 3094b8e4 (paired WSS transfer fallback with bounded chunks and read-only recovery, IPv6 URL correction), beafd842 (memory-only receipt fingerprint cache and batched reconciliation). Focused CI runs 45860984471, 45861240638, 45861240675, 45861401747, 45861401965, 45861587406 succeeded in tested scopes, including Windows relay, Python/JVM transfer and Android Java compile. First fast-forward test failed on a wildcard assertion, corrected subsequently.
+
+Full unmodified regression inventory workflow at 3b80ea82: [run 45861843854](https://github.com/Azrazieliz/Asterion-Comander/actions/runs/45861843854). Linux 412 passed, 29 failed, 2 skipped, 36 subtests passed. Windows still running at checkpoint. Failures include retired gateway/release assumptions, cycle/UI assertions, native fallback suite interactions, framework route introspection and AI-era expectations; not all are established obsolete. Do not mark accepted or delete assertions merely to green CI.
+
+Fresh phone diagnostics (control-nonai-20261126-cert-phone-{vpn,network,security,voice}-status-01) report validated Wi-Fi, VPN off/unconfigured/unverified peer, owner-local security/no Android permission bypass, voice stopped. No real end-to-end file transfer or sustained disconnect/reconnect acceptance after repairs. Android process-death transfer reconciliation remains unverified. In-place Windows deployment attempt was blocked by execution safety checks; no successful deployment receipt, no bypass attempted. Existing running Windows worker and installed APK are not certified updated. Full non-AI completion remains blocked by runtime deployment/acceptance, unresolved full regressions, provider enrollment/Android consent, Tor/voice/UI/security/autonomy runtime evidence. Release hold remains. No neural reconstruction, model changes or training undertaken.
+
+---
+
 # 2026-11-26 — Non-AI Tor, VPN, autonomy and security
 
 Merged [#35](https://github.com/Azrazieliz/Asterion-Comander/pull/35), [#36](https://github.com/Azrazieliz/Asterion-Comander/pull/36) and [#37](https://github.com/Azrazieliz/Asterion-Comander/pull/37). Canonical implementation now includes signature-pinned official Tor routing with ordinary-browser/crawler onion rejection; strict dual-stack VPN route and provider checks, existing-VPN transition guards; scanner and no-clobber recoverable quarantine; durable dependency/cycle receipts, pinned local container policy and exact staged-tree isolation without Git metadata/untracked data.
