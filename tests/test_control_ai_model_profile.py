@@ -69,3 +69,20 @@ def test_owner_settings_are_local_and_not_tool_permissions():
     assert "authorization and security controls" in policy
     assert "showPhoneAiPreferences" in view
     assert "ControlAssistantPreferences.save" in view
+
+
+def test_encrypted_memory_contract_and_owner_review_controls():
+    code=(JAVA/"ControlAssistantMemory.java").read_text(encoding="utf8")
+    ui=(JAVA/"MainActivity.java").read_text(encoding="utf8")
+    model=(JAVA/"OnDeviceLlm.java").read_text(encoding="utf8")
+    assert 'KeyStore.getInstance("AndroidKeyStore")' in code
+    assert 'AES/GCM/NoPadding' in code
+    assert 'setKeySize(256)' in code
+    assert 'if(!explicitlyOwnerApproved)' in code
+    assert 'db.delete("memory","id=?",new String[]{id})' in code
+    assert 'SELECT id,project,origin,nonce,payload' in code
+    assert "ControlAssistantMemory.relevant(context,userPrompt)" in model
+    assert "ControlAssistantMemory.remember" in ui
+    assert "ControlAssistantMemory.recent" in ui
+    assert "ControlAssistantMemory.forget" in ui
+    assert "new AlertDialog.Builder(this)" in ui
