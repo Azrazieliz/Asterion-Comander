@@ -187,3 +187,43 @@ def test_old_accepted_jobs_cannot_starve_fresh_pc_commands(tmp_path, monkeypatch
     assert called.count("pc_job_status") == 24
     assert called.count("pc_status") == 1
     assert "pc_command" not in called
+
+
+def test_receipt_cache_reparses_only_changed_files(tmp_path,monkeypatch):
+    monkeypatch.setattr(control,"ROOT",tmp_path)
+    folder=tmp_path/"results";folder.mkdir()
+    for i in range(100):
+        (folder/f"finished-{i:03}.json").write_text(json.dumps({"id":f"finished-{i:03}","status":"complete"}))
+    p=folder/"active-job.json"
+    p.write_text(json.dumps({"id":"active-job","status":"accepted"}))
+    original=Path.read_text
+    reads=[]
+    def count(self,*a,**kw):
+        reads.append(self.name)
+        return original(self,*a,**kw)
+    monkeypatch.setattr(Path,"read_text",count)
+    assert len(control.outstanding_jobs())==1
+    assert len(reads)==101
+    reads.clear()
+    assert len(control.outstanding_jobs())==1
+    assert reads==[]
+    pending=folder/"changed.pending"
+    pending.write_text(json.dumps({"id":"active-job","status":"complete"}))
+    pending.replace(p)
+    assert control.outstanding_jobs()==[]
+    assert reads==["active-job.json"]
+
+
+def test_reconciled_and_new_receipts_share_one_publication(tmp_path,monkeypatch):
+    active=prepare(tmp_path,monkeypatch)
+    saved=tmp_path/"results";saved.mkdir()
+    for i in range(3):
+        (saved/f"old-job-{i}.json").write_text(json.dumps({"id":f"old-job-{i}",
+            "status":"accepted","result":{"id":"a"*32}}))
+    (active/"fresh-read.json").write_text(json.dumps({"id":"fresh-read","op":"pc_status"}))
+    published=[]
+    monkeypatch.setattr(control,"publish",lambda paths:published.append(list(paths)))
+    monkeypatch.setattr(control,"run",lambda task,key:{"status":"finished","exit_code":0}
+        if task["op"]=="pc_job_status" else {"ok":True})
+    assert control.cycle("redacted")==1
+    assert len(published)==1 and len(published[0])==4

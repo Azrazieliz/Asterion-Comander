@@ -99,31 +99,64 @@ def reconcile_slice(pending):
     return batch
 
 
-def outstanding_jobs():
-    """Load only native job receipts that lack a final exit status."""
-    folder=ROOT/'results'
-    if not folder.is_dir():return []
-    pending=[]
-    for path in sorted(folder.glob('*.json')):
-        if not NAME.fullmatch(path.stem):continue
-        try: receipt=json.loads(path.read_text('utf8'))
-        except (ValueError,OSError):continue
-        if receipt.get('status') in ('accepted','running'):
-            pending.append((path,receipt))
-    return pending
+_RECEIPT_CACHE_ROOT=None
+_RECEIPT_CACHE={}
 
-def reconcile_jobs(key,pending):
+def outstanding_jobs():
+    """Only parse changed receipts, not every historical JSON on every poll.
+
+    File fingerprints include inode, timestamps and size; atomic replacement
+    invalidates a prior receipt even if its length is unchanged. The cache is
+    memory-only and is rebuilt on restart or root change.
+    """
+    global _RECEIPT_CACHE_ROOT,_RECEIPT_CACHE
+    folder=ROOT/'results'
+    if _RECEIPT_CACHE_ROOT!=folder:
+        _RECEIPT_CACHE_ROOT=folder
+        _RECEIPT_CACHE={}
+    if not folder.is_dir():
+        _RECEIPT_CACHE={}
+        return []
+    found={}
+    pending=[]
+    with os.scandir(folder) as entries:
+        for entry in entries:
+            if not entry.name.endswith('.json') or not NAME.fullmatch(entry.name[:-5]):
+                continue
+            try:
+                if not entry.is_file(follow_symlinks=False):continue
+                info=entry.stat(follow_symlinks=False)
+                fingerprint=(info.st_ino,info.st_size,info.st_mtime_ns,info.st_ctime_ns)
+                old=_RECEIPT_CACHE.get(entry.name)
+                path=Path(entry.path)
+                if old is not None and old[0]==fingerprint:
+                    receipt=old[1]
+                else:
+                    value=json.loads(path.read_text('utf8'))
+                    receipt=value if isinstance(value,dict) and value.get('status') in ('accepted','running') else None
+                found[entry.name]=(fingerprint,receipt)
+                if receipt is not None:pending.append((path,receipt))
+            except (ValueError,OSError):continue
+    _RECEIPT_CACHE=found
+    return sorted(pending,key=lambda item:item[0].name)
+
+
+def reconcile_jobs(key,pending,*,publish_now=True):
     """Preserve uncertain execution without replaying side-effecting commands."""
+    changed=[]
+    def record(identity,response):
+        if write_result(identity,response,publish_now=publish_now):
+            changed.append(Path('results')/(identity+'.json'))
     for path,receipt in pending:
         identity=path.stem
         if receipt.get('status')=='running':
-            write_result(identity,dict(receipt,ok=False,status='uncertain',
+            record(identity,dict(receipt,ok=False,status='uncertain',
                 error='Previous Control worker stopped before a durable job receipt'))
             continue
         remote=receipt.get('result',{})
         ident=remote.get('id','') if isinstance(remote,dict) else ''
         if not isinstance(ident,str) or len(ident)!=32:
-            write_result(identity,dict(receipt,ok=False,status='uncertain',
+            record(identity,dict(receipt,ok=False,status='uncertain',
                 error='Native job identifier unavailable'))
             continue
         try:
@@ -133,7 +166,7 @@ def reconcile_jobs(key,pending):
                 job=run({'op':'pc_job_status','params':{'job_id':ident}},key)
         except Exception as exc:
             if '404' in str(exc) or 'Unknown job' in str(exc):
-                write_result(identity,dict(receipt,ok=False,status='uncertain',
+                record(identity,dict(receipt,ok=False,status='uncertain',
                     error='Agent restarted and lost job state; inspect saved build artifacts'))
                 continue
             # A transient query failure for an old job must not starve fresh
@@ -155,18 +188,20 @@ def reconcile_jobs(key,pending):
                 result['location'].startswith('Downloads/Asterion Control/') and
                 isinstance(result.get('android_uri'),str) and result['android_uri'].startswith('content://'))
             terminal='complete' if verified else ('error' if state in ('failed','cancelled') else 'uncertain')
-            write_result(identity,dict(receipt,ok=verified,status=terminal,
+            record(identity,dict(receipt,ok=verified,status=terminal,
                 result={'id':ident,'state':state,'receipt':result if verified else None},
                 error='' if verified else 'Native transfer '+state+'; no verified publication'))
             continue
         if not isinstance(job,dict) or job.get('status')!='finished':continue
         code=job.get('exit_code')
         good=code==0
-        write_result(identity,dict(receipt,ok=good,
+        record(identity,dict(receipt,ok=good,
             status='complete' if good else 'error',
             result={'id':ident,'exit_code':code,
                     'output_tail':str(job.get('output',''))[-1600:]},
             error='' if good else 'Native Control command exited unsuccessfully'))
+    return changed
+
 
 def git(*args,timeout=60,env=None):
     p=subprocess.run(['git',*args],cwd=ROOT if ROOT.is_dir() else None,
@@ -421,14 +456,14 @@ def recover_unpublished():
         publish(ready)
     return len(ready)
 
-def pending_in(folder):
+def pending_in(folder,recorded=None):
     """Return only unknown commands; never replay a recorded running/error receipt."""
     results=ROOT/'results'
     results.mkdir(exist_ok=True)
     if not folder.is_dir():return []
     # One directory enumeration rather than a separate filesystem existence
     # lookup for every historical command. Durable receipts still gate replay.
-    recorded={p.name for p in results.glob('*.json')}
+    if recorded is None:recorded={p.name for p in results.glob('*.json')}
     return [p for p in sorted(folder.glob('*.json'))
             if NAME.fullmatch(p.stem) and p.name not in recorded]
 
@@ -441,7 +476,8 @@ def entries():
     """
     commands=ROOT/'commands'
     chosen=[];seen=set()
-    for file in pending_in(commands/'active')+pending_in(commands):
+    recorded={p.name for p in (ROOT/'results').glob('*.json')}
+    for file in pending_in(commands/'active',recorded)+pending_in(commands,recorded):
         if file.stem in seen:continue
         chosen.append(file)
         seen.add(file.stem)
@@ -472,19 +508,13 @@ def cycle(key):
     health('idle',pending_count=len(tasks)+len(unfinished))
     if tasks or unfinished:
         ensure_agent(key)
-    if unfinished:
-        # Do not indefinitely block the four-second fresh command queue
-        # behind old accepted native jobs. Those jobs remain durable and
-        # are checked in bounded rotating batches; never resubmit them.
-        reconcile_jobs(key,reconcile_slice(unfinished))
-    # A finished receipt written just before a previous push failed is
-    # publication-only: NEVER execute the corresponding operation again.
+    # Already-durable previous results are publication-only, never replayed.
     recover_unpublished()
-    # Execute a bounded command burst against one already-fetched snapshot.
-    # Each result is durably journaled before the next action, then ALL receipts
-    # share one Git commit/fetch/rebase/push instead of one per command.
-    # On a publishing failure recover_unpublished() publishes without replay.
-    batch=[]
+    # Coalesce finished historical jobs with new command results into a single
+    # Git publication. A failed publication is still recovered on next sync.
+    batch=reconcile_jobs(key,reconcile_slice(unfinished),publish_now=False) if unfinished else []
+    reconciled=len(batch)
+    processed=0
     for request in tasks[:12]:
         identity=request.stem
         health('processing',inflight_id=identity)
@@ -532,13 +562,14 @@ def cycle(key):
         write_result(identity,reply,publish_now=False)
         health('idle',inflight_id=None)
         batch.append(Path('results')/(identity+'.json'))
+        processed+=1
         print('Asterion Control',identity,reply['status'],flush=True)
     if batch:
         health('publishing',inflight_id=None)
         publish(batch)
         health('idle',last_publish_utc=_utc_now(),
-               pending_count=max(0,len(tasks)-len(batch)),inflight_id=None)
-    return len(batch)
+               pending_count=max(0,len(tasks)+len(unfinished)-processed-reconciled),inflight_id=None)
+    return processed
 
 def _run_owned_worker():
     health('starting')
