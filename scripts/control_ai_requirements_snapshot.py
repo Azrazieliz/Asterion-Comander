@@ -47,8 +47,12 @@ def _source(root:Path,entry:dict)->list[str]:
     if not isinstance(entry["blob_sha"],str) or not BLOB.fullmatch(entry["blob_sha"]):
         raise ValueError("source_git_blob_required")
     data=resolved.read_bytes()
-    if git_blob_sha(data)!=entry["blob_sha"]:
-        raise ValueError("pinned_canonical_source_changed")
+    if (git_blob_sha(data)!=entry["blob_sha"] and
+            # Windows core.autocrlf checkout may materialize CRLF while
+            # immutable Git blob and canonical source are LF. Never relax
+            # any other mismatch or accept unpinned content.
+            git_blob_sha(data.replace(b"\r\n",b"\n"))!=entry["blob_sha"]):
+        raise ValueError("pinned_canonical_source_changed:"+relative)
     try:return data.decode("utf-8").splitlines(keepends=True)
     except UnicodeDecodeError as exc:
         raise ValueError("canonical_source_not_utf8") from exc
@@ -80,11 +84,12 @@ def snapshot(root:Path,index:dict,*,max_pack_chars:int=12000)->dict:
     records=[]
     topics=set()
     for item in descriptions:
-        required_fields={"id","file","start_match","end_before","topic",
+        required_fields={"id","file","start_match","topic",
                          "kind","status","importance","supersedes"}
+        optional_fields={"end_before","end_at_eof"}
         if (not isinstance(item,dict) or
                 not required_fields <= set(item) or
-                not set(item) <= required_fields|{"end_at_eof"} or
+                not set(item) <= (required_fields|optional_fields) or
                 ("end_at_eof" in item and type(item["end_at_eof"]) is not bool)):
             raise ValueError("invalid_requirement_anchor_fields")
         source=item["file"]
@@ -92,7 +97,7 @@ def snapshot(root:Path,index:dict,*,max_pack_chars:int=12000)->dict:
             raise ValueError("requirements_source_not_pinned")
         lines=prepared[source]
         first=_unique_line(lines,item["start_match"])
-        next_anchor=item["end_before"]
+        next_anchor=item.get("end_before")
         last=(_unique_line(lines,next_anchor)-1
               if next_anchor is not None else
               len(lines) if item.get("end_at_eof") else first)
