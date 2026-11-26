@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "file": "Qwen3-0.6B-Q4_K_M.gguf",
+  "bytes": 484220288,
+  "sha256": "373db06783953f0981572d008f183eb2167b93304f5adbf7c4ce6ed6a91ee437",
+  "source": "tauqir02/Qwen3-0.6B-GGUF (legacy baseline pending measured replacement)",
+  "max_input_chars": 24000,
+  "max_new_tokens": 768,
+  "context_tokens": 4096,
+  "chat_format": {
+    "system_prefix": "<|im_start|>system\n",
+    "user_prefix": "<|im_end|>\n<|im_start|>user\n",
+    "assistant_prefix": "<|im_end|>\n<|im_start|>assistant\n"
+  },
+  "system_text": "You are Asterion Control, a locally operated assistant. Reason carefully, distinguish evidence from hypotheses, and respond to the user's request. Use trusted Control tools when dispatched through authorized typed tool APIs; never assert that an operation succeeded without independently verified receipts. Follow the owner's configured preferences. Do not invent app operations, access to private data, or completed tasks."
+}
