@@ -26,7 +26,7 @@ def setup(tmp_path):
     config={
         "repo":str(repo),
         "tasks":"docs/CONTROL_NATIVE_AI_BACKLOG_20261126.json",
-        "cycle":"native_daemon_test_20261126",
+        "cycle":"native-daemon-test-20261126",
         "isolated_root":str(tmp_path/"isolated"),
         "endpoint":"http://127.0.0.1:8080/v1/chat/completions",
         "model":"local",
@@ -71,7 +71,7 @@ def test_uncertain_turn_stays_blocked_after_process_restart(setup,monkeypatch):
     result=daemon.run(config,once=True)
     assert result["state"]=="dispatch_uncertain"
     assert overnight_supervisor.status(config["cycle"])["turn_index"]==1
-    assert dev_backlog.claim(config["cycle"]) is not None  # no candidate generated yet
+    assert all(t["state"]=="pending" for t in dev_backlog.snapshot(config["cycle"]))
 
 
 def test_config_reviewed_tests_are_immutable(setup):
