@@ -42,7 +42,7 @@ def test_source_locked_owner_and_v3_v6_contracts_recover_exactly():
               if x["id"]=="OAI-05")
     assert "50,000 unique sealed holdout" in next(x["text"] for x in all_records
               if x["id"]=="OAI-12")
-    assert "Continue all independently actionable work" in next(
+    assert "never wait on one independent workstream" in next(
         x["text"] for x in all_records if x["id"]=="OAI-15")
 
 
