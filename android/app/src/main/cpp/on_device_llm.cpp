@@ -57,24 +57,27 @@ static void batch_tokens(llama_batch_ext *batch,const llama_token *token,int n,l
     llama_batch_ext_set_output_logits(batch,n-1,true);
 }
 extern "C" JNIEXPORT jbyteArray JNICALL
-Java_com_asterion_control_OnDeviceLlm_nativeGenerate(JNIEnv *env,jclass,jstring jprompt,jint limit) {
-    if (!jprompt || limit<1 || limit>384) return nullptr;
+Java_com_asterion_control_OnDeviceLlm_nativeGenerate(JNIEnv *env,jclass,jstring jprompt,jint limit,jint context_limit) {
+    if (!jprompt || limit<1 || limit>2048 || context_limit<512 || context_limit>16384
+        || limit+256>context_limit) return nullptr;
     std::lock_guard<std::mutex> lock(guard);
     if (!model || cancel_generation.load(std::memory_order_acquire)) return nullptr;
     const char *raw=env->GetStringUTFChars(jprompt,nullptr);
     if(!raw)return nullptr;
     std::string prompt(raw);
     env->ReleaseStringUTFChars(jprompt,raw);
-    if(prompt.empty()||prompt.size()>8192)return nullptr;
+    if(prompt.empty()||prompt.size()>262144)return nullptr;
     const llama_vocab *vocab=llama_model_get_vocab(model);
     int tokenCount=llama_tokenize(vocab,prompt.data(),prompt.size(),nullptr,0,true,true);
-    if(tokenCount>=0||tokenCount < -2048)return nullptr;
+    if(tokenCount>=0||tokenCount < -16384)return nullptr;
     std::vector<llama_token> tokens(-tokenCount);
     if(llama_tokenize(vocab,prompt.data(),prompt.size(),tokens.data(),tokens.size(),true,true)<0)
         return nullptr;
+    if(tokens.size()+static_cast<size_t>(limit)+32u >
+            static_cast<size_t>(context_limit))return nullptr;
     llama_context_params cp=llama_context_default_params();
-    cp.n_ctx=std::max(2048,(int)tokens.size()+(int)limit+32);
-    cp.n_batch=std::max(256,(int)tokens.size());
+    cp.n_ctx=context_limit;
+    cp.n_batch=512;
     cp.n_ubatch=256;
     cp.n_threads=4;cp.n_threads_batch=4;
     llama_context *ctx=llama_init_from_model(model,cp);
@@ -106,7 +109,7 @@ Java_com_asterion_control_OnDeviceLlm_nativeGenerate(JNIEnv *env,jclass,jstring 
         if(llama_process(ctx,LLAMA_PROCESS_TYPE_DECODE,batch)!=0){ok=false;break;}
     }
     llama_batch_ext_free(batch);llama_sampler_free(sampler);llama_free(ctx);
-    if(!ok||answer.size()>65536)return nullptr;
+    if(!ok||answer.size()>262144)return nullptr;
     jbyteArray bytes=env->NewByteArray(answer.size());
     if(bytes)env->SetByteArrayRegion(bytes,0,answer.size(),(jbyte*)answer.data());
     return bytes;
