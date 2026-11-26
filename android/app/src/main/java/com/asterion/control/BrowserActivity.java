@@ -625,31 +625,8 @@ public final class BrowserActivity extends Activity {
               .setNegativeButton("Cancel", null).show();
     }
     private void sendToSpecialistDownloader(String url){
-        // This explicitly delegates B06: no Downloader extraction, segmented
-        // transfer or retry engine runs inside the Control Browser process.
-        notice("Checking signed Downloader capability");
-        new Thread(()->{
-            try{
-                JSONObject request=new JSONObject()
-                    .put("intent","download")
-                    .put("request_id","browser-"+UUID.randomUUID().toString())
-                    .put("payload",new JSONObject().put("url",url));
-                JSONObject receipt=AppIntentFastPath.route(
-                    getApplicationContext(),request);
-                runOnUiThread(()->{
-                    if(receipt.optBoolean("routed",false)){
-                        String state=receipt.optString("status","outcome_unknown");
-                        notice("Downloader operation: "+state);
-                    }else{
-                        notice("No approved signed Downloader action: "+
-                            receipt.optString("status","unavailable"));
-                    }
-                });
-            }catch(Exception error){
-                runOnUiThread(()->notice("Downloader handoff unavailable: "+
-                    error.getClass().getSimpleName()));
-            }
-        },"asterion-browser-signed-downloader-handoff").start();
+        // B06 delegates to the original signed Downloader/Nexus engine.
+        new BrowserDownloadPanel(this).choose(url);
     }
     private void rememberDownload(long id,String host){
         try{
@@ -678,6 +655,7 @@ public final class BrowserActivity extends Activity {
                 try{startActivity(new Intent(DownloadManager.ACTION_VIEW_DOWNLOADS));}
                 catch(Exception error){notice("Android Downloads unavailable");}
             })
+            .setNegativeButton("Specialist transfers",(d,w)->new BrowserDownloadPanel(this).show())
             .setPositiveButton("Close",null).create();
         Handler updater=new Handler(Looper.getMainLooper());
         final Runnable[] runner=new Runnable[1];
