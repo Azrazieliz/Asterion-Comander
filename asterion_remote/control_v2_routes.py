@@ -30,8 +30,12 @@ def _owner_approval(value: str | None):
 
 def _authorized_path(value:str)->Path:
     # Reuse existing Control's configured roots, symlink checks and policy.
-    from .app import safe_path
-    return safe_path(value)
+    from .app import safe_path, ROOT
+    supplied=Path(value).expanduser()
+    lexical=Path(os.path.abspath(supplied if supplied.is_absolute() else ROOT/supplied))
+    resolved=safe_path(value)
+    if resolved!=lexical:raise HTTPException(403,"Symbolic or redirected security path refused")
+    return lexical
 
 
 def _vault()->Path:
@@ -82,7 +86,7 @@ def security_restore(body:RestoreRequest,
     try:
         # The vault only holds files that were previously authorized by
         # safe_path; restore forbids replacing any existing destination.
-        return security_scanner.restore(body.quarantine_id,_vault())
+        return security_scanner.restore(body.quarantine_id,_vault(),authorize=lambda p:_authorized_path(str(p)))
     except FileNotFoundError as exc:
         raise HTTPException(404,"Quarantine item not found") from exc
     except (ValueError,OSError) as exc:
