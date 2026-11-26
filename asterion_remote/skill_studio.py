@@ -40,6 +40,10 @@ def _db():
       state TEXT NOT NULL,
       created_ms INTEGER NOT NULL,approved_ms INTEGER NOT NULL DEFAULT 0,
       executions INTEGER NOT NULL DEFAULT 0)""")
+    db.execute("""CREATE TABLE IF NOT EXISTS skill_versions(
+      id TEXT NOT NULL,version INTEGER NOT NULL,sha256 TEXT NOT NULL,
+      definition TEXT NOT NULL,created_ms INTEGER NOT NULL,
+      PRIMARY KEY(id,version))""")
     db.row_factory=sqlite3.Row
     return db
 
@@ -75,7 +79,11 @@ def create(skill_id:str, description:str, device:str,
     with _LOCK:
         db=_db()
         try:
-            old=db.execute("SELECT version FROM skills WHERE id=?",(skill_id,)).fetchone()
+            db.execute("BEGIN IMMEDIATE")
+            old=db.execute("SELECT * FROM skills WHERE id=?",(skill_id,)).fetchone()
+            if old:
+                db.execute("INSERT OR IGNORE INTO skill_versions VALUES(?,?,?,?,?)",
+                           (skill_id,old["version"],old["sha256"],old["definition"],old["created_ms"]))
             ver=old["version"]+1 if old else 1
             db.execute("""INSERT INTO skills(id,version,sha256,definition,state,
               created_ms,approved_ms,executions) VALUES(?,?,?,?,?,?,0,0)
@@ -83,6 +91,8 @@ def create(skill_id:str, description:str, device:str,
               sha256=excluded.sha256,definition=excluded.definition,
               state='draft',created_ms=excluded.created_ms,approved_ms=0""",
               (skill_id,ver,digest,serialized,"draft",time.time_ns()//1000000))
+            db.execute("INSERT INTO skill_versions SELECT id,version,sha256,definition,created_ms FROM skills WHERE id=?",(skill_id,))
+            db.commit()
         finally:db.close()
     return {"ok":True,"id":skill_id,"version":ver,
             "sha256":digest,"state":"draft","owner_approval_required":True}
@@ -112,6 +122,50 @@ def details(skill_id:str)->dict:
         finally:db.close()
     row["definition"]=json.loads(row["definition"])
     return {"ok":True,**row}
+
+
+def versions(skill_id:str)->dict:
+    _valid_id(skill_id)
+    with _LOCK:
+        db=_db()
+        try:
+            current=db.execute("SELECT version FROM skills WHERE id=?",(skill_id,)).fetchone()
+            if current is None:raise KeyError(skill_id)
+            db.execute("INSERT OR IGNORE INTO skill_versions SELECT id,version,sha256,definition,created_ms FROM skills WHERE id=?",(skill_id,))
+            rows=db.execute("SELECT version,sha256,created_ms FROM skill_versions WHERE id=? ORDER BY version DESC",(skill_id,)).fetchall()
+            return {"ok":True,"id":skill_id,"current_version":current["version"],"versions":[dict(x) for x in rows]}
+        finally:db.close()
+
+
+def rollback(skill_id:str,target_version:int,expected_current_sha256:str)->dict:
+    """Copy an intact historical definition into a NEW unapproved draft."""
+    _valid_id(skill_id)
+    if not isinstance(target_version,int) or target_version<1 or not _SHA.fullmatch(expected_current_sha256):
+        raise ValueError("invalid_rollback_request")
+    with _LOCK:
+        db=_db()
+        try:
+            db.execute("BEGIN IMMEDIATE")
+            current=db.execute("SELECT * FROM skills WHERE id=?",(skill_id,)).fetchone()
+            if current is None:raise KeyError(skill_id)
+            if current["sha256"]!=expected_current_sha256:raise ValueError("current_definition_changed")
+            db.execute("INSERT OR IGNORE INTO skill_versions SELECT id,version,sha256,definition,created_ms FROM skills WHERE id=?",(skill_id,))
+            prior=db.execute("SELECT * FROM skill_versions WHERE id=? AND version=?",(skill_id,target_version)).fetchone()
+            if prior is None:raise KeyError(target_version)
+            digest=hashlib.sha256(prior["definition"].encode("utf8")).hexdigest()
+            if digest!=prior["sha256"]:raise ValueError("historical_definition_integrity_failed")
+            doc=json.loads(prior["definition"])
+            SessionRequest(device=doc["device"],steps=doc["steps"],timeout_s=doc["timeout_s"],
+                           stop_on_error=doc.get("stop_on_error",True))
+            ver=current["version"]+1
+            now=time.time_ns()//1000000
+            db.execute("UPDATE skills SET version=?,sha256=?,definition=?,state='draft',created_ms=?,approved_ms=0 WHERE id=?",
+                       (ver,digest,prior["definition"],now,skill_id))
+            db.execute("INSERT INTO skill_versions VALUES(?,?,?,?,?)",(skill_id,ver,digest,prior["definition"],now))
+            db.commit()
+            return {"ok":True,"id":skill_id,"version":ver,"restored_from":target_version,
+                    "sha256":digest,"state":"draft","owner_approval_required":True}
+        finally:db.close()
 
 
 def approve(skill_id:str,expected_sha256:str)->dict:
@@ -153,6 +207,8 @@ def execute(skill_id:str,expected_sha256:str,request_id:str)->dict:
     if entry["state"]!="approved" or entry["sha256"]!=expected_sha256:
         raise PermissionError("skill_not_approved_or_changed")
     request=entry["definition"]
+    if hashlib.sha256(_canonical(request).encode("utf8")).hexdigest()!=expected_sha256:
+        raise PermissionError("skill_definition_integrity_failed")
     from .interaction_sessions import start
     # The same request ID must preserve the prior execution across retries.
     session=SessionRequest(device=request["device"],

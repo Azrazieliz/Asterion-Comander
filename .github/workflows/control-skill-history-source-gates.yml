@@ -1,0 +1,23 @@
+name: Control skill version history source gates
+on:
+  push:
+    branches:
+      - work/control-non-ai-skill-history-20261126
+    paths:
+      - 'asterion_remote/skill_studio.py'
+      - 'asterion_remote/control_v2_routes.py'
+      - 'tests/test_skill_version_history.py'
+      - '.github/workflows/control-skill-history-source-gates.yml'
+permissions:
+  contents: read
+jobs:
+  skill-history:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install pytest fastapi pydantic httpx
+      - run: python -m pytest -q tests/test_skill_version_history.py
+      - run: python -m py_compile asterion_remote/skill_studio.py asterion_remote/control_v2_routes.py

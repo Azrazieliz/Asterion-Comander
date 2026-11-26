@@ -179,6 +179,26 @@ def get_skill(skill_id:str):
     except ValueError as exc:raise HTTPException(422,str(exc)) from exc
 
 
+@router.get("/skills/{skill_id}/versions")
+def skill_versions(skill_id:str):
+    try:return skill_studio.versions(skill_id)
+    except KeyError as exc:raise HTTPException(404,"Skill not found") from exc
+    except ValueError as exc:raise HTTPException(422,str(exc)) from exc
+
+
+class SkillRollback(BaseModel):
+    version:int=Field(ge=1)
+    current_sha256:str=Field(pattern=r"^[0-9a-f]{64}$")
+
+
+@router.post("/skills/{skill_id}/rollback")
+def rollback_skill(skill_id:str,body:SkillRollback,x_owner_approval:str|None=Header(default=None)):
+    _owner_approval(x_owner_approval)
+    try:return skill_studio.rollback(skill_id,body.version,body.current_sha256)
+    except KeyError as exc:raise HTTPException(404,"Skill version not found") from exc
+    except ValueError as exc:raise HTTPException(409,str(exc)) from exc
+
+
 class SkillApproval(BaseModel):
     sha256:str=Field(pattern=r"^[0-9a-f]{64}$")
 
