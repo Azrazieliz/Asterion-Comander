@@ -21,9 +21,10 @@ def run(llama_source: str, ndk_root: str) -> dict:
     ndk=Path(ndk_root).resolve(strict=True)
     source=ROOT/"android/app/src/main/cpp/on_device_llm.cpp"
     header=llama/"include/llama.h"
+    ggml_header=llama/"ggml/include/ggml.h"
     compiler=ndk/"toolchains/llvm/prebuilt/windows-x86_64/bin/clang++.exe"
     ndk_include=ndk/"toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/include"
-    if not source.is_file() or not header.is_file() or not compiler.is_file():
+    if not source.is_file() or not header.is_file() or not ggml_header.is_file() or not compiler.is_file():
         raise FileNotFoundError("original_native_source_or_pinned_llama_or_ndk_missing")
     commit=subprocess.run(["git","-C",str(llama),"rev-parse","HEAD"],
         capture_output=True,text=True,check=True,timeout=15).stdout.strip()
@@ -31,7 +32,8 @@ def run(llama_source: str, ndk_root: str) -> dict:
         raise ValueError("unexpected_llama_cpp_source_commit")
     argv=[str(compiler),"--target=aarch64-linux-android29",
           "-std=c++17","-fsyntax-only","-fno-exceptions",
-          "-I"+str(llama/"include"),"-I"+str(ndk_include),
+          "-I"+str(llama/"include"),"-I"+str(llama/"ggml/include"),
+          "-I"+str(ndk_include),
           str(source)]
     proc=subprocess.run(argv,capture_output=True,text=True,
         timeout=150,check=False)
