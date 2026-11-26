@@ -57,16 +57,46 @@ static void batch_tokens(llama_batch_ext *batch,const llama_token *token,int n,l
     llama_batch_ext_set_output_logits(batch,n-1,true);
 }
 extern "C" JNIEXPORT jbyteArray JNICALL
-Java_com_asterion_control_OnDeviceLlm_nativeGenerate(JNIEnv *env,jclass,jstring jprompt,jint limit,jint context_limit) {
-    if (!jprompt || limit<1 || limit>2048 || context_limit<512 || context_limit>16384
-        || limit+256>context_limit) return nullptr;
+Java_com_asterion_control_OnDeviceLlm_nativeGenerate(
+        JNIEnv *env,jclass,jstring jsystem,jstring juser,jint limit,jint context_limit) {
+    if (!jsystem || !juser || limit<1 || limit>2048 ||
+        context_limit<512 || context_limit>16384 ||
+        limit+256>context_limit) return nullptr;
     std::lock_guard<std::mutex> lock(guard);
     if (!model || cancel_generation.load(std::memory_order_acquire)) return nullptr;
-    const char *raw=env->GetStringUTFChars(jprompt,nullptr);
-    if(!raw)return nullptr;
-    std::string prompt(raw);
-    env->ReleaseStringUTFChars(jprompt,raw);
-    if(prompt.empty()||prompt.size()>262144)return nullptr;
+    const char *rawSystem=env->GetStringUTFChars(jsystem,nullptr);
+    if(!rawSystem)return nullptr;
+    std::string systemText(rawSystem);
+    env->ReleaseStringUTFChars(jsystem,rawSystem);
+    const char *rawUser=env->GetStringUTFChars(juser,nullptr);
+    if(!rawUser)return nullptr;
+    std::string userText(rawUser);
+    env->ReleaseStringUTFChars(juser,rawUser);
+    if(systemText.empty() || userText.empty() ||
+       systemText.size()>262144 || userText.size()>262144 ||
+       systemText.size()+userText.size()>262144)
+       return nullptr;
+    // The template is read from the actual verified GGUF metadata, not
+    // hard-coded for Qwen, SmolLM, Ministral or another model vendor.
+    const char *chatTemplate=llama_model_chat_template(model,nullptr);
+    if(!chatTemplate)return nullptr;
+    llama_chat_message messages[2]={{"system",systemText.c_str()},
+                                    {"user",userText.c_str()}};
+    size_t reserve=std::min<size_t>(262144,
+        std::max<size_t>(4096,(systemText.size()+userText.size())*2+4096));
+    std::vector<char> formatted(reserve);
+    int written=llama_chat_apply_template(chatTemplate,messages,2,true,
+        formatted.data(),static_cast<int>(formatted.size()));
+    if(written<=0 || written>262144)return nullptr;
+    if(static_cast<size_t>(written)>=formatted.size()){
+        if(written>=262144)return nullptr;
+        formatted.resize(static_cast<size_t>(written)+1);
+        written=llama_chat_apply_template(chatTemplate,messages,2,true,
+            formatted.data(),static_cast<int>(formatted.size()));
+        if(written<=0 || static_cast<size_t>(written)>=formatted.size())
+            return nullptr;
+    }
+    std::string prompt(formatted.data(),static_cast<size_t>(written));
     const llama_vocab *vocab=llama_model_get_vocab(model);
     int tokenCount=llama_tokenize(vocab,prompt.data(),prompt.size(),nullptr,0,true,true);
     if(tokenCount>=0||tokenCount < -16384)return nullptr;
