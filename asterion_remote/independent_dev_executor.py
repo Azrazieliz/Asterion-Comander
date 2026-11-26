@@ -135,8 +135,10 @@ class CandidateExecutor:
 
 def source_context(canonical_root, task, *, max_chars=20000) -> str:
     """Ground model work in exactly the task-owned source; no broad credential reads."""
-    path=Path(canonical_root).resolve() / task["target_path"]
-    if path.is_symlink() or not path.is_file() or path.stat().st_size>200000:
+    root=Path(canonical_root).resolve(strict=True)
+    path=root / task["target_path"]
+    if (path.is_symlink() or not path.is_file() or root not in path.resolve().parents
+            or path.stat().st_size>200000):
         raise ValueError("source_not_safely_readable")
     data=path.read_bytes()
     source=data.decode("utf-8")
