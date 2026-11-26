@@ -80,9 +80,12 @@ def snapshot(root:Path,index:dict,*,max_pack_chars:int=12000)->dict:
     records=[]
     topics=set()
     for item in descriptions:
-        if not isinstance(item,dict) or set(item)!={
-                "id","file","start_match","end_before","topic","kind",
-                "status","importance","supersedes"}:
+        required_fields={"id","file","start_match","end_before","topic",
+                         "kind","status","importance","supersedes"}
+        if (not isinstance(item,dict) or
+                not required_fields <= set(item) or
+                not set(item) <= required_fields|{"end_at_eof"} or
+                ("end_at_eof" in item and type(item["end_at_eof"]) is not bool)):
             raise ValueError("invalid_requirement_anchor_fields")
         source=item["file"]
         if source not in prepared:
@@ -91,7 +94,8 @@ def snapshot(root:Path,index:dict,*,max_pack_chars:int=12000)->dict:
         first=_unique_line(lines,item["start_match"])
         next_anchor=item["end_before"]
         last=(_unique_line(lines,next_anchor)-1
-              if next_anchor is not None else first)
+              if next_anchor is not None else
+              len(lines) if item.get("end_at_eof") else first)
         # Multi-line sections keep the complete original text, including
         # the requirement's explanatory and acceptance paragraphs.
         if last<first:
