@@ -7,10 +7,14 @@ on:
       - work/control-non-ai-browser-permissions-20261126
       - work/control-non-ai-download-integration-20261126
       - work/control-non-ai-private-browser-20261126
-      - work/control-network-security-autonomy-20261126
+      - work/control-non-ai-network-security-20261126
+      - work/control-embedded-tor-reconciled-20261126
       - work/control-native-ai-reconstruction-20261126
     paths:
       - 'android/app/src/main/java/com/asterion/control/Browser*.java'
+      - 'android/app/src/main/java/com/asterion/control/Tor*.java'
+      - 'android/app/src/main/java/com/asterion/control/*Vpn*.java'
+      - 'tests/java/com/asterion/control/Tor*.java'
       - 'android/app/src/main/java/com/asterion/control/ControlSecurityPolicy.java'
       - 'android/app/src/main/AndroidManifest.xml'
       - 'android/app/build.gradle'
@@ -23,6 +27,9 @@ on:
       - work/control-native-ai-reconstruction-20261126
     paths:
       - 'android/app/src/main/java/com/asterion/control/Browser*.java'
+      - 'android/app/src/main/java/com/asterion/control/Tor*.java'
+      - 'android/app/src/main/java/com/asterion/control/*Vpn*.java'
+      - 'tests/java/com/asterion/control/Tor*.java'
       - 'android/app/src/main/java/com/asterion/control/ControlSecurityPolicy.java'
       - 'android/app/src/main/AndroidManifest.xml'
       - 'android/app/build.gradle'
@@ -40,7 +47,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: '25'
       - name: Compile the real filter cache code without Android stubs
         run: |
           mkdir -p /tmp/asterion-browser-atomic-classes
@@ -59,8 +66,9 @@ jobs:
       - name: Execute Browser navigation and privacy regressions
         run: |
           javac -encoding UTF-8 -d /tmp/asterion-browser-atomic-classes \
-            android/app/src/main/java/com/asterion/control/TorRoutePolicy.java \
             android/app/src/main/java/com/asterion/control/BrowserNavigationPolicy.java \
+            android/app/src/main/java/com/asterion/control/TorAddressPolicy.java \
+            android/app/src/main/java/com/asterion/control/TorRoutePolicy.java \
             tests/java/com/asterion/control/BrowserNavigationPolicyTest.java
           java -cp /tmp/asterion-browser-atomic-classes \
             com.asterion.control.BrowserNavigationPolicyTest
@@ -70,9 +78,12 @@ jobs:
             android/app/src/main/java/com/asterion/control/BrowserDownloadContract.java \
             tests/java/com/asterion/control/BrowserDownloadContractTest.java
           java -cp /tmp/asterion-browser-atomic-classes com.asterion.control.BrowserDownloadContractTest
-      - name: Execute Tor delegation policy regressions
+      - name: Execute isolated Tor address and VPN route policy
         run: |
-          javac -encoding UTF-8 -cp /tmp/asterion-browser-atomic-classes -d /tmp/asterion-browser-atomic-classes tests/java/com/asterion/control/TorRoutePolicyTest.java
+          javac -encoding UTF-8 -cp /tmp/asterion-browser-atomic-classes -d /tmp/asterion-browser-atomic-classes \
+            android/app/src/main/java/com/asterion/control/VpnRouteScope.java \
+            tests/java/com/asterion/control/TorAddressPolicyTest.java tests/java/com/asterion/control/TorRoutePolicyTest.java
+          java -cp /tmp/asterion-browser-atomic-classes com.asterion.control.TorAddressPolicyTest
           java -cp /tmp/asterion-browser-atomic-classes com.asterion.control.TorRoutePolicyTest
   android-source-only:
     needs: browser-cache-jvm
@@ -83,17 +94,17 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: '25'
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.13'
-      - name: Ensure Android 35 platform
+          gradle-version: '9.3.1'
+      - name: Ensure Android 37 platform
         run: |
           SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
-          if [ ! -f "$SDK/platforms/android-35/android.jar" ]; then
-            yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" 'platforms;android-35' || true
+          if [ ! -f "$SDK/platforms/android-37.0/android.jar" ]; then
+            yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" --channel=3 'platforms;android-37.0' || true
           fi
-          test -s "$SDK/platforms/android-35/android.jar"
+          test -s "$SDK/platforms/android-37.0/android.jar"
       - name: Integrate Browser Java compilation without APK creation or installation
         working-directory: android
         run: gradle --no-daemon --console=plain :app:compileDebugJavaWithJavac
