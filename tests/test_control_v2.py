@@ -33,7 +33,7 @@ class ControlV2Tests(unittest.TestCase):
         self.auth={"Authorization":"Bearer "+"T"*40}
         self.owner={**self.auth,"X-Owner-Approval":"O"*40}
         self.patcher=patch("asterion_remote.control_v2_routes._authorized_path",
-             side_effect=lambda value:(self.root/value).resolve(strict=True))
+             side_effect=lambda value:(self.root/value).resolve())
         self.patcher.start()
         app=FastAPI()
         app.include_router(router)
