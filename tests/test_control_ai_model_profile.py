@@ -32,8 +32,8 @@ def test_on_device_loader_uses_profile_not_named_vendor_constants():
     assert "nativeGenerate(systemText.getBytes(StandardCharsets.UTF_8),roles,content," in source
     assert "ControlAssistantPreferences.promptGuidance(context)" in source
     assert "ControlAssistantPreferences.outputTokens(context,profile)" in source
-    assert "outputBudget,profile.contextTokens" in source
-    assert "profile.sha256.equals(hex(digest.digest()))" in source
+    assert "outputBudget,contextBudget" in source
+    assert "sha.equals(hex(digest.digest()))" in source
     assert "on_device_inference_already_running" in source
     assert "/no_think" not in source
     assert "MODEL_FILE=" not in source
@@ -51,7 +51,7 @@ def test_jni_preserves_cancellation_and_rejects_context_overflow():
     assert "static_cast<size_t>(-n)+static_cast<size_t>(limit)+32u" in code
     assert "cp.n_ctx=context_limit;" in code
     assert "cancel_generation.load" in code
-    assert "n_gpu_layers=0" in code  # fallback remains CPU; GPU acceleration unverified
+    assert "load_profile(value,nullptr,nullptr,0)" in code  # unsigned callers cannot select an accelerator
 
 
 def test_jobs_keep_durable_receipt_before_work_and_use_profile_budget():

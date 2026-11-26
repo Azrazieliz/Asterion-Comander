@@ -2,7 +2,7 @@
   "schema_version": "asterion.control.requirement-anchors/1",
   "owner_directive_date": "2026-11-26",
   "status": "owner_source_index_not_deployment",
-  "origin": "owner November 26 directive plus immutable previously approved V3–V6 and signed partner documents",
+  "origin": "owner November 26 directive plus immutable previously approved V3\u2013V6 and signed partner documents",
   "files": {
     "owner": {
       "path": "docs/CONTROL_AI_OWNER_DIRECTIVE_PRIORITY_20261126.md",
@@ -31,6 +31,10 @@
     "v3": {
       "path": "docs/CONTROL_V3_COMPLETE_DESIGN_NO_CODE_20261115.md",
       "blob_sha": "9c40ee6df635e10d3a8a7e106ce78dde13a63bc9"
+    },
+    "owner_followup": {
+      "path": "docs/CONTROL_AI_OWNER_FOLLOWUP_20261126.md",
+      "blob_sha": "94efb31b94b3d81701581bee1ff29afeed771d81"
     }
   },
   "records": [
@@ -313,12 +317,34 @@
     {
       "id": "V3-N01-N30-OPEN",
       "file": "v3",
-      "start_match": "unapproved N01–N30 proposals remain preserved",
+      "start_match": "unapproved N01\u2013N30 proposals remain preserved",
       "topic": "open.v3.n01-n30",
       "kind": "decision",
       "status": "open",
       "importance": "supporting",
       "supersedes": []
+    },
+    {
+      "id": "OAI-F01",
+      "file": "owner_followup",
+      "start_match": "## OAI-F01 Full-function neural reconstruction and device tailoring",
+      "topic": "owner.quality.near_frontier",
+      "kind": "correction",
+      "status": "active",
+      "importance": "mandatory",
+      "supersedes": [],
+      "end_before": "## OAI-F02 Owner-controlled content behavior"
+    },
+    {
+      "id": "OAI-F02",
+      "file": "owner_followup",
+      "start_match": "## OAI-F02 Owner-controlled content behavior",
+      "topic": "owner.content.control",
+      "kind": "correction",
+      "status": "active",
+      "importance": "mandatory",
+      "supersedes": [],
+      "end_at_eof": true
     }
   ],
   "required_topics": [
@@ -342,7 +368,9 @@
     "release.acceptance",
     "credential.authority",
     "model.lab.maturity",
-    "partner.authority"
+    "partner.authority",
+    "owner.quality.near_frontier",
+    "owner.content.control"
   ],
   "evidence_note": "SHA-1 fields are immutable Git blob identifiers; SHA-256 full bytes and passage hashes generated and verified by original context_requirements. No semantic interpretation inferred."
 }

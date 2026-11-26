@@ -14,6 +14,10 @@ final class OnDeviceModelProfile {
     final String asset,file,sha256,source,systemText;
     final long bytes;
     final int inputChars,outputTokens,contextTokens;
+    final String precision,backendDevice,adapterFile,adapterSha256;
+    final int offloadLayers,kvBits;
+    final long adapterBytes,residentBytes,workspaceBytes,kvBytesPerToken;
+    final boolean allowSmallerContext;
     private OnDeviceModelProfile(JSONObject j) throws Exception {
         file=j.getString("file");
         if(!NAME.matcher(file).matches())throw new IllegalArgumentException("invalid_model_filename");
@@ -31,11 +35,39 @@ final class OnDeviceModelProfile {
                 ||contextTokens<512||contextTokens>16384
                 ||contextTokens<outputTokens+256)
             throw new IllegalArgumentException("invalid_context_budget");
+        precision=j.optString("weight_precision","unspecified");
+        if(!precision.matches("[A-Za-z0-9._-]{1,32}"))
+            throw new IllegalArgumentException("invalid_weight_precision");
+        backendDevice=j.optString("backend_device","");
+        offloadLayers=j.optInt("offload_layers",0);
+        if(!backendDevice.matches("[A-Za-z0-9._-]{0,64}") || offloadLayers<0 ||
+                offloadLayers>256 || (offloadLayers==0)!=backendDevice.isEmpty())
+            throw new IllegalArgumentException("invalid_backend_profile");
+        kvBits=j.optInt("kv_precision_bits",16);
+        if(kvBits!=8&&kvBits!=16)throw new IllegalArgumentException("invalid_kv_precision");
+        JSONObject memory=j.optJSONObject("memory_budget");
+        residentBytes=boundBytes(memory,"resident_weight_bytes",bytes);
+        workspaceBytes=boundBytes(memory,"workspace_bytes",512L<<20);
+        kvBytesPerToken=boundBytes(memory,"kv_bytes_per_token",256L<<10);
+        allowSmallerContext=j.optBoolean("allow_smaller_context",false);
+        JSONObject adapter=j.optJSONObject("adapter");
+        adapterFile=adapter==null?"":adapter.getString("file");
+        adapterSha256=adapter==null?"":adapter.getString("sha256");
+        adapterBytes=adapter==null?0:boundBytes(adapter,"bytes",0);
+        if(j.has("adapter")&&(adapter==null||!NAME.matcher(adapterFile).matches()||
+                adapterFile.equals(file)||!SHA.matcher(adapterSha256).matches()||
+                adapterBytes==0||!sha256.equals(adapter.getString("base_sha256"))))
+            throw new IllegalArgumentException("invalid_adapter_identity");
         // Role formatting comes from the verified GGUF tokenizer metadata
         // through llama_chat_apply_template, never from a model-name switch.
         systemText=j.getString("system_text");
         if(systemText.length()>4096 || systemText.isBlank())
             throw new IllegalArgumentException("invalid_system_text");
+    }
+    private static long boundBytes(JSONObject value,String key,long fallback) {
+        long bytes=value==null?fallback:value.optLong(key,fallback);
+        if(bytes<0||bytes>(64L<<30))throw new IllegalArgumentException("invalid_memory_estimate");
+        return bytes;
     }
     static OnDeviceModelProfile read(Context context)throws Exception{
         try(InputStream in=context.getAssets().open("models/control-model.json")){

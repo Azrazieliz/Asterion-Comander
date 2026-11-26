@@ -1,3 +1,38 @@
+# 2026-11-26 — Phone precision, owner learning and signed requirements integration
+
+**Source integrated; owner requested implementation without compilation or APK builds.**
+The current branch loads a signed profile's exact base GGUF and optional base-bound
+LoRA adapter, supports named native offload and separate 8-/16-bit KV, admits each
+context using live Android RAM and thermal state, and records generation timing,
+PSS and resource samples. The bundled baseline remains diagnostic. Accelerator
+execution, exact bytes offloaded, battery use and build/device acceptance remain
+open. The earlier compiled source checks do not verify these new changes.
+
+A fresh original bridge receipt `control-ai-20261126-precision-hardware-status-02`
+reports SM-S948B/Android 17, 3,733,700,608 bytes available RAM, 35% battery at
+28.1 °C, nominal thermal status and original native WSS. Oryon/Adreno/Hexagon
+identification comes from Samsung and Qualcomm model documentation.
+8- and ideal 12-bit estimates for the 7.3B and 14.7B comparisons exceed the
+observed headroom before weight overhead. No runnable Q12 format is present in
+the pinned runtime. No heavier model or accelerator was promoted.
+
+The existing local trainer has an NF4 QLoRA path and preference optimization
+anchored to completed SFT, with disjoint workflow families and before/after
+hashes. Three labeled capability examples and three preference pairs were
+generated from the actual signed specialist inventory receipt. These are
+availability examples, not completed workflows or human-reviewed data.
+No new model was trained in this pass. The signed Android projection prepares
+exact requirements passages and includes both new owner directives. It covers
+the pinned Control requirements only; live cross-repo/TeraBox retrieval remains open.
+
+The complete training and qualification instructions for the next executor are
+in [the neural training handoff](docs/CONTROL_AI_TRAINING_HANDOFF_20261126.md).
+All V3–V6, Nexus and release gates remain binding. Autonomous development,
+a qualified near-frontier neural candidate, broader verified corpora, full
+multimodal and artifact coverage, and final Samsung acceptance remain open.
+
+---
+
 # 2026-11-26 — Non-AI voice handoff and Skill Studio revision safety
 
 Merged [#33](https://github.com/Azrazieliz/Asterion-Comander/pull/33) (`444c0a11`): owner wake-word/explicit spoken requests default to existing AssistantSession; explicit legacy ChatGPT route remains selectable only with voice stopped. Encrypted pending command claim suppresses replay after uncertain process loss; native completion is observed before speaking, action proposals require existing review, long replies receive a bounded spoken preview with the full response retained in conversation. Existing microphone-off setting, consent and nonexclusive audio focus preserved; no change to AssistantActivity, AssistantSession, model, runtime or training. [CI 45837624305](https://github.com/Azrazieliz/Asterion-Comander/actions/runs/45837624305): 38 wake-word + 9 spoken-preview JVM assertions, 3 focused pytest, Android Java compile passed. Inherited cycle-runner test fails unchanged baseline because AgentService already calls cycles.tick(); excluded from focused voice gate, not resolved. Real phone speech, interruption, music coexistence, signed Sound packs and task-answer resumption remain unverified.

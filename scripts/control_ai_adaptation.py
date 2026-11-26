@@ -13,10 +13,16 @@ import re
 import time
 import platform
 import importlib.metadata
+import sys
 from pathlib import Path
 
+if __package__ in {None, ""}:
+    sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+from scripts.control_ai_preferences import optimize, read_preferences
+
 DOMAINS = frozenset(("reasoning","coding","tools","research","documents","device",
-                     "cross_app","voice","diagnostics","cycles","creative","memory"))
+                     "cross_app","voice","diagnostics","cycles","creative","memory",
+                     "multimodal","automation","content_behavior","artifacts","education"))
 ROLES = {"system","user","assistant"}
 
 def digest(value):
@@ -100,12 +106,13 @@ def file_hash(path):
     return h.hexdigest()
 
 def trainable_hash(model):
+    import torch
     h=hashlib.sha256()
     for name,tensor in sorted(model.named_parameters()):
         if tensor.requires_grad:
             value=tensor.detach().cpu().contiguous()
             h.update(name.encode());h.update(str(value.dtype).encode())
-            h.update(str(tuple(value.shape)).encode());h.update(value.numpy().tobytes())
+            h.update(str(tuple(value.shape)).encode());h.update(value.view(-1).view(torch.uint8).numpy().tobytes())
     return h.hexdigest()
 
 def training_device(requested,cuda_available):
@@ -117,12 +124,13 @@ def training_device(requested,cuda_available):
 
 def train_adapter(args):
     train,holdout,manifest=validate(args.train,args.holdout)
+    preferences=read_preferences(args.preferences,train,holdout) if getattr(args,"preferences",None) else []
     # No training on holdout, no implicit downloads and no remote model code.
     os.environ["HF_HUB_OFFLINE"]="1"
     os.environ["TRANSFORMERS_OFFLINE"]="1"
     import torch
-    from transformers import AutoModelForCausalLM,AutoTokenizer,Trainer,TrainingArguments
-    from peft import LoraConfig,get_peft_model
+    from transformers import AutoConfig,AutoModelForCausalLM,AutoTokenizer,BitsAndBytesConfig,Trainer,TrainingArguments
+    from peft import LoraConfig,get_peft_model,prepare_model_for_kbit_training
     device=training_device(getattr(args,"device","auto"),torch.cuda.is_available())
     torch.manual_seed(42)
     torch.set_num_threads(getattr(args,"threads",4))
@@ -155,22 +163,44 @@ def train_adapter(args):
     encoded=[encode(tokenizer,r["messages"],args.context) for _,r in train]
     bf16=device=="cuda" and torch.cuda.is_bf16_supported()
     dtype=torch.float32 if device=="cpu" else torch.bfloat16 if bf16 else torch.float16
+    precision=getattr(args,"precision","native")
+    config=AutoConfig.from_pretrained(str(base),local_files_only=True,trust_remote_code=False)
+    existing_quant=getattr(config,"quantization_config",None)
+    quantized=precision=="nf4"
+    if existing_quant and (not quantized or not isinstance(existing_quant,dict) or
+            existing_quant.get("quant_method")!="bitsandbytes" or
+            existing_quant.get("bnb_4bit_quant_type")!="nf4" or
+            not existing_quant.get("load_in_4bit",existing_quant.get("_load_in_4bit",False))):
+        raise ValueError("unsupported_prequantized_training_base")
+    load_options={}
+    if quantized:
+        load_options["device_map"]={"":device}
+        if not existing_quant:
+            load_options["quantization_config"]=BitsAndBytesConfig(
+                load_in_4bit=True,bnb_4bit_quant_type="nf4",
+                bnb_4bit_use_double_quant=True,bnb_4bit_compute_dtype=dtype)
     if device=="cpu":
         import psutil
         budget=getattr(args,"memory_budget_mib",0)*1024**2
         base_bytes=sum(p.stat().st_size for p in files if p.suffix==".safetensors")
-        # Conservative preflight, not a substitute for measured peak RSS.
-        estimate=base_bytes*2+2*1024**3
+        # Admission estimate only. On-the-fly quantization still requires
+        # transient RAM for source tensors and dequantization workspaces.
+        estimate=base_bytes*(1 if existing_quant else 2)+2*1024**3
         if budget<=0 or estimate>budget or budget>psutil.virtual_memory().available:
             raise RuntimeError("cpu_training_memory_admission_failed")
-        if args.context>512 or not 1<=getattr(args,"max_steps",0)<=64:
-            raise ValueError("bounded_cpu_diagnostic_requires_context_at_most_512_and_1_to_64_steps")
+        if not 1<=getattr(args,"max_steps",0):
+            raise ValueError("cpu_training_requires_explicit_step_budget")
     model=AutoModelForCausalLM.from_pretrained(str(base),local_files_only=True,
-        trust_remote_code=False,use_safetensors=True,torch_dtype=dtype)
+        trust_remote_code=False,use_safetensors=True,torch_dtype=dtype,**load_options)
     model.config.use_cache=False
+    if quantized:
+        if not getattr(model,"is_loaded_in_4bit",False):
+            raise RuntimeError("requested_nf4_base_not_loaded")
+        model=prepare_model_for_kbit_training(model,use_gradient_checkpointing=True)
+    requested=getattr(args,"target_modules","all-linear")
+    targets=requested if requested=="all-linear" else requested.split(",")
     model=get_peft_model(model,LoraConfig(r=getattr(args,"rank",16),lora_alpha=2*getattr(args,"rank",16),lora_dropout=0.05,
-        target_modules=["q_proj","k_proj","v_proj","o_proj"],
-        bias="none",task_type="CAUSAL_LM"))
+        target_modules=targets,bias="none",task_type="CAUSAL_LM"))
     model.enable_input_require_grads()
     before=trainable_hash(model)
     def collate(rows):
@@ -189,12 +219,26 @@ def train_adapter(args):
             save_strategy="epoch",save_total_limit=2,report_to=[],
             remove_unused_columns=False,seed=42))
     metrics=trainer.train().metrics
+    del trainer
+    after_sft=trainable_hash(model)
+    if before==after_sft:
+        raise RuntimeError("sft_did_not_change_adapter_weights")
+    preference_record=None
+    if preferences:
+        model.zero_grad(set_to_none=True)
+        model.save_pretrained(str(out/"sft-adapter"),safe_serialization=True)
+        preference_record=optimize(model,tokenizer,preferences,context=args.context,
+            steps=args.preference_steps,learning_rate=args.preference_learning_rate,beta=args.preference_beta)
+        preference_record["dataset_sha256"]=digest(preferences)
+        preference_record["sft_weights_sha256"]=after_sft
     after=trainable_hash(model)
+    if preferences and after==after_sft:
+        raise RuntimeError("preference_training_did_not_change_adapter_weights")
     if before==after:raise RuntimeError("training_did_not_change_adapter_weights")
     model.save_pretrained(str(out/"adapter"),safe_serialization=True)
     tokenizer.save_pretrained(str(out/"adapter"))
     manifest.update({"base_revision_declared":args.revision,"base_files_sha256":hashes,
-        "training_metrics":metrics,"adapter_only":True,"evaluated":False,
+        "training_metrics":metrics,"training_precision":precision,"preference_training":preference_record,"adapter_only":True,"evaluated":False,
         "device_verified":False,"production_replaced":False,"weights_changed":before!=after,
         "trainable_sha256_before":before,"trainable_sha256_after":after,
         "artifact_sha256":{str(p.relative_to(out)):file_hash(p) for p in sorted((out/"adapter").rglob("*")) if p.is_file()},
@@ -255,6 +299,12 @@ def main():
             q.add_argument("--rank",type=int,default=16)
             q.add_argument("--accumulate",type=int,default=8)
             q.add_argument("--learning-rate",type=float,default=1e-4)
+            q.add_argument("--precision",choices=("native","nf4"),default="native")
+            q.add_argument("--target-modules",default="all-linear")
+            q.add_argument("--preferences")
+            q.add_argument("--preference-steps",type=int,default=0)
+            q.add_argument("--preference-learning-rate",type=float,default=5e-6)
+            q.add_argument("--preference-beta",type=float,default=0.1)
     a=p.parse_args()
     if a.op=="selftest":selftest()
     elif a.op=="validate":print(json.dumps(validate(a.train,a.holdout)[2],indent=2))
@@ -263,6 +313,12 @@ def main():
             raise ValueError("invalid training budget")
         if not 1<=a.threads<=8 or not 1<=a.rank<=128 or not 1<=a.accumulate<=32 or not 0<a.learning_rate<=0.01:
             raise ValueError("invalid_training_resource_budget")
+        if not re.fullmatch(r"(?:all-linear|[A-Za-z_][A-Za-z0-9_]*(?:,[A-Za-z_][A-Za-z0-9_]*)*)",a.target_modules):
+            raise ValueError("invalid_adapter_modules")
+        if bool(a.preferences)!=bool(a.preference_steps) or not 0<=a.preference_steps<=100000:
+            raise ValueError("invalid_preference_training_steps")
+        if not 0<a.preference_learning_rate<=0.01 or not 0<a.preference_beta<=10:
+            raise ValueError("invalid_preference_training_budget")
         train_adapter(a)
 if __name__=="__main__":
     main()

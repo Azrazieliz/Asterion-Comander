@@ -27,6 +27,7 @@ final class OnDeviceLlm {
     private static final boolean LIBRARY_LOADED;
     private static volatile boolean modelReady=false;
     private static volatile String lastFailure="";
+    private static volatile JSONObject lastCompletedGeneration;
     static {
         boolean loaded;
         try {System.loadLibrary("asterion_llm");loaded=true;}
@@ -35,6 +36,8 @@ final class OnDeviceLlm {
     }
     private OnDeviceLlm(){}
     private static native boolean nativeLoad(String privateFile);
+    private static native boolean nativeLoadProfile(String file,String adapter,String backend,int layers);
+    private static native void nativeConfigureContext(int threads,int kvBits);
     private static native boolean nativeReady();
     private static native byte[] nativeGenerate(byte[] systemText,String[] roles,byte[][] content,
         int maxTokens,int contextTokens,NativeStream stream);
@@ -46,12 +49,18 @@ final class OnDeviceLlm {
     static final class NativeStream {
         final AssistantOutput output=new AssistantOutput();
         final Stream listener;
+        int promptTokens,omittedMessages,pieces;
+        long firstPieceNanos,lastPieceNanos;
         NativeStream(Stream listener){this.listener=listener;}
         public void onStart(boolean thinking,int tokens,int omitted){
+            promptTokens=tokens;
+            omittedMessages=omitted;
             output.initialThinking(thinking);
             if(listener!=null)listener.context(tokens,omitted);
         }
         public void onToken(byte[] bytes){
+            lastPieceNanos=System.nanoTime();
+            if(pieces++==0)firstPieceNanos=lastPieceNanos;
             String text=output.append(bytes);
             if(listener!=null)listener.text(text);
         }
@@ -76,6 +85,12 @@ final class OnDeviceLlm {
             .put("model_bundled_in_apk",hasPackagedModel(context,profile))
             .put("model_name",profile.file)
             .put("model_context_tokens",profile.contextTokens)
+            .put("weight_precision",profile.precision)
+            .put("configured_backend",profile.backendDevice.isEmpty()?"CPU":profile.backendDevice)
+            .put("configured_offload_layers",profile.offloadLayers)
+            .put("configured_kv_bits",profile.kvBits)
+            .put("configured_adapter_sha256",profile.adapterSha256)
+            .put("device_resources",new OnDeviceModelResources(context).status(context))
             .put("max_generation_tokens",profile.outputTokens)
             .put("max_input_chars",profile.inputChars)
             .put("reasoning_effort",ControlAssistantPreferences.effort(context))
@@ -86,7 +101,8 @@ final class OnDeviceLlm {
             .put("external_server_required",false)
             .put("paid_cloud_api_required",false)
             .put("model_source",profile.source)
-            .put("last_failure_code",lastFailure);
+            .put("last_failure_code",lastFailure)
+            .put("last_completed_generation",lastCompletedGeneration==null?JSONObject.NULL:lastCompletedGeneration);
     }
     private static boolean hasPackagedModel(Context c,OnDeviceModelProfile profile) {
         try (android.content.res.AssetFileDescriptor afd =
@@ -106,32 +122,18 @@ final class OnDeviceLlm {
                 if(!folder.isDirectory()&&!folder.mkdirs()){
                     lastFailure="private_model_storage_unavailable";return false;
                 }
-                File file=new File(folder,profile.file);
-                if(!verified(file,profile)){
-                    File temp=new File(folder,profile.file+".partial");
-                    if(temp.exists()&&!temp.delete()){
-                        lastFailure="partial_model_cleanup_failed";return false;
-                    }
-                    MessageDigest digest=MessageDigest.getInstance("SHA-256");
-                    long read=0;
-                    byte[] buffer=new byte[256*1024];
-                    try (InputStream from=context.getAssets().open(profile.asset,
-                         AssetManager.ACCESS_STREAMING);
-                         FileOutputStream out=new FileOutputStream(temp)) {
-                        for(int n;(n=from.read(buffer))!=-1;){
-                            read+=n;
-                            if(read>profile.bytes)throw new IllegalStateException("invalid_length");
-                            out.write(buffer,0,n);
-                            digest.update(buffer,0,n);
-                        }
-                        out.getFD().sync();
-                    }
-                    if(read!=profile.bytes||!profile.sha256.equals(hex(digest.digest())))
-                        throw new IllegalStateException("model_checksum_mismatch");
-                    if(!temp.renameTo(file))
-                        throw new IllegalStateException("private_model_commit_failed");
+                File file=stageArtifact(context,folder,profile.file,profile.bytes,profile.sha256);
+                if(CANCELLED.get())throw new InterruptedException("user_cancelled");
+                if(profile.adapterFile.isEmpty()&&profile.backendDevice.isEmpty()){
+                    modelReady=nativeLoad(file.getAbsolutePath());
+                }else{
+                    String adapter="";
+                    if(!profile.adapterFile.isEmpty())
+                        adapter=stageArtifact(context,folder,profile.adapterFile,profile.adapterBytes,
+                            profile.adapterSha256).getAbsolutePath();
+                    if(CANCELLED.get())throw new InterruptedException("user_cancelled");
+                    modelReady=nativeLoadProfile(file.getAbsolutePath(),adapter,profile.backendDevice,profile.offloadLayers);
                 }
-                modelReady=nativeLoad(file.getAbsolutePath());
                 lastFailure=modelReady?"":"native_model_load_failed";
                 return modelReady;
             }catch(Exception|LinkageError exception){
@@ -143,14 +145,41 @@ final class OnDeviceLlm {
             }
         }
     }
-    private static boolean verified(File file,OnDeviceModelProfile profile) throws Exception {
-        if(!file.isFile()||file.length()!=profile.bytes)return false;
-        MessageDigest md=MessageDigest.getInstance("SHA-256");
-        byte[] buf=new byte[262144];
-        try(FileInputStream in=new FileInputStream(file)){
-            for(int n;(n=in.read(buf))!=-1;)md.update(buf,0,n);
+    private static File stageArtifact(Context context,File folder,String name,long length,String sha)throws Exception {
+        File file=new File(folder,name);
+        MessageDigest digest=MessageDigest.getInstance("SHA-256");
+        byte[] buffer=new byte[256*1024];
+        if(file.isFile()&&file.length()==length){
+            try(InputStream in=new FileInputStream(file)){
+                for(int size;(size=in.read(buffer))!=-1;){
+                    if(CANCELLED.get())throw new InterruptedException("user_cancelled");
+                    digest.update(buffer,0,size);
+                }
+            }
+            if(sha.equals(hex(digest.digest())))return file;
         }
-        return profile.sha256.equals(hex(md.digest()));
+        File temporary=File.createTempFile("model-", ".partial",folder);
+        try{
+            long received=0;
+            digest.reset();
+            try(InputStream input=context.getAssets().open("models/"+name,AssetManager.ACCESS_STREAMING);
+                FileOutputStream output=new FileOutputStream(temporary)){
+                for(int size;(size=input.read(buffer))!=-1;){
+                    if(CANCELLED.get())throw new InterruptedException("user_cancelled");
+                    received+=size;
+                    if(received>length)throw new IllegalStateException("invalid_length");
+                    output.write(buffer,0,size);
+                    digest.update(buffer,0,size);
+                }
+                output.getFD().sync();
+            }
+            if(received!=length||!sha.equals(hex(digest.digest())))
+                throw new IllegalStateException("model_checksum_mismatch");
+            android.system.Os.rename(temporary.getAbsolutePath(),file.getAbsolutePath());
+            return file;
+        }finally{
+            temporary.delete();
+        }
     }
     private static String hex(byte[] bytes) {
         StringBuilder result=new StringBuilder(bytes.length*2);
@@ -175,6 +204,10 @@ final class OnDeviceLlm {
         try{
             if(!LIBRARY_LOADED)throw new IllegalStateException("native_library_missing");
             nativeResetCancel();
+            long requestStarted=System.nanoTime();
+            boolean warm=modelReady;
+            int outputBudget=ControlAssistantPreferences.outputTokens(context,profile);
+            new OnDeviceModelResources(context).contextTokens(profile,outputBudget,modelReady);
             if(!ensureLoaded(context))throw new IllegalStateException(lastFailure);
             if(CANCELLED.get())throw new InterruptedException("user_cancelled");
             String recalled=ControlAssistantMemory.relevant(context,userPrompt,project);
@@ -185,9 +218,12 @@ final class OnDeviceLlm {
                 +"Do not claim you are outside the app or that unverified tools are available. "
                 +"Return the final answer in the user-visible channel; do not print internal reasoning delimiters.";
             guidance+="\nActive project: "+project+". This label scopes local memory; project source access requires verified retrieval evidence.\n"+AssistantCapabilities.context(context);
+            guidance+="\n"+AssistantRequirements.context(context,userPrompt,project);
             if(!recalled.isEmpty())guidance+="\nOwner-approved memories, reference only:\n"+recalled;
             String systemText=profile.systemInstructions(guidance);
-            int outputBudget=ControlAssistantPreferences.outputTokens(context,profile);
+            OnDeviceModelResources resources=new OnDeviceModelResources(context);
+            int contextBudget=resources.contextTokens(profile,outputBudget,true);
+            nativeConfigureContext(resources.threads(),profile.kvBits);
             String[] roles=new String[messages.size()];
             byte[][] content=new byte[messages.size()][];
             for(int i=0;i<messages.size();i++){
@@ -197,12 +233,33 @@ final class OnDeviceLlm {
                 roles[i]=m.role;content[i]=m.text.getBytes(StandardCharsets.UTF_8);
             }
             NativeStream stream=new NativeStream(listener);
+            long inferenceStarted=System.nanoTime();
             byte[] output=nativeGenerate(systemText.getBytes(StandardCharsets.UTF_8),roles,content,
-                outputBudget,profile.contextTokens,stream);
+                outputBudget,contextBudget,stream);
             if(CANCELLED.get())throw new InterruptedException("user_cancelled");
             if(output==null||output.length==0)throw new IllegalStateException("native_context_or_generation_failed");
             String result=stream.output.finish(output);
             if(result.isBlank())throw new IllegalStateException("no_visible_model_answer");
+            OnDeviceModelResources after=new OnDeviceModelResources(context);
+            lastCompletedGeneration=new JSONObject()
+                .put("base_sha256",profile.sha256)
+                .put("adapter_sha256",profile.adapterSha256)
+                .put("weight_precision",profile.precision)
+                .put("kv_bits",profile.kvBits)
+                .put("configured_backend",profile.backendDevice.isEmpty()?"CPU":profile.backendDevice)
+                .put("model_already_loaded",warm)
+                .put("context_tokens",contextBudget)
+                .put("prompt_tokens",stream.promptTokens)
+                .put("omitted_messages",stream.omittedMessages)
+                .put("generated_token_pieces",stream.pieces)
+                .put("request_to_first_piece_ms",(stream.firstPieceNanos-requestStarted)/1_000_000)
+                .put("inference_to_first_piece_ms",(stream.firstPieceNanos-inferenceStarted)/1_000_000)
+                .put("decode_between_pieces_ms",(stream.lastPieceNanos-stream.firstPieceNanos)/1_000_000)
+                .put("process_pss_kib_after",android.os.Debug.getPss())
+                .put("available_bytes_before_context",resources.memory.availMem)
+                .put("available_bytes_after",after.memory.availMem)
+                .put("thermal_before",resources.thermalStatus)
+                .put("thermal_after",after.thermalStatus);
             return result;
         }finally{BUSY.set(false);}
     }

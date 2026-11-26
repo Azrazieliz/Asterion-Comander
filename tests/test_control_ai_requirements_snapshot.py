@@ -19,10 +19,11 @@ def index():
 
 def test_source_locked_owner_and_v3_v6_contracts_recover_exactly():
     result=snapshot(ROOT,index(),max_pack_chars=12000)
-    assert result["mandatory_count"]==25
-    assert result["indexed_records"]==27
+    assert result["mandatory_count"]==27
+    assert result["indexed_records"]==29
     assert result["unresolved_ids"]==["V6-R09-OPEN","V3-N01-N30-OPEN"]
-    assert result["source_count"]==7
+    assert result["source_count"]==8
+    assert {"OAI-F01","OAI-F02"} <= set(result["mandatory_ids"])
     assert len(result["canonical_index_sha256"])==64
     assert result["source_git_blob_oids"]=={
         name:metadata["blob_sha"] for name,metadata in index()["files"].items()}

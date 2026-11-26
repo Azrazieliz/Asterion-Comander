@@ -1,0 +1,44 @@
+{
+  "parameters": 7298011136,
+  "available_bytes_sample": 3733700608,
+  "context_tokens": 4096,
+  "kv_bytes_per_token_assumed": 524288,
+  "workspace_bytes_assumed": 536870912,
+  "minimum_reserve_bytes_assumed": 402653184,
+  "experiments": [
+    {
+      "precision": "bf16_reference",
+      "backend_artifact": "BF16",
+      "weight_only_lower_bound_bytes": 14596022272,
+      "minimum_accounted_bytes": 17683030016,
+      "lower_bound_fits_sample": false,
+      "android_measured": false
+    },
+    {
+      "precision": "fp16_reference",
+      "backend_artifact": "F16",
+      "weight_only_lower_bound_bytes": 14596022272,
+      "minimum_accounted_bytes": 17683030016,
+      "lower_bound_fits_sample": false,
+      "android_measured": false
+    },
+    {
+      "precision": "12_bit_theoretical",
+      "backend_artifact": null,
+      "weight_only_lower_bound_bytes": 10947016704,
+      "minimum_accounted_bytes": 14034024448,
+      "lower_bound_fits_sample": false,
+      "android_measured": false
+    },
+    {
+      "precision": "int8_ideal",
+      "backend_artifact": "Q8_0_with_block_overhead",
+      "weight_only_lower_bound_bytes": 7298011136,
+      "minimum_accounted_bytes": 10385018880,
+      "lower_bound_fits_sample": false,
+      "android_measured": false
+    }
+  ],
+  "phone_fit_certified": false,
+  "receipt_id": "control-ai-20261126-precision-hardware-status-02"
+}

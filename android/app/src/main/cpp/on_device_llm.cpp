@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 #include "llama.h"
+#include "ggml-backend.h"
 
 static std::mutex guard;
 static llama_model *model=nullptr;
@@ -14,22 +15,70 @@ static std::atomic<bool> model_loaded{false};
 static std::atomic<bool> cancel_generation{false};
 extern "C" JNIEXPORT void JNICALL Java_com_asterion_control_OnDeviceLlm_nativeCancel(JNIEnv *,jclass){cancel_generation.store(true);}
 extern "C" JNIEXPORT void JNICALL Java_com_asterion_control_OnDeviceLlm_nativeResetCancel(JNIEnv *,jclass){cancel_generation.store(false);}
-extern "C" JNIEXPORT jboolean JNICALL Java_com_asterion_control_OnDeviceLlm_nativeLoad(JNIEnv *env,jclass,jstring jpath){
-    if(!jpath)return JNI_FALSE;
+static llama_adapter_lora *active_adapter=nullptr;
+static int context_threads=4;
+static int kv_bits=16;
+
+static bool load_profile(const char *path,const char *adapter,const char *backend,int layers){
     std::lock_guard<std::mutex> lock(guard);
     if(!initialized){llama_backend_init();initialized=true;}
-    const char *path=env->GetStringUTFChars(jpath,nullptr);
-    if(!path)return JNI_FALSE;
     llama_model_params params=llama_model_default_params();
-    params.n_gpu_layers=0; // CPU verified source baseline; accelerator admission remains measured separately.
+    params.n_gpu_layers=layers;
+    ggml_backend_dev_t devices[2]={nullptr,nullptr};
+    if(layers>0){
+        if(!backend||!*backend)return false;
+        devices[0]=ggml_backend_dev_by_name(backend);
+        if(!devices[0]||ggml_backend_dev_type(devices[0])==GGML_BACKEND_DEVICE_TYPE_CPU)return false;
+        params.devices=devices;
+    }
     llama_model *loaded=llama_model_load_from_file(path,params);
-    env->ReleaseStringUTFChars(jpath,path);
-    if(!loaded)return JNI_FALSE;
+    if(!loaded)return false;
+    // The adapter belongs to this model and stays live for every context.
+    llama_adapter_lora *loaded_adapter=nullptr;
+    if(adapter&&*adapter){
+        loaded_adapter=llama_adapter_lora_init(loaded,adapter);
+        if(!loaded_adapter){llama_model_free(loaded);return false;}
+    }
+    if(active_adapter)llama_adapter_lora_free(active_adapter);
     if(model)llama_model_free(model);
-    model=loaded;model_loaded.store(true);return JNI_TRUE;
+    model=loaded;
+    active_adapter=loaded_adapter;
+    model_loaded.store(true);
+    return true;
+}
+extern "C" JNIEXPORT jboolean JNICALL Java_com_asterion_control_OnDeviceLlm_nativeLoad(JNIEnv *env,jclass,jstring path){
+    if(!path)return JNI_FALSE;
+    const char *value=env->GetStringUTFChars(path,nullptr);
+    if(!value)return JNI_FALSE;
+    bool ok=load_profile(value,nullptr,nullptr,0);
+    env->ReleaseStringUTFChars(path,value);
+    return ok?JNI_TRUE:JNI_FALSE;
+}
+extern "C" JNIEXPORT jboolean JNICALL Java_com_asterion_control_OnDeviceLlm_nativeLoadProfile(
+    JNIEnv *env,jclass,jstring path,jstring adapter,jstring backend,jint layers){
+    if(!path||!adapter||!backend||layers<0||layers>256)return JNI_FALSE;
+    const char *file=env->GetStringUTFChars(path,nullptr);
+    const char *weights=file?env->GetStringUTFChars(adapter,nullptr):nullptr;
+    const char *device=weights?env->GetStringUTFChars(backend,nullptr):nullptr;
+    bool ok=device&&load_profile(file,weights,device,layers);
+    if(device)env->ReleaseStringUTFChars(backend,device);
+    if(weights)env->ReleaseStringUTFChars(adapter,weights);
+    if(file)env->ReleaseStringUTFChars(path,file);
+    return ok?JNI_TRUE:JNI_FALSE;
+}
+extern "C" JNIEXPORT void JNICALL Java_com_asterion_control_OnDeviceLlm_nativeConfigureContext(
+    JNIEnv *,jclass,jint threads,jint bits){
+    std::lock_guard<std::mutex> lock(guard);
+    context_threads=std::clamp(static_cast<int>(threads),1,8);
+    kv_bits=bits==8?8:16;
 }
 extern "C" JNIEXPORT jboolean JNICALL Java_com_asterion_control_OnDeviceLlm_nativeReady(JNIEnv *,jclass){return model_loaded.load()?JNI_TRUE:JNI_FALSE;}
-extern "C" JNIEXPORT void JNICALL Java_com_asterion_control_OnDeviceLlm_nativeUnload(JNIEnv *,jclass){std::lock_guard<std::mutex> lock(guard);if(model){model_loaded.store(false);llama_model_free(model);model=nullptr;}}
+extern "C" JNIEXPORT void JNICALL Java_com_asterion_control_OnDeviceLlm_nativeUnload(JNIEnv *,jclass){
+    std::lock_guard<std::mutex> lock(guard);
+    model_loaded.store(false);
+    if(active_adapter){llama_adapter_lora_free(active_adapter);active_adapter=nullptr;}
+    if(model){llama_model_free(model);model=nullptr;}
+}
 static bool read_utf8(JNIEnv *env,jbyteArray data,std::string &out){
     if(!data)return false;
     jsize n=env->GetArrayLength(data);
@@ -108,9 +157,20 @@ extern "C" JNIEXPORT jbyteArray JNICALL Java_com_asterion_control_OnDeviceLlm_na
     env->CallVoidMethod(stream,started,static_cast<jboolean>(thinking),static_cast<jint>(tokens.size()),omitted);
     if(env->ExceptionCheck())return nullptr;
     llama_context_params cp=llama_context_default_params();
-    cp.n_ctx=context_limit;cp.n_batch=512;cp.n_ubatch=256;cp.n_threads=4;cp.n_threads_batch=4;
+    cp.n_ctx=context_limit;cp.n_batch=512;cp.n_ubatch=256;cp.n_threads=context_threads;cp.n_threads_batch=context_threads;
+    if(kv_bits==8){
+        cp.type_k=GGML_TYPE_Q8_0;
+        cp.type_v=GGML_TYPE_Q8_0;
+        cp.flash_attn_type=LLAMA_FLASH_ATTN_TYPE_ENABLED;
+    }
     cp.abort_callback=[](void *){return cancel_generation.load();};
     llama_context *ctx=llama_init_from_model(model,cp);if(!ctx)return nullptr;
+    if(active_adapter){
+        float scale=1.0f;
+        if(llama_set_adapters_lora(ctx,&active_adapter,1,&scale)!=0){
+            llama_free(ctx);return nullptr;
+        }
+    }
     llama_sampler *sampler=llama_sampler_chain_init(llama_sampler_chain_default_params());
     if(!sampler){llama_free(ctx);return nullptr;}
     llama_sampler_chain_add(sampler,llama_sampler_init_greedy());

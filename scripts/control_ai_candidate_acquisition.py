@@ -37,7 +37,7 @@ def stage(*,repo,revision,filename,sha256,bytes_expected,output_dir):
     if not (REPO.fullmatch(repo) and REVISION.fullmatch(revision)
             and FILENAME.fullmatch(filename) and SHA.fullmatch(sha256)):
         raise ValueError("invalid_immutable_model_identity")
-    if not isinstance(bytes_expected,int) or not 50_000_000<=bytes_expected<=8_000_000_000:
+    if not isinstance(bytes_expected,int) or not 50_000_000<=bytes_expected<=2**47:
         raise ValueError("invalid_model_size")
     dest=Path(output_dir).expanduser().resolve()
     if "candidates" not in dest.name.casefold() and not any(
