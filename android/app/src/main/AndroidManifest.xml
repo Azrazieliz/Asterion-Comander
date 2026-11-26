@@ -37,6 +37,10 @@
       <!-- Isolate website cookies/storage from the authenticated Control dashboard. -->
       <activity android:name=".BrowserActivity" android:exported="false"
           android:process=":asterion_browser" android:screenOrientation="unspecified"/>
+      <!-- Same-UID internal access to the existing main-process signed transfer authority. -->
+      <provider android:name=".BrowserDownloadProvider"
+          android:authorities="${applicationId}.browser.download.internal"
+          android:exported="false"/>
       <!-- OS-controlled Autofill binding; never a chat/AI/Windows credential API. -->
       <service android:name=".ControlAutofillService"
           android:process=":asterion_browser"
