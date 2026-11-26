@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from .security import require_token
 from . import security_scanner,model_lab,skill_studio
+from .bridge_worker_lock import WorkerAlreadyRunning
 
 router=APIRouter(prefix="/api/v1/v2",dependencies=[Depends(require_token)])
 
@@ -30,7 +31,10 @@ def _owner_approval(value: str | None):
 
 def _authorized_path(value:str)->Path:
     # Reuse existing Control's configured roots, symlink checks and policy.
-    from .app import safe_path
+    from .app import safe_path, ROOT
+    candidate=Path(value).expanduser()
+    if not candidate.is_absolute():candidate=ROOT/candidate
+    if candidate.is_symlink():raise ValueError("symlink_target_rejected")
     return safe_path(value)
 
 
@@ -67,7 +71,7 @@ def security_quarantine(body:QuarantineRequest,
     try:
         return security_scanner.quarantine(_authorized_path(body.path),_vault(),
                                            body.file_sha256)
-    except (ValueError,OSError) as exc:
+    except (ValueError,OSError,WorkerAlreadyRunning) as exc:
         raise HTTPException(409,type(exc).__name__) from exc
 
 
@@ -82,10 +86,10 @@ def security_restore(body:RestoreRequest,
     try:
         # The vault only holds files that were previously authorized by
         # safe_path; restore forbids replacing any existing destination.
-        return security_scanner.restore(body.quarantine_id,_vault())
+        return security_scanner.restore(body.quarantine_id,_vault(),authorize=lambda p:_authorized_path(str(p)))
     except FileNotFoundError as exc:
         raise HTTPException(404,"Quarantine item not found") from exc
-    except (ValueError,OSError) as exc:
+    except (ValueError,OSError,WorkerAlreadyRunning) as exc:
         raise HTTPException(409,type(exc).__name__) from exc
 
 
