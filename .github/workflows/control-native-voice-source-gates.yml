@@ -7,6 +7,7 @@ on:
       - 'android/app/src/main/java/com/asterion/control/*Voice*.java'
       - 'android/app/src/main/java/com/asterion/control/MainActivity.java'
       - 'tests/java/com/asterion/control/*Voice*.java'
+      - 'tests/test_voice_cycle_repair_094.py'
       - '.github/workflows/control-native-voice-source-gates.yml'
 permissions:
   contents: read
