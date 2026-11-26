@@ -15,14 +15,13 @@ def test_logcat_only_reads_owner_app_pid_and_redacts_tokens():
 def test_authenticated_diagnostics_routes_use_existing_pairing(monkeypatch):
     assert github_bridge.PHONE_NATIVE["phone_logcat"] == ("GET","/diagnostics/logcat")
     assert callable(native_routes.phone_own_logcat)
-    monkeypatch.setattr(phone_bridge,"load",lambda:{
-        "base_url":"http://192.168.1.22:8973","token":"z"*40})
+    import importlib
     seen=[]
-    def fake_http(url,token,method="GET",body=None,**kwargs):
-        seen.append((url,token,method,body,kwargs))
-        return {"ok":True,"scope":"own_app_pid_only"}
-    monkeypatch.setattr(github_bridge,"http",fake_http)
-    assert github_bridge.run({"op":"phone_logcat","params":{}}, "existing-pc-token")["ok"]
-    assert seen[0][0]=="http://192.168.1.22:8973/diagnostics/logcat"
-    assert seen[0][1]=="z"*40
-    assert seen[0][2]=="GET" and seen[0][4]["control"] is True
+    class Reply:
+        def json(self): return {"ok":True,"scope":"own_app_pid_only"}
+    def capture(path,method,payload,timeout):
+        seen.append((path,method,payload,timeout));return Reply()
+    monkeypatch.setattr(importlib.import_module("asterion_remote.phone_bridge"),"request",capture)
+    result=github_bridge.run({"op":"phone_logcat","params":{}}, "existing-pc-token")
+    assert result=={"ok":True,"scope":"own_app_pid_only"}
+    assert seen==[("/diagnostics/logcat","GET",None,10.0)]

@@ -33,11 +33,19 @@ class ControlV2Tests(unittest.TestCase):
         self.auth={"Authorization":"Bearer "+"T"*40}
         self.owner={**self.auth,"X-Owner-Approval":"O"*40}
         self.patcher=patch("asterion_remote.control_v2_routes._authorized_path",
-             side_effect=lambda value:(self.root/value).resolve(strict=True))
+             side_effect=self.authorized_fixture_path)
         self.patcher.start()
         app=FastAPI()
         app.include_router(router)
         self.client=TestClient(app)
+
+    def authorized_fixture_path(self,value):
+        # The real safe_path authorizes not-yet-existing restore destinations.
+        path=(self.root/value).resolve(strict=False)
+        if not path.is_relative_to(self.root.resolve()):
+            from fastapi import HTTPException
+            raise HTTPException(403,"outside authorized fixture root")
+        return path
 
     def tearDown(self):
         self.client.close()

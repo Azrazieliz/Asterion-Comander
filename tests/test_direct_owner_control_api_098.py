@@ -5,10 +5,12 @@ from asterion_remote import github_bridge, phone_bridge
 
 def test_voice_and_cycle_commands_call_existing_phone_token(monkeypatch):
     calls=[]
-    monkeypatch.setattr(phone_bridge,'load',lambda:{'base_url':'http://192.168.1.22:8973','token':'x'*36})
-    def capture(url,token,method='GET',body=None,**kwargs):
-        calls.append((url,token,method,body,kwargs));return {'ok':True}
-    monkeypatch.setattr(github_bridge,'http',capture)
+    import importlib
+    class Reply:
+        def json(self): return {"ok":True}
+    def capture(path,method,payload,timeout):
+        calls.append((path,method,payload,timeout));return Reply()
+    monkeypatch.setattr(importlib.import_module("asterion_remote.phone_bridge"),"request",capture)
     for op,params,path in [
         ('phone_voice_status',{},'/voice/status'),
         ('phone_voice_ack',{'question_id':'voice-example-001'},'/voice/ack'),
@@ -18,11 +20,10 @@ def test_voice_and_cycle_commands_call_existing_phone_token(monkeypatch):
         ('phone_cycle_cancel',{},'/continuation/cancel'),
         ('phone_performance_status',{},'/performance/status')]:
         assert github_bridge.run({'op':op,'params':params},'windows-token')=={'ok':True}
-        url,token,method,body,kwargs=calls[-1]
-        assert url=='http://192.168.1.22:8973'+path
-        assert token=='x'*36 and kwargs['control'] is True
-        if method=='POST':assert body==params
-        else:assert body is None
+        actual,method,body,timeout=calls[-1]
+        assert actual==path and timeout==10.0
+        assert body==(params if method=="POST" else None)
+
 
 
 def test_owner_native_api_rejects_unsafe_arguments(monkeypatch):

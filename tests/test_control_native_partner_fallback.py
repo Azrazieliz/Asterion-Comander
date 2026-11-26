@@ -13,7 +13,8 @@ def test_native_voice_and_network_share_original_wss_first_transport(monkeypatch
     def request(path,method,payload,timeout):
         calls.append((path,method,payload,timeout))
         return Reply()
-    monkeypatch.setattr(phone_bridge,"request",request)
+    import importlib
+    monkeypatch.setattr(importlib.import_module("asterion_remote.phone_bridge"),"request",request)
     for op in ("phone_voice_status","phone_network_status"):
         assert bridge.run({"op":op,"params":{}}, "redacted")["ok"]
     assert calls == [("/voice/status","GET",None,10.0),
