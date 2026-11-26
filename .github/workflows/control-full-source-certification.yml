@@ -1,0 +1,84 @@
+name: Control complete source regression (no release)
+on:
+  push:
+    branches:
+      - work/control-a-z-certification-20261126
+    paths:
+      - 'asterion_remote/**'
+      - 'android/**'
+      - 'tests/**'
+      - 'scripts/**'
+      - '.github/workflows/control-full-source-certification.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  all-python:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt pytest
+      - if: runner.os == 'Linux'
+        run: xvfb-run -a python -m pytest -ra --junitxml=full-regression.xml tests
+      - if: runner.os == 'Windows'
+        run: python -m pytest -ra --junitxml=full-regression.xml tests
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: full-python-${{ matrix.os }}
+          path: full-regression.xml
+  all-jvm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Execute every pure JVM test
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/control-jvm
+          SRC=android/app/src/main/java/com/asterion/control
+          TEST=tests/java/com/asterion/control
+          javac -encoding UTF-8 -sourcepath android/app/src/main/java -d /tmp/control-jvm "$TEST"/*.java
+          for p in "$TEST"/*Test.java; do
+            java -cp /tmp/control-jvm "com.asterion.control.$(basename "$p" .java)"
+          done
+  android-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+      - name: Ensure compile platform
+        run: |
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          if [ ! -f "$SDK/platforms/android-37.0/android.jar" ]; then
+            yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" --channel=3 'platforms;android-37.0' || true
+          fi
+          test -s "$SDK/platforms/android-37.0/android.jar"
+      - name: Integrated Java, manifest and dependency DEX (no APK)
+        working-directory: android
+        run: gradle --no-daemon --console=plain :app:compileDebugJavaWithJavac :app:processDebugMainManifest :app:mergeExtDexDebug
