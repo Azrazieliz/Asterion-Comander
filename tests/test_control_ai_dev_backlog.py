@@ -75,3 +75,21 @@ def test_receipt_cannot_forge_device_acceptance(cycle):
     with pytest.raises(ValueError,match="invalid_independent_source_receipt"):
         dev_backlog.record("taskfirst",evidence_sha256="0",
                            candidate_commit=COMMIT,verification_level="source_tested")
+
+
+def test_cyclic_dependency_graph_is_rejected(cycle):
+    with pytest.raises(ValueError,match="cyclic_task_dependencies"):
+        dev_backlog.seed(cycle,[item("taskfirst",["tasksecond"]),item("tasksecond",["taskfirst"])])
+    assert dev_backlog.snapshot(cycle)==[]
+
+def test_independent_tasks_cannot_claim_same_cycle_concurrently(cycle):
+    dev_backlog.seed(cycle,[item("taskfirst"),item("tasksecond")])
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        claims=list(pool.map(lambda _:dev_backlog.claim(cycle),range(6)))
+    assert sum(c is not None for c in claims)==1
+
+def test_priority_is_not_silently_rewritten(cycle):
+    original=item("taskfirst")
+    dev_backlog.seed(cycle,[original])
+    with pytest.raises(ValueError,match="existing_task"):
+        dev_backlog.seed(cycle,[dict(original,priority=9)])
