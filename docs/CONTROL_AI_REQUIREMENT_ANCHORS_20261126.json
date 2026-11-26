@@ -197,7 +197,8 @@
       "kind": "requirement",
       "importance": "mandatory",
       "status": "active",
-      "supersedes": []
+      "supersedes": [],
+      "end_at_eof": true
     },
     {
       "id": "V6-NON-DUPLICATION",
