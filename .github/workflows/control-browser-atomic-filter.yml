@@ -4,9 +4,12 @@ on:
     branches:
       - fix/control-browser-atomic-filter-cache-20261126
       - work/control-non-ai-browser-20261126
+      - work/control-non-ai-browser-permissions-20261126
       - work/control-native-ai-reconstruction-20261126
     paths:
       - 'android/app/src/main/java/com/asterion/control/Browser*.java'
+      - 'android/app/src/main/java/com/asterion/control/ControlSecurityPolicy.java'
+      - 'android/app/src/main/AndroidManifest.xml'
       - 'tests/java/com/asterion/control/Browser*.java'
       - 'android/app/src/main/java/com/asterion/control/BrowserProtection.java'
       - 'tests/java/com/asterion/control/BrowserFilterCacheStoreTest.java'
@@ -16,6 +19,8 @@ on:
       - work/control-native-ai-reconstruction-20261126
     paths:
       - 'android/app/src/main/java/com/asterion/control/Browser*.java'
+      - 'android/app/src/main/java/com/asterion/control/ControlSecurityPolicy.java'
+      - 'android/app/src/main/AndroidManifest.xml'
       - 'tests/java/com/asterion/control/Browser*.java'
       - '.github/workflows/control-browser-atomic-filter.yml'
   workflow_dispatch:
