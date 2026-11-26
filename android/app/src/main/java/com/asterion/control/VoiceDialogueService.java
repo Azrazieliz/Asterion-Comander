@@ -101,6 +101,12 @@ public final class VoiceDialogueService extends Service {
   private volatile boolean ambientAwaitingCommand=false;
   private volatile long lastWakePhraseAtMs=0L;
   private volatile boolean pendingRestored=false;
+  private final VoiceNativeAssistant nativeAssistant=new VoiceNativeAssistant();
+  private volatile boolean nativeVoiceBusy=false;
+  static boolean nativeOwnerRoute(Context c){
+    return !"chatgpt".equals(c.getSharedPreferences("voice_style",MODE_PRIVATE)
+      .getString("owner_voice_route","native"));
+  }
   private volatile boolean preferSystemRecognizer=false;
   private volatile int ambientErrors=0;
   private volatile int recognizedWakeCount=0;
@@ -141,7 +147,7 @@ public final class VoiceDialogueService extends Service {
     if(ambientRetry!=null)ui.removeCallbacks(ambientRetry);
     ambientRetry=()->{
       ambientRetry=null;
-      if(active!=this||!ambientEnabled||!pendingOwnerSpeech.isEmpty()||
+      if(active!=this||!ambientEnabled||!pendingOwnerSpeech.isEmpty()||nativeVoiceBusy||PendingVoiceStore.hasNativeClaim(this)||
         ownerCommandMode||"speaking".equals(phase)||"processing".equals(phase)||
         ambientCapture||("answered".equals(phase)&&!consumed))return;
       if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){
@@ -287,6 +293,7 @@ public final class VoiceDialogueService extends Service {
     pendingOwnerSpeech=PendingVoiceStore.restore(this);
     pendingRestored=!pendingOwnerSpeech.isEmpty();
     if(pendingRestored)lastVoiceDispatch="restored_pending_voice";
+    else if(PendingVoiceStore.hasNativeClaim(this))lastVoiceDispatch="native_submission_uncertain_review_history";
     unlockedReceiver=new BroadcastReceiver(){
       @Override public void onReceive(Context context,Intent intent){
         if(active==VoiceDialogueService.this)onChatWindowVisible();
@@ -330,7 +337,7 @@ public final class VoiceDialogueService extends Service {
       .setContentTitle("Asterion voice control")
       .setContentText(pendingOwnerSpeech.isEmpty()
         ?"Ready for voice questions while other apps are open"
-        :"Voice command recognized. Open ChatGPT after unlocking to send.")
+        :(nativeOwnerRoute(this)?"Voice command waiting for native assistant":"Voice command recognized. Open ChatGPT after unlocking to send."))
       .setVisibility(Notification.VISIBILITY_PUBLIC)
       .addAction(android.R.drawable.ic_btn_speak_now,"Talk to Asterion",talkAction)
       .addAction(android.R.drawable.ic_menu_close_clear_cancel,"Stop",action)
@@ -534,6 +541,7 @@ public final class VoiceDialogueService extends Service {
         if(id.equals(utteranceId)){
           speakerPlaybackCompleted=true;
           ui.post(()->{
+            if(active!=VoiceDialogueService.this||!id.equals(questionId))return;
             releaseAudioFocus();
             if(speakOnly){
               clearDeadline();speakOnly=false;state("ready","");
@@ -685,14 +693,15 @@ public final class VoiceDialogueService extends Service {
     listener.startListening(request);
   }
   /** One explicit owner-initiated voice turn. The recognizer transcribes what the
-   * owner says, then Control sends it into the existing ChatGPT writing bar.
+   * owner says, then Control submits to the selected owner voice route.
    * This never creates a queue or fabricates an AI response.
    */
   synchronized JSONObject beginOwnerVoiceControl(String locale)throws Exception{
     if(active!=this)throw new IllegalStateException("Enable voice session first");
-    if(ownerCommandMode)throw new IllegalStateException("Voice command already running");
+    if(ownerCommandMode||nativeVoiceBusy)throw new IllegalStateException("Voice command already running");
+    if(PendingVoiceStore.hasNativeClaim(this))throw new IllegalStateException("Previous submission uncertain; review assistant history and stop/restart voice");
     if(!pendingOwnerSpeech.isEmpty())
-      throw new IllegalStateException("Previous spoken instruction is waiting for ChatGPT");
+      throw new IllegalStateException("Previous spoken instruction is waiting for dispatch");
     ownerCommandMode=true;
     try{
       JSONObject started=ask("What would you like me to do?",locale,
@@ -742,7 +751,7 @@ public final class VoiceDialogueService extends Service {
        ownerDispatchRetryCount>=MAX_OWNER_DISPATCH_RETRIES){
       if(!pendingOwnerSpeech.isEmpty()){
         lastVoiceDispatch="awaiting_manual_chat_foreground";
-        state("awaiting_device","Spoken command saved; return to ChatGPT to continue");
+        state("awaiting_device",nativeOwnerRoute(this)?"Spoken command saved; native assistant remains busy":"Spoken command saved; return to ChatGPT to continue");
         refreshVoiceNotification();
       }
       return;
@@ -762,6 +771,7 @@ public final class VoiceDialogueService extends Service {
     }catch(Exception ignored){}
   }
   private void dispatchOwnerVoiceRequest(){
+    if(nativeOwnerRoute(this)){ui.post(this::dispatchNativeOwnerVoice);return;}
     String spoken=pendingOwnerSpeech;
     if(active!=this||spoken.isEmpty())return;
     PowerManager power=(PowerManager)getSystemService(POWER_SERVICE);
@@ -828,6 +838,75 @@ public final class VoiceDialogueService extends Service {
       refreshVoiceNotification();
     }
   }
+  private void dispatchNativeOwnerVoice(){
+    if(active!=this||pendingOwnerSpeech.isEmpty()||nativeVoiceBusy)return;
+    PowerManager power=(PowerManager)getSystemService(POWER_SERVICE);
+    KeyguardManager lock=(KeyguardManager)getSystemService(KEYGUARD_SERVICE);
+    if(power==null||!power.isInteractive()||(lock!=null&&lock.isDeviceLocked())){
+      lastVoiceDispatch="waiting_for_owner_unlock";
+      state("awaiting_device","Unlock the phone to submit the native voice request");
+      refreshVoiceNotification();return;
+    }
+    if(AssistantSession.INSTANCE.conversation.running()){
+      lastVoiceDispatch="native_assistant_busy";
+      state("awaiting_device","Native assistant is busy; spoken request retained");
+      retryOwnerVoiceWhenChatReady();refreshVoiceNotification();return;
+    }
+    String spoken=pendingOwnerSpeech;
+    boolean claimed=false;
+    try{
+      if(!PendingVoiceStore.hasSaved(this))PendingVoiceStore.save(this,spoken);
+      if(!PendingVoiceStore.claimForNativeDispatch(this)){
+        lastVoiceDispatch="native_submission_uncertain_review_history";
+        state("failed","Review native assistant history before retrying");
+        refreshVoiceNotification();return;
+      }
+      claimed=true;
+      nativeVoiceBusy=true;
+      state("native_generating","Native assistant is preparing a response");
+      boolean submitted=nativeAssistant.submit(this,spoken,new VoiceNativeAssistant.Listener(){
+        public void accepted(){
+          pendingOwnerSpeech="";pendingRestored=false;transcript="";consumed=true;
+          ownerDispatchRetryCount=0;
+          lastVoiceDispatch="native_submitted";
+          refreshVoiceNotification();
+        }
+        public void completed(String text,boolean review){
+          nativeVoiceBusy=false;
+          PendingVoiceStore.clear(VoiceDialogueService.this);
+          lastVoiceDispatch="native_response_completed";
+          state("ready","");
+          String spoken=VoiceReplyPolicy.speech(text,review);
+          try{sayOnly(spoken,"en-US");}
+          catch(Exception failure){
+            state("failed","Native response saved in assistant; speech playback unavailable");
+            if(ambientEnabled)scheduleAmbient(800L);
+          }
+          refreshVoiceNotification();
+        }
+        public void failed(String reason){
+          nativeVoiceBusy=false;
+          PendingVoiceStore.clear(VoiceDialogueService.this);
+          lastVoiceDispatch="native_response_"+reason;
+          state("failed","Native assistant did not complete; review conversation");
+          if(ambientEnabled)scheduleAmbient(800L);
+          refreshVoiceNotification();
+        }
+      });
+      if(!submitted){
+        nativeVoiceBusy=false;
+        PendingVoiceStore.releaseNativeClaim(this);
+        state("awaiting_device","Native assistant busy; spoken request retained");
+        retryOwnerVoiceWhenChatReady();
+      }
+    }catch(Exception failure){
+      nativeVoiceBusy=false;
+      if(claimed){pendingOwnerSpeech="";pendingRestored=false;}
+      lastVoiceDispatch=claimed?"native_submission_uncertain_review_history":"native_storage_unavailable";
+      state("failed","Native voice submission not confirmed; review assistant history");
+      refreshVoiceNotification();
+    }
+  }
   private static String speechError(int code){
     switch(code){
       case SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS:
@@ -861,7 +940,9 @@ public final class VoiceDialogueService extends Service {
       .put("phase",phase).put("question_id",questionId)
       .put("question",question).put("transcript",transcript)
       .put("microphone_active",microphoneActive)
-      .put("voice_control_active",ownerCommandMode)
+      .put("voice_control_active",ownerCommandMode||nativeVoiceBusy)
+      .put("owner_voice_route",nativeOwnerRoute(this)?"native":"chatgpt")
+      .put("native_submission_claimed",PendingVoiceStore.hasNativeClaim(this))
       .put("always_listening_enabled",ambientEnabled)
       .put("ambient_recognizer_active",ambientCapture)
       .put("wake_word","asterion")
@@ -887,6 +968,7 @@ public final class VoiceDialogueService extends Service {
   }
   @Override public void onDestroy(){
     active=null;
+    nativeAssistant.interrupt();nativeVoiceBusy=false;
     if(unlockedReceiver!=null){
       try{unregisterReceiver(unlockedReceiver);}catch(Exception ignored){}
       unlockedReceiver=null;
