@@ -1274,7 +1274,10 @@ public final class MainActivity extends Activity {
         catch(Exception e){toast("Voice could not stop: "+e.getMessage());}
         updateHealth();
       });
-    wide(voice,voiceStopAction);wide(toolsBody,voice);
+    wide(voice,voiceStopAction);
+    gap(voice,9);
+    button(voice,"Voice assistant route","settings",false,this::showOwnerVoiceRoute);
+    wide(toolsBody,voice);
 
     gap(toolsBody,12);LinearLayout integrations=card();
     rowTitle(integrations,"Connected applications",
@@ -2344,6 +2347,18 @@ public final class MainActivity extends Activity {
       if(System.currentTimeMillis()<until)monitorVoiceTest(until);
       else voiceTestStatus.setText("Voice test timed out; no successful transcript");
     },350);
+  }
+  private void showOwnerVoiceRoute(){
+    if(VoiceDialogueService.active!=null){
+      toast("Stop the voice session before changing its route");return;
+    }
+    String[] routes={"Native Asterion assistant","Existing ChatGPT operator (explicit external route)"};
+    new android.app.AlertDialog.Builder(this).setTitle("Voice assistant route")
+      .setSingleChoiceItems(routes,VoiceDialogueService.nativeOwnerRoute(this)?0:1,(dialog,which)->{
+        getSharedPreferences("voice_style",MODE_PRIVATE).edit()
+          .putString("owner_voice_route",which==0?"native":"chatgpt").apply();
+        dialog.dismiss();toast("Voice route saved");
+      }).setNegativeButton("Cancel",null).show();
   }
   private void showVoiceAnswerStatus(){
     try{
