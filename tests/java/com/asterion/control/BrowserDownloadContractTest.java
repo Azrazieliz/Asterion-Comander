@@ -6,7 +6,7 @@ public final class BrowserDownloadContractTest {
     }
     public static void main(String[] args){
         String id="browser-12345678-1234-1234-1234-123456789abc";
-        for(String pkg:new String[]{BrowserDownloadContract.DOWNLOADER,BrowserDownloadContract.NEXUS}){
+        for(String pkg:new String[]{BrowserDownloadContract.DOWNLOADER,BrowserDownloadContract.DOWNLOADER_ACCEPTANCE,BrowserDownloadContract.NEXUS}){
             expect(BrowserDownloadContract.canDispatch(pkg,"download","https://example.com/file",id),true);
             expect(BrowserDownloadContract.canDispatch(pkg,"download","http://example.com/file",id),true);
             expect(BrowserDownloadContract.canDispatch(pkg,"diagnostics","https://example.com/file",id),false);
