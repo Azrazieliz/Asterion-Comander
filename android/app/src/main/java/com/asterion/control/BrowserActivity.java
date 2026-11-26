@@ -97,7 +97,7 @@ public final class BrowserActivity extends Activity {
     private EditText address;
     private TextView status, counter, site;
     private static final int SITE_PERMISSION_CODE=4107;
-    private SiteRequest pendingSiteRequest;
+    private SiteRequest pendingSiteRequest, androidPermissionInFlight;
     private AlertDialog siteRequestDialog;
     private View back, forward;
     private ProgressBar progress;
@@ -516,6 +516,7 @@ public final class BrowserActivity extends Activity {
                 permissions.add(android.Manifest.permission.CAMERA);names.add("camera");
             }else{request.deny();return;}
         }
+        if(request.getOrigin()==null){request.deny();return;}
         beginSiteRequest(new SiteRequest(tab,request.getOrigin().toString(),request,null,
             permissions.toArray(new String[0]),resources.clone(),String.join(" and ",names)));
     }
@@ -542,16 +543,18 @@ public final class BrowserActivity extends Activity {
     private void beginSiteRequest(SiteRequest request){
         // Never allow a hidden tab, cross-origin frame, insecure page or a
         // second request to take over an already visible consent dialog.
-        if(pendingSiteRequest!=null||!hasWindowFocus()||!visibleSite(request)){answerSiteRequest(request,false);return;}
+        if(pendingSiteRequest!=null||androidPermissionInFlight!=null||!hasWindowFocus()||!visibleSite(request)){answerSiteRequest(request,false);return;}
+        String display;
+        try{display=ControlPasswordVault.exactOrigin(request.origin);}catch(Exception invalid){answerSiteRequest(request,false);return;}
         pendingSiteRequest=request;
-        String display=ControlPasswordVault.exactOrigin(request.origin);
         siteRequestDialog=new AlertDialog.Builder(this).setTitle("Site permission")
             .setMessage(display+" requests access to your "+request.description+".\n\nAllow for this page only?")
             .setPositiveButton("Allow once",(d,w)->{
                 if(pendingSiteRequest!=request||!visibleSite(request)){finishSiteRequest(false);return;}
                 if(androidAllows(request)){finishSiteRequest(true);return;}
+                androidPermissionInFlight=request;
                 try{requestPermissions(request.androidPermissions,SITE_PERMISSION_CODE);}
-                catch(Exception denied){finishSiteRequest(false);}
+                catch(Exception denied){androidPermissionInFlight=null;finishSiteRequest(false);}
             }).setNegativeButton("Deny",(d,w)->finishSiteRequest(false))
             .setOnCancelListener(d->finishSiteRequest(false)).create();
         siteRequestDialog.show();
@@ -564,7 +567,10 @@ public final class BrowserActivity extends Activity {
     }
     @Override public void onRequestPermissionsResult(int code,String[] permissions,int[] results){
         super.onRequestPermissionsResult(code,permissions,results);
-        if(code==SITE_PERMISSION_CODE)finishSiteRequest(true);
+        if(code==SITE_PERMISSION_CODE){
+            SiteRequest completed=androidPermissionInFlight;androidPermissionInFlight=null;
+            if(completed!=null&&pendingSiteRequest==completed)finishSiteRequest(true);
+        }
     }
     private void showSitePermissions(){
         BrowserTab tab=current();String origin=verifiedActiveHttpsOrigin();
@@ -848,6 +854,7 @@ public final class BrowserActivity extends Activity {
     private void homeSection(LinearLayout body,String heading,String key,int limit){
         LinearLayout bar=DesignSystem.horizontal(this);bar.setPadding(0,dp(20),0,dp(4));
         TextView label=label(heading,17,DesignSystem.TEXT,true);bar.addView(label,new LinearLayout.LayoutParams(0,-2,1));
+        if(key.equals("bookmarks"))bar.addView(control("Add",this::addHomeBookmark));
         bar.addView(control("View all",()->showEntryList(key,heading)));add(body,bar);
         try{
             JSONArray entries=new JSONArray(browserPrefs.getString(key,"[]"));
@@ -913,22 +920,37 @@ public final class BrowserActivity extends Activity {
             browserPrefs.edit().putString("history",now.toString()).apply();
         }catch(Exception ignored){}
     }
+    private void addHomeBookmark(){
+        LinearLayout fields=DesignSystem.vertical(this);fields.setPadding(dp(20),dp(8),dp(20),0);
+        EditText name=new EditText(this);name.setSingleLine(true);name.setHint("Name (optional)");add(fields,name);
+        EditText link=new EditText(this);link.setSingleLine(true);link.setHint("https://example.com");link.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_VARIATION_URI);add(fields,link);
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Add shortcut").setView(fields).setPositiveButton("Save",null).setNegativeButton("Cancel",null).create();
+        dialog.setOnShowListener(v->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(w->{
+            String raw=link.getText().toString().trim();if(!raw.contains("://"))raw="https://"+raw;
+            String url=safeSessionUrl(raw);if(url.equals(START)){link.setError("Enter a valid website address");return;}
+            String title=name.getText().toString().trim();if(title.isEmpty())title=Uri.parse(url).getHost();
+            if(saveBookmark(url,title)){dialog.dismiss();showTab(active);}
+        }));dialog.show();
+    }
     private void bookmarkCurrent(){
         BrowserTab tab=current();
         if(tab==null)return;
-        String url=safeSessionUrl(tab.web.getUrl());
-        if(url.equals(START))return;
+        saveBookmark(tab.web.getUrl(),tab.title);
+    }
+    private boolean saveBookmark(String raw,String title){
+        String url=safeSessionUrl(raw);
+        if(url.equals(START))return false;
         try{
             JSONArray previous=new JSONArray(browserPrefs.getString("bookmarks","[]"));
             JSONArray next=new JSONArray();
-            next.put(new JSONObject().put("url",url).put("title",tab.title));
+            next.put(new JSONObject().put("url",url).put("title",title));
             for(int i=0;i<previous.length()&&next.length()<100;i++){
                 JSONObject e=previous.optJSONObject(i);
                 if(e!=null&&!url.equals(e.optString("url")))next.put(e);
             }
             browserPrefs.edit().putString("bookmarks",next.toString()).apply();
-            notice("Bookmark saved");
-        }catch(Exception error){notice("Unable to save bookmark");}
+            notice("Bookmark saved");return true;
+        }catch(Exception error){notice("Unable to save bookmark");return false;}
     }
     private void showSavedPages(){
         String[] choices={"Open bookmarks","Open history","Bookmark this page",
