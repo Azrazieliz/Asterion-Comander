@@ -93,3 +93,21 @@ def test_priority_is_not_silently_rewritten(cycle):
     dev_backlog.seed(cycle,[original])
     with pytest.raises(ValueError,match="existing_task"):
         dev_backlog.seed(cycle,[dict(original,priority=9)])
+
+
+def test_candidate_and_turn_commit_atomically(cycle):
+    dev_backlog.seed(cycle,[item("taskfirst")])
+    dev_backlog.claim(cycle)
+    turn=overnight_supervisor.claim(cycle)
+    ident=turn["request_id"]
+    overnight_supervisor.response(cycle,ident,provider_receipt="fixture-provider",content="fixture")
+    args=dict(evidence_sha256=DIGEST,work_summary="Verified isolated fixture source",
+              next_work="Next fixture",candidate_commit=COMMIT)
+    with pytest.raises(RuntimeError,match="candidate_task_not_claimed"):
+        overnight_supervisor.verify(cycle,ident,candidate_task_id="taskunknown",**args)
+    assert overnight_supervisor.status(cycle)["state"]=="awaiting_verification"
+    assert dev_backlog.snapshot(cycle)[0]["state"]=="claimed"
+    result=overnight_supervisor.verify(cycle,ident,candidate_task_id="taskfirst",**args)
+    assert result["verified_turns"]==1
+    assert dev_backlog.snapshot(cycle)[0]["state"]=="source_tested"
+    assert dev_backlog.snapshot(cycle)[0]["candidate_commit"]==COMMIT
