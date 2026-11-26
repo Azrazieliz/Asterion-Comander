@@ -19,12 +19,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * A missing library/weight is a hard error, never a success placeholder.
  */
 final class OnDeviceLlm {
-    static final String MODEL_ASSET="models/Qwen3-0.6B-Q4_K_M.gguf";
-    static final String MODEL_FILE="Qwen3-0.6B-Q4_K_M.gguf";
-    static final long MODEL_BYTES=484220288L;
-    static final String MODEL_SHA256=
-        "373db06783953f0981572d008f183eb2167b93304f5adbf7c4ce6ed6a91ee437";
-    static final String MODEL_SOURCE="tauqir02/Qwen3-0.6B-GGUF";
     private static final Object LOCK=new Object();
     private static final AtomicBoolean BUSY=new AtomicBoolean(false);
     private static final AtomicBoolean CANCELLED=new AtomicBoolean(false);
@@ -40,7 +34,7 @@ final class OnDeviceLlm {
     private OnDeviceLlm(){}
     private static native boolean nativeLoad(String privateFile);
     private static native boolean nativeReady();
-    private static native byte[] nativeGenerate(String prompt,int maxTokens);
+    private static native byte[] nativeGenerate(String prompt,int maxTokens,int contextTokens);
     private static native void nativeCancel();
     private static native void nativeResetCancel();
     static void cancel(){
@@ -50,26 +44,31 @@ final class OnDeviceLlm {
     private static native void nativeUnload();
 
     static JSONObject status(Context context) throws Exception {
-        File file=new File(new File(context.getFilesDir(),"models"),MODEL_FILE);
+        OnDeviceModelProfile profile=OnDeviceModelProfile.read(context);
+        File file=new File(new File(context.getFilesDir(),"models"),profile.file);
         return new JSONObject()
             .put("ok",true)
             .put("platform","android_phone")
             .put("inference_backend","llama_cpp_jni")
             .put("native_library_loaded",LIBRARY_LOADED)
             .put("inference_active",BUSY.get())
-            .put("model_bundled_in_apk",hasPackagedModel(context))
+            .put("model_bundled_in_apk",hasPackagedModel(context,profile))
+            .put("model_name",profile.file)
+            .put("model_context_tokens",profile.contextTokens)
+            .put("max_generation_tokens",profile.outputTokens)
+            .put("max_input_chars",profile.inputChars)
             .put("model_private_file_bytes",file.isFile()?file.length():0L)
             .put("model_sha_verified",modelReady && LIBRARY_LOADED)
             .put("model_loaded",LIBRARY_LOADED && modelReady && nativeReady())
             .put("external_server_required",false)
             .put("paid_cloud_api_required",false)
-            .put("model_source",MODEL_SOURCE)
+            .put("model_source",profile.source)
             .put("last_failure_code",lastFailure);
     }
-    private static boolean hasPackagedModel(Context c) {
+    private static boolean hasPackagedModel(Context c,OnDeviceModelProfile profile) {
         try (android.content.res.AssetFileDescriptor afd =
-             c.getAssets().openFd(MODEL_ASSET)) {
-            return afd.getLength()==MODEL_BYTES;
+             c.getAssets().openFd(profile.asset)) {
+            return afd.getLength()==profile.bytes;
         }catch(Exception ignored){
             return false;
         }
@@ -79,31 +78,32 @@ final class OnDeviceLlm {
             if(!LIBRARY_LOADED){lastFailure="native_library_missing";return false;}
             try{
                 if(modelReady&&nativeReady())return true;
+                OnDeviceModelProfile profile=OnDeviceModelProfile.read(context);
                 File folder=new File(context.getFilesDir(),"models");
                 if(!folder.isDirectory()&&!folder.mkdirs()){
                     lastFailure="private_model_storage_unavailable";return false;
                 }
-                File file=new File(folder,MODEL_FILE);
-                if(!verified(file)){
-                    File temp=new File(folder,MODEL_FILE+".partial");
+                File file=new File(folder,profile.file);
+                if(!verified(file,profile)){
+                    File temp=new File(folder,profile.file+".partial");
                     if(temp.exists()&&!temp.delete()){
                         lastFailure="partial_model_cleanup_failed";return false;
                     }
                     MessageDigest digest=MessageDigest.getInstance("SHA-256");
                     long read=0;
                     byte[] buffer=new byte[256*1024];
-                    try (InputStream from=context.getAssets().open(MODEL_ASSET,
+                    try (InputStream from=context.getAssets().open(profile.asset,
                          AssetManager.ACCESS_STREAMING);
                          FileOutputStream out=new FileOutputStream(temp)) {
                         for(int n;(n=from.read(buffer))!=-1;){
                             read+=n;
-                            if(read>MODEL_BYTES)throw new IllegalStateException("invalid_length");
+                            if(read>profile.bytes)throw new IllegalStateException("invalid_length");
                             out.write(buffer,0,n);
                             digest.update(buffer,0,n);
                         }
                         out.getFD().sync();
                     }
-                    if(read!=MODEL_BYTES||!MODEL_SHA256.equals(hex(digest.digest())))
+                    if(read!=profile.bytes||!profile.sha256.equals(hex(digest.digest())))
                         throw new IllegalStateException("model_checksum_mismatch");
                     if(!temp.renameTo(file))
                         throw new IllegalStateException("private_model_commit_failed");
@@ -120,14 +120,14 @@ final class OnDeviceLlm {
             }
         }
     }
-    private static boolean verified(File file) throws Exception {
-        if(!file.isFile()||file.length()!=MODEL_BYTES)return false;
+    private static boolean verified(File file,OnDeviceModelProfile profile) throws Exception {
+        if(!file.isFile()||file.length()!=profile.bytes)return false;
         MessageDigest md=MessageDigest.getInstance("SHA-256");
         byte[] buf=new byte[262144];
         try(FileInputStream in=new FileInputStream(file)){
             for(int n;(n=in.read(buf))!=-1;)md.update(buf,0,n);
         }
-        return MODEL_SHA256.equals(hex(md.digest()));
+        return profile.sha256.equals(hex(md.digest()));
     }
     private static String hex(byte[] bytes) {
         StringBuilder result=new StringBuilder(bytes.length*2);
@@ -136,7 +136,9 @@ final class OnDeviceLlm {
         return result.toString();
     }
     static String generate(Context context,String userPrompt) throws Exception {
-        if(userPrompt==null||userPrompt.trim().isEmpty()||userPrompt.length()>1800)
+        OnDeviceModelProfile profile=OnDeviceModelProfile.read(context);
+        if(userPrompt==null||userPrompt.trim().isEmpty()||
+                userPrompt.length()>profile.inputChars)
             throw new IllegalArgumentException("prompt_length_invalid");
         if(!BUSY.compareAndSet(false,true))
             throw new IllegalStateException("on_device_inference_already_running");
@@ -147,18 +149,13 @@ final class OnDeviceLlm {
             if(!ensureLoaded(context))
                 throw new IllegalStateException(lastFailure);
             if(CANCELLED.get())throw new InterruptedException("user_cancelled");
-            // Qwen3 ChatML. A bounded context and no tool/network permissions.
-            String prompt="<|im_start|>system\n"+
-                "You are Asterion Control's locally hosted phone assistant. "+
-                "Give concise, accurate answers. Never claim an app was modified, "+
-                "a command ran, or a VPN connected unless you receive evidence. "+
-                "You cannot autonomously operate other applications. /no_think"+
-                "<|im_end|>\n<|im_start|>user\n"+
-                userPrompt.trim()+"<|im_end|>\n<|im_start|>assistant\n";
-            byte[] output=nativeGenerate(prompt,192);
+            // Model-specific delimiters and adaptive generation budget come from
+            // the signed model profile. No forced reasoning suppression.
+            String prompt=profile.prompt(userPrompt);
+            byte[] output=nativeGenerate(prompt,profile.outputTokens,profile.contextTokens);
             if(CANCELLED.get())throw new InterruptedException("user_cancelled");
             if(output==null||output.length==0)
-                throw new IllegalStateException("no_generated_tokens");
+                throw new IllegalStateException("native_context_or_generation_failed");
             return new String(output,StandardCharsets.UTF_8).trim();
         }finally{
             BUSY.set(false);
