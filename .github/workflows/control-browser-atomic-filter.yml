@@ -7,9 +7,13 @@ on:
       - work/control-non-ai-browser-permissions-20261126
       - work/control-non-ai-download-integration-20261126
       - work/control-non-ai-private-browser-20261126
+      - work/control-non-ai-network-security-20261126
       - work/control-native-ai-reconstruction-20261126
     paths:
       - 'android/app/src/main/java/com/asterion/control/Browser*.java'
+      - 'android/app/src/main/java/com/asterion/control/Tor*.java'
+      - 'android/app/src/main/java/com/asterion/control/*Vpn*.java'
+      - 'tests/java/com/asterion/control/Tor*.java'
       - 'android/app/src/main/java/com/asterion/control/ControlSecurityPolicy.java'
       - 'android/app/src/main/AndroidManifest.xml'
       - 'android/app/build.gradle'
@@ -22,6 +26,9 @@ on:
       - work/control-native-ai-reconstruction-20261126
     paths:
       - 'android/app/src/main/java/com/asterion/control/Browser*.java'
+      - 'android/app/src/main/java/com/asterion/control/Tor*.java'
+      - 'android/app/src/main/java/com/asterion/control/*Vpn*.java'
+      - 'tests/java/com/asterion/control/Tor*.java'
       - 'android/app/src/main/java/com/asterion/control/ControlSecurityPolicy.java'
       - 'android/app/src/main/AndroidManifest.xml'
       - 'android/app/build.gradle'
@@ -59,6 +66,7 @@ jobs:
         run: |
           javac -encoding UTF-8 -d /tmp/asterion-browser-atomic-classes \
             android/app/src/main/java/com/asterion/control/BrowserNavigationPolicy.java \
+            android/app/src/main/java/com/asterion/control/TorAddressPolicy.java \
             tests/java/com/asterion/control/BrowserNavigationPolicyTest.java
           java -cp /tmp/asterion-browser-atomic-classes \
             com.asterion.control.BrowserNavigationPolicyTest
@@ -68,6 +76,12 @@ jobs:
             android/app/src/main/java/com/asterion/control/BrowserDownloadContract.java \
             tests/java/com/asterion/control/BrowserDownloadContractTest.java
           java -cp /tmp/asterion-browser-atomic-classes com.asterion.control.BrowserDownloadContractTest
+      - name: Execute isolated Tor address and VPN route policy
+        run: |
+          javac -encoding UTF-8 -cp /tmp/asterion-browser-atomic-classes -d /tmp/asterion-browser-atomic-classes \
+            android/app/src/main/java/com/asterion/control/VpnRouteScope.java \
+            tests/java/com/asterion/control/TorAddressPolicyTest.java
+          java -cp /tmp/asterion-browser-atomic-classes com.asterion.control.TorAddressPolicyTest
   android-source-only:
     needs: browser-cache-jvm
     runs-on: ubuntu-latest
