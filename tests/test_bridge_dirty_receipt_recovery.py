@@ -54,8 +54,7 @@ class DirtyReceiptRecoveryTest(unittest.TestCase):
         self.assertEqual(json.loads(receipt.read_text()),complete)
         self.assertEqual(git(self.worker,'status','--porcelain'),'')
         self.assertTrue((self.worker/'commands'/'active'/'new-job.json').exists())
-        self.assertEqual(json.loads((self.base/'receipt-recovery'/next(
-            (self.base/'receipt-recovery').iterdir()).name).read_text()),complete)
+        self.assertFalse((self.base/'receipt-recovery').exists())
         git(self.publisher,'pull','--ff-only')
         self.assertEqual(json.loads((self.publisher/'results'/'test-job.json').read_text()),complete)
 
@@ -198,10 +197,46 @@ class DirtyReceiptRecoveryTest(unittest.TestCase):
             bridge.publish([Path('results/test-job.json')])
         self.assertFalse((self.worker/'.git'/'rebase-merge').exists())
         self.assertEqual(json.loads(local.read_text())['status'],'error')
-        recovered=list((self.base/'receipt-recovery').glob('test-job-*.json'))
-        self.assertTrue(any(p.read_bytes()==original for p in recovered))
+        refs=git(self.worker,'for-each-ref','--format=%(refname)','refs/asterion-recovery/unpublished-').splitlines()
+        self.assertTrue(any(subprocess.run(['git','show',ref+':results/test-job.json'],
+            cwd=self.worker,check=True,capture_output=True).stdout==original for ref in refs))
+        self.assertFalse((self.base/'receipt-recovery').exists())
         self.assertEqual(git(self.worker,'status','--porcelain'),'')
 
+    def test_normal_publish_is_fast_forward_without_recovery_copy(self):
+        result=self.worker/'results'/'ordinary-receipt.json'
+        result.write_text(json.dumps({'id':'ordinary-receipt','status':'complete','ok':True}))
+        with patch.object(bridge,'ROOT',self.worker), patch.object(
+            bridge,'_compact_unpublished_receipts',side_effect=AssertionError('unexpected compaction')):
+            bridge.publish([Path('results/ordinary-receipt.json')])
+        self.assertFalse((self.base/'receipt-recovery').exists())
+        git(self.publisher,'pull','--ff-only')
+        self.assertTrue((self.publisher/'results'/'ordinary-receipt.json').is_file())
+
+    def test_failed_tree_creation_leaves_original_receipts_and_head_intact(self):
+        receipt=self.worker/'results'/'test-job.json'
+        receipt.write_text(json.dumps({'id':'test-job','status':'complete','ok':True}))
+        git(self.worker,'add','results')
+        git(self.worker,'commit','-m','Local result')
+        old=git(self.worker,'rev-parse','HEAD')
+        (self.publisher/'notes.txt').write_text('remote update')
+        git(self.publisher,'add','notes.txt')
+        git(self.publisher,'commit','-m','Concurrent writer')
+        git(self.publisher,'push')
+        actual=bridge.git
+        def fail_write(*args,**kwargs):
+            if args[0]=='write-tree':raise RuntimeError('simulated interrupted tree creation')
+            return actual(*args,**kwargs)
+        with patch.object(bridge,'ROOT',self.worker):
+            with patch.object(bridge,'git',side_effect=fail_write):
+                with self.assertRaisesRegex(RuntimeError,'simulated interrupted'):
+                    bridge.sync_remote()
+            self.assertEqual(git(self.worker,'rev-parse','HEAD'),old)
+            self.assertEqual(json.loads(receipt.read_text())['status'],'complete')
+            bridge.sync_remote()
+        self.assertFalse((self.worker/'.git'/'asterion-reconcile-index').exists())
+        self.assertFalse((self.base/'receipt-recovery').exists())
+        self.assertEqual(git(self.worker,'status','--porcelain'),'')
 
 
 if __name__=='__main__':

@@ -133,8 +133,11 @@ def reconcile_jobs(key,pending):
                 write_result(identity,dict(receipt,ok=False,status='uncertain',
                     error='Agent restarted and lost job state; inspect saved build artifacts'))
                 continue
-            raise
-        if job.get('status')!='finished':continue
+            # A transient query failure for an old job must not starve fresh
+            # commands. Keep its accepted receipt and revisit on rotation.
+            print('Native job reconciliation deferred:',type(exc).__name__,flush=True)
+            continue
+        if not isinstance(job,dict) or job.get('status')!='finished':continue
         code=job.get('exit_code')
         good=code==0
         write_result(identity,dict(receipt,ok=good,
@@ -143,9 +146,9 @@ def reconcile_jobs(key,pending):
                     'output_tail':str(job.get('output',''))[-1600:]},
             error='' if good else 'Native Control command exited unsuccessfully'))
 
-def git(*args,timeout=60):
+def git(*args,timeout=60,env=None):
     p=subprocess.run(['git',*args],cwd=ROOT if ROOT.is_dir() else None,
-        text=True,capture_output=True,timeout=timeout,check=False)
+        text=True,capture_output=True,timeout=timeout,check=False,env=env)
     if p.returncode:
         raise RuntimeError('Git transport error '+str(p.returncode)+': '+(p.stderr or p.stdout)[-450:])
     return p.stdout.strip()
@@ -185,23 +188,8 @@ def preserve_dirty_receipts():
             raise RuntimeError('Invalid local result; left untouched: '+path) from exc
         candidates.append((path,candidate))
     if not candidates:return 0
-    # Back up every exact receipt outside the Git worktree before staging.
-    # Backups are content-addressed and never overwritten or pushed.
-    import hashlib
-    backup=ROOT.parent/'receipt-recovery'
-    backup.mkdir(parents=True,exist_ok=True)
-    for path,candidate in candidates:
-        content=candidate.read_bytes()
-        name=candidate.stem+'-'+hashlib.sha256(content).hexdigest()+'.json'
-        destination=backup/name
-        try:
-            with destination.open('xb') as stream:
-                stream.write(content)
-                stream.flush()
-                os.fsync(stream.fileno())
-        except FileExistsError:
-            if destination.read_bytes()!=content:
-                raise RuntimeError('Receipt recovery backup mismatch: '+path)
+    # The existing Git object store is the durable journal. Do not duplicate
+    # receipts into an extra PC directory; commit before moving any ref.
     git('add','--',*[path for path,_ in candidates])
     git('-c','user.name=Asterion Control',
         '-c','user.email=asterion-control@users.noreply.github.com',
@@ -229,51 +217,36 @@ def recover_interrupted_rebase():
 
 
 def _compact_unpublished_receipts():
-    """Rebuild the bridge from remote while preserving every local receipt.
+    """Reconcile divergent receipt commits using the existing Git object store.
 
-    Rebase can repeatedly conflict when other writers publish receipts for the
-    same job IDs. Never replay commands: save local commits and exact receipt
-    bytes before moving HEAD, then restore only receipts missing remotely or
-    newer terminal states over remote nonterminal states.
+    Create the complete replacement tree and commit BEFORE moving the worktree.
+    The original commit remains under a recovery ref. No external receipt
+    directory, checkout, or backup repository is created.
     """
-    import hashlib
     original=git('rev-parse','HEAD')
+    remote=git('rev-parse','origin/main')
     git('update-ref','refs/asterion-recovery/unpublished-'+original[:16],original)
     changes=sorted(set(p.strip() for p in
-        git('log','--format=','--name-only','origin/main..HEAD').splitlines()
+        git('log','--format=','--name-only',remote+'..'+original).splitlines()
         if p.strip()))
     if not changes or any(not p.startswith('results/') or
                           not p.endswith('.json') or
                           not NAME.fullmatch(Path(p).stem) for p in changes):
         raise RuntimeError('Unpublished non-receipt commit; refusing worktree reset')
-    backup=ROOT.parent/'receipt-recovery'
-    backup.mkdir(parents=True,exist_ok=True)
-    restore={}
     terminal={'complete','error','uncertain','failed','skipped'}
+    restore={}
     for relative in changes:
         path=ROOT/relative
         if not path.is_file():
             raise RuntimeError('Unpublished receipt missing; refusing reset: '+relative)
-        raw=path.read_bytes()
         try:
-            local=json.loads(raw)
+            local=json.loads(path.read_bytes())
             if not isinstance(local,dict) or local.get('id')!=path.stem or not isinstance(local.get('status'),str):
                 raise ValueError('Receipt id/status invalid')
         except (ValueError,TypeError,UnicodeDecodeError) as exc:
             raise RuntimeError('Invalid unpublished receipt; refusing reset: '+relative) from exc
-        destination=backup/(path.stem+'-'+hashlib.sha256(raw).hexdigest()+'.json')
-        try:
-            with destination.open('xb') as out:
-                out.write(raw)
-                out.flush()
-                os.fsync(out.fileno())
-        except FileExistsError:
-            if destination.read_bytes()!=raw:
-                raise RuntimeError('Receipt backup hash mismatch: '+relative)
-        remote_exists=(git('ls-tree','-r','--name-only','origin/main',
-                           '--',relative)==relative)
-        if remote_exists:
-            published=subprocess.run(['git','show','origin/main:'+relative],
+        if git('ls-tree','-r','--name-only',remote,'--',relative)==relative:
+            published=subprocess.run(['git','show',remote+':'+relative],
                               cwd=ROOT,check=True,capture_output=True,timeout=30).stdout
             try:
                 existing=json.loads(published)
@@ -281,23 +254,31 @@ def _compact_unpublished_receipts():
                     raise ValueError('Remote receipt identity mismatch')
             except (ValueError,UnicodeDecodeError) as exc:
                 raise RuntimeError('Invalid remote receipt; refusing reset: '+relative) from exc
-            # A published terminal receipt is authoritative. Otherwise a
-            # locally completed result upgrades an old accepted/running one.
             if existing.get('status') in terminal or local['status'] not in terminal:
                 continue
-        restore[relative]=raw
-    # Local history and individual receipts are now independently recoverable.
-    git('reset','--hard','origin/main')
-    for relative,raw in restore.items():
-        target=ROOT/relative
-        target.parent.mkdir(parents=True,exist_ok=True)
-        target.write_bytes(raw)
-    if restore:
-        git('add','--',*sorted(restore))
-        if git('diff','--cached','--name-only'):
-            git('-c','user.name=Asterion Control',
+        restore[relative]=git('rev-parse',original+':'+relative)
+    # Use one transient index INSIDE the existing Git metadata. Its contents
+    # are reconstructable; an interrupted run leaves HEAD and receipts intact.
+    index=Path(git('rev-parse','--absolute-git-dir'))/'asterion-reconcile-index'
+    env=dict(os.environ,GIT_INDEX_FILE=str(index))
+    try:
+        index.unlink(missing_ok=True)
+        index.with_name(index.name+'.lock').unlink(missing_ok=True)
+        git('read-tree',remote,env=env)
+        for relative,blob in restore.items():
+            git('update-index','--add','--cacheinfo','100644,'+blob+','+relative,env=env)
+        tree=git('write-tree',env=env)
+        if tree==git('rev-parse',remote+'^{tree}'):
+            replacement=remote
+        else:
+            replacement=git('-c','user.name=Asterion Control',
                 '-c','user.email=asterion-control@users.noreply.github.com',
-                'commit','--quiet','-m','Restore preserved local Control result receipts')
+                'commit-tree',tree,'-p',remote,'-m','Reconcile preserved Control receipts',env=env)
+        # Commit and original recovery ref are both durable before reset.
+        git('reset','--hard',replacement)
+    finally:
+        index.unlink(missing_ok=True)
+        index.with_name(index.name+'.lock').unlink(missing_ok=True)
     return len(restore)
 
 
@@ -311,9 +292,12 @@ def sync_remote():
         if not unpublished:
             git('merge','--ff-only','origin/main')
             return
-        _compact_unpublished_receipts()
-        if int(git('rev-list','--count','origin/main..HEAD'))==0:
-            return
+        # Normal publishing is a fast-forward. Only reconcile if another
+        # project actually advanced the remote after our base snapshot.
+        if int(git('rev-list','--count','HEAD..origin/main')):
+            _compact_unpublished_receipts()
+            if int(git('rev-list','--count','origin/main..HEAD'))==0:
+                return
         try:
             git('push','--quiet','origin','HEAD:main')
             return
@@ -414,8 +398,11 @@ def pending_in(folder):
     results=ROOT/'results'
     results.mkdir(exist_ok=True)
     if not folder.is_dir():return []
+    # One directory enumeration rather than a separate filesystem existence
+    # lookup for every historical command. Durable receipts still gate replay.
+    recorded={p.name for p in results.glob('*.json')}
     return [p for p in sorted(folder.glob('*.json'))
-            if NAME.fullmatch(p.stem) and not (results/p.name).exists()]
+            if NAME.fullmatch(p.stem) and p.name not in recorded]
 
 def entries():
     """Explicit active queue survives first-start legacy-command migration.

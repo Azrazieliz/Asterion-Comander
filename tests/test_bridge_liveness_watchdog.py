@@ -150,3 +150,18 @@ def test_venv_launcher_delayed_child_is_one_logical_relay():
     assert "$bridge.ProcessId -contains $_.ParentProcessId" in WATCHDOG
     assert "$bridge=@($child[0])" in WATCHDOG
     assert "$bridge.Count -gt 1" in WATCHDOG  # Still reject independent relays
+
+
+def test_old_job_status_failure_does_not_starve_new_requests(tmp_path,monkeypatch):
+    prepare(tmp_path,monkeypatch)
+    results=tmp_path/'results'; results.mkdir()
+    (results/'old-job.json').write_text(json.dumps({'id':'old-job','status':'accepted','result':{'id':'a'*32}}))
+    command=tmp_path/'commands'/'active'/'new-job.json'
+    command.write_text(json.dumps({'id':'new-job','op':'pc_status','params':{}}))
+    def run(task,key):
+        if task['op']=='pc_job_status':raise TimeoutError('temporary native job failure')
+        return {'ok':True}
+    monkeypatch.setattr(worker,'run',run)
+    assert worker.cycle('redacted')==1
+    assert json.loads((results/'new-job.json').read_text())['status']=='complete'
+    assert json.loads((results/'old-job.json').read_text())['status']=='accepted'
