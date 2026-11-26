@@ -11,3 +11,7 @@
 
 # JNI invokes these callbacks by exact name; preserve them in owner release.
 -keep class com.asterion.control.OnDeviceLlm$NativeStream { public void onStart(boolean,int,int); public void onToken(byte[]); }
+
+# Preserve JNI binary names with R8 9.1.
+-dontrepackage
+-keep class org.torproject.jni.TorService { *; }

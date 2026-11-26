@@ -94,14 +94,14 @@ jobs:
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.13'
-      - name: Ensure Android 35 platform
+          gradle-version: '9.3.1'
+      - name: Ensure Android 37 platform
         run: |
           SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
-          if [ ! -f "$SDK/platforms/android-35/android.jar" ]; then
-            yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" 'platforms;android-35' || true
+          if [ ! -f "$SDK/platforms/android-37/android.jar" ]; then
+            yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" 'platforms;android-37' || true
           fi
-          test -s "$SDK/platforms/android-35/android.jar"
+          test -s "$SDK/platforms/android-37/android.jar"
       - name: Integrate Browser Java compilation without APK creation or installation
         working-directory: android
         run: gradle --no-daemon --console=plain :app:compileDebugJavaWithJavac
