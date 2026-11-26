@@ -17,6 +17,7 @@ import ssl
 import threading
 import time
 from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlsplit, urlunsplit
@@ -38,6 +39,12 @@ _last_request: dict[str, float] = {}
 
 class CaptureRequest(BaseModel):
     url: str = Field(min_length=8, max_length=2048)
+    text_limit: int = Field(default=20_000, ge=1000, le=50_000)
+
+
+class ResearchRequest(BaseModel):
+    urls: list[str] = Field(min_length=1, max_length=4)
+    terms: list[str] = Field(default_factory=list, max_length=12)
     text_limit: int = Field(default=20_000, ge=1000, le=50_000)
 
 
@@ -84,7 +91,9 @@ def validated_public_https(url: str) -> tuple[str, str, str]:
     except OSError as exc:
         raise HTTPException(502, "Public website DNS lookup failed") from exc
     resolved = [row[4][0] for row in addresses]
-    if not resolved or any(not ipaddress.ip_address(ip).is_global for ip in resolved):
+    if not resolved or any(not ipaddress.ip_address(ip).is_global or
+                           ipaddress.ip_address(ip).is_multicast or
+                           ipaddress.ip_address(ip).is_reserved for ip in resolved):
         raise HTTPException(403, "Private, reserved or mixed-address hosts are not crawlable")
     path = urlunsplit(("", "", parsed.path or "/", parsed.query, ""))
     return host, resolved[0], path
@@ -136,9 +145,11 @@ class _Extract(HTMLParser):
         self._skip = 0
 
     def handle_starttag(self, tag, attrs):
-        attrs = dict(attrs)
+        attrs = {key: value or "" for key, value in attrs}
         if tag in ("script", "style", "noscript", "template"):
             self._skip += 1
+            return
+        if self._skip:
             return
         if tag == "title":
             self._title = True
@@ -160,6 +171,8 @@ class _Extract(HTMLParser):
     def handle_endtag(self, tag):
         if tag in ("script", "style", "noscript", "template"):
             self._skip = max(0, self._skip - 1)
+        if self._skip:
+            return
         if tag == "title":
             self._title = False
 
@@ -197,6 +210,8 @@ def capture_public(url: str, text_limit: int = 20_000) -> dict:
     redirects = 0
     for _ in range(5):
         validated_public_https(url)
+        parts = urlsplit(url)
+        url = urlunsplit((parts.scheme.lower(), parts.netloc, parts.path or "/", parts.query, ""))
         if url in visited:
             raise HTTPException(409, "Website redirect loop")
         visited.add(url)
@@ -250,6 +265,7 @@ def capture_public(url: str, text_limit: int = 20_000) -> dict:
             "published_claim": extraction.published,
             "content_sha256": hashlib.sha256(fetched.content).hexdigest(),
             "extraction_method": "htmlparser_visible_text_v1",
+            "extraction_limit": "static HTML text approximation; CSS visibility not evaluated",
             "identity_authenticated": False,
             "provenance": "observed_http_content_not_verified_truth",
         }
@@ -259,3 +275,87 @@ def capture_public(url: str, text_limit: int = 20_000) -> dict:
 @router.post("/capture")
 def public_capture(req: CaptureRequest):
     return capture_public(req.url, req.text_limit)
+
+
+def _source_excerpt(text: str, terms: list[str]) -> list[dict]:
+    """Offsets refer to the bounded extracted text, never invented paraphrases."""
+    excerpts = []
+    for term in terms:
+        match = re.search(re.escape(term), text, flags=re.IGNORECASE)
+        if match is None:
+            continue
+        start = max(0, match.start() - 150)
+        end = min(len(text), match.end() + 150)
+        excerpts.append({"term": term, "start": start, "end": end,
+                         "quote": text[start:end]})
+    return excerpts
+
+
+def research_sources(urls: list[str], terms: list[str], text_limit: int = 20_000) -> dict:
+    """Compare only actually captured sources, with independent failures and citations.
+
+    No search-engine scraping, unrestricted crawling, credentialed requests,
+    automatic assertion of truth, or additional browser engine.
+    """
+    if not 1 <= len(urls) <= 4 or not 1000 <= text_limit <= 50_000:
+        raise HTTPException(422, "Research batch limits exceeded")
+    if len(terms) > 12:
+        raise HTTPException(422, "Too many comparison terms")
+    cleaned = []
+    for value in terms:
+        value = value.strip()
+        if not value or len(value) > 120 or any(ord(c) < 32 for c in value):
+            raise HTTPException(422, "Invalid comparison term")
+        if value.casefold() not in {term.casefold() for term in cleaned}:
+            cleaned.append(value)
+    unique = []
+    for url in urls:
+        if not isinstance(url, str) or not 8 <= len(url) <= 2048:
+            raise HTTPException(422, "Invalid source URL")
+        try:
+            parts = urlsplit(url)
+            key = urlunsplit((parts.scheme.lower(), parts.netloc, parts.path or "/", parts.query, ""))
+        except ValueError as exc:
+            raise HTTPException(422, "Malformed source URL") from exc
+        if key not in unique:
+            unique.append(key)
+    results = [None] * len(unique)
+    with ThreadPoolExecutor(max_workers=min(3, len(unique))) as pool:
+        pending = {pool.submit(capture_public, url, text_limit): i
+                   for i, url in enumerate(unique)}
+        for future in as_completed(pending):
+            i = pending[future]
+            citation = "S" + str(i + 1)
+            try:
+                captured = future.result()
+                captured["citation_id"] = citation
+                captured["excerpts"] = _source_excerpt(captured["text"], cleaned)
+                results[i] = captured
+            except HTTPException as exc:
+                results[i] = {"ok": False, "citation_id": citation,
+                              "original_url": unique[i], "error_code": exc.status_code,
+                              "reason": str(exc.detail)[:200]}
+            except Exception as exc:
+                results[i] = {"ok": False, "citation_id": citation,
+                              "original_url": unique[i], "error_code": 502,
+                              "reason": "Capture failed: " + type(exc).__name__}
+    successful = [item for item in results if item["ok"]]
+    comparisons = []
+    for term in cleaned:
+        matches = [item["citation_id"] for item in successful
+                   if any(excerpt["term"] == term for excerpt in item["excerpts"])]
+        comparisons.append({"term": term, "matching_citations": matches,
+                            "captured_sources_without_match": [
+                                item["citation_id"] for item in successful
+                                if item["citation_id"] not in matches],
+                            "failed_sources": [item["citation_id"] for item in results
+                                               if not item["ok"]]})
+    return {"ok": bool(successful), "requested": len(urls), "unique": len(unique),
+            "captured": len(successful), "sources": results,
+            "comparison": comparisons,
+            "scope": "literal term matches in bounded static captures, not claim verification"}
+
+
+@router.post("/research")
+def public_research(req: ResearchRequest):
+    return research_sources(req.urls, req.terms, req.text_limit)
