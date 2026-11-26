@@ -5,6 +5,7 @@ on:
       - fix/control-browser-atomic-filter-cache-20261126
       - work/control-non-ai-browser-20261126
       - work/control-non-ai-browser-permissions-20261126
+      - work/control-non-ai-download-integration-20261126
       - work/control-native-ai-reconstruction-20261126
     paths:
       - 'android/app/src/main/java/com/asterion/control/Browser*.java'
@@ -58,6 +59,12 @@ jobs:
             tests/java/com/asterion/control/BrowserNavigationPolicyTest.java
           java -cp /tmp/asterion-browser-atomic-classes \
             com.asterion.control.BrowserNavigationPolicyTest
+      - name: Execute signed transfer contract regressions
+        run: |
+          javac -encoding UTF-8 -cp /tmp/asterion-browser-atomic-classes -d /tmp/asterion-browser-atomic-classes \
+            android/app/src/main/java/com/asterion/control/BrowserDownloadContract.java \
+            tests/java/com/asterion/control/BrowserDownloadContractTest.java
+          java -cp /tmp/asterion-browser-atomic-classes com.asterion.control.BrowserDownloadContractTest
   android-source-only:
     needs: browser-cache-jvm
     runs-on: ubuntu-latest
