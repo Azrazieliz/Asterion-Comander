@@ -18,6 +18,11 @@ import sys
 import time
 from urllib.parse import urlsplit
 
+# Executable from an isolated checkout without installing a second Python app.
+_SOURCE_ROOT=Path(__file__).resolve().parents[1]
+if str(_SOURCE_ROOT) not in sys.path:
+    sys.path.insert(0,str(_SOURCE_ROOT))
+
 from asterion_remote import overnight_supervisor
 from asterion_remote.isolated_test_runner import IsolatedContainerTests
 from asterion_remote.local_model_provider import LocalModelConfig
