@@ -855,6 +855,8 @@ public final class MainActivity extends Activity {
       button(controls,"Advanced WireGuard peer settings","settings",false,()->{
         close.run();showVpnImportType();
       });
+      gap(controls,10);
+      button(controls,"Tor network","shield",false,()->{close.run();ControlTorRoute.panel(this);});
       wide(content,controls);gap(content,12);
       wide(content,t(
         "Cloudflare WARP is an external provider with its own terms. "+
