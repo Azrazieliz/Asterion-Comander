@@ -109,8 +109,9 @@ final class OnDeviceAiJobs {
         String id=request.getString("request_id");
         String prompt=request.getString("prompt");
         validate(id);
-        if(prompt.isBlank()||prompt.length()>1800)
-            throw new IllegalArgumentException("Native model prompt must be 1..1800 characters");
+        int maxInputChars=OnDeviceModelProfile.read(ctx).inputChars;
+        if(prompt.isBlank()||prompt.length()>maxInputChars)
+            throw new IllegalArgumentException("Native model prompt violates signed model input budget");
         String digest=sha(prompt);
         synchronized(LOCK){
             Job current=jobs.get(id);
