@@ -73,7 +73,7 @@ public final class BrowserActivity extends Activity {
             try{
                 if(activeBrowser!=browser)return;
                 BrowserTab tab=browser.current();
-                if(tab==null||tab.web.getParent()!=browser.viewport||!BrowserNavigationPolicy.sameDocument(tab.committedUrl,tab.web.getUrl())||tab.web.getCertificate()==null)return;
+                if(tab==null||tab.privateProfile!=null||tab.web.getParent()!=browser.viewport||!BrowserNavigationPolicy.sameDocument(tab.committedUrl,tab.web.getUrl())||tab.web.getCertificate()==null)return;
                 value[0]=ControlPasswordVault.exactOrigin(tab.committedUrl);
             }catch(Exception invalid){value[0]=null;}
         };
@@ -163,7 +163,7 @@ public final class BrowserActivity extends Activity {
             if(!isFinishing()&&status!=null)refreshToolbar();
         });
         // The WebView suffix is process-global; recreating this Activity must not reset it.
-        if(!webDirectoryConfigured){WebView.setDataDirectorySuffix("asterion_browser");webDirectoryConfigured=true;}
+        if(!webDirectoryConfigured){WebView.setDataDirectorySuffix("asterion_browser");webDirectoryConfigured=true;BrowserPrivateProfiles.cleanPreviousProcess();}
         boolean dark=(getResources().getConfiguration().uiMode &
             android.content.res.Configuration.UI_MODE_NIGHT_MASK)==android.content.res.Configuration.UI_MODE_NIGHT_YES;
         getWindow().setStatusBarColor(Color.TRANSPARENT);getWindow().setNavigationBarColor(Color.TRANSPARENT);
@@ -195,6 +195,7 @@ public final class BrowserActivity extends Activity {
         site=control("Site",this::showSiteInfo);site.setMinWidth(dp(48));site.setPadding(dp(5),0,dp(5),0);
         search.addView(site,new LinearLayout.LayoutParams(dp(54),dp(48)));
         address=new EditText(this);address.setSingleLine(true);address.setTextSize(15);
+        address.setSaveEnabled(false);address.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
         address.setTextColor(DesignSystem.TEXT);address.setHintTextColor(DesignSystem.MUTED);
         address.setHint("Search with "+providerName()+" or enter URL");address.setContentDescription("Address and search");
         address.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_URI);
@@ -252,14 +253,26 @@ public final class BrowserActivity extends Activity {
         addTab(START);
         showTab(tabs.size()-1);
     }
-    private void addTab(String url){addTab(url,true);}
-    private void addTab(String url,boolean load) {
+    private void newPrivateTab(){
+        if(tabs.size()>=MAX_TABS){notice("Close a tab first");return;}
+        if(!BrowserPrivateProfiles.supported()){notice("This WebView cannot isolate and clear private profiles");return;}
+        try{addTab(START,true,BrowserPrivateProfiles.newName());showTab(tabs.size()-1);}
+        catch(RuntimeException failure){notice("Private profile could not be opened");}
+    }
+    private void addTab(String url){addTab(url,true,null);}
+    private void addTab(String url,boolean load,String privateProfile) {
         WebView view = new WebView(this);
+        if(privateProfile!=null){
+            try{BrowserPrivateProfiles.attach(view,privateProfile);}
+            catch(RuntimeException failure){view.destroy();throw failure;}
+            view.setSaveEnabled(false);view.setSaveFromParentEnabled(false);
+            view.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
+        }
         view.setBackgroundColor(Color.WHITE);
         WebSettings s = view.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
-        s.setGeolocationEnabled(true);
+        s.setGeolocationEnabled(privateProfile==null);
         s.setAllowFileAccess(false);
         s.setAllowContentAccess(false);
         s.setJavaScriptCanOpenWindowsAutomatically(false);
@@ -268,7 +281,7 @@ public final class BrowserActivity extends Activity {
         if(Build.VERSION.SDK_INT >= 26) s.setSafeBrowsingEnabled(true);
         s.setBuiltInZoomControls(true);
         s.setDisplayZoomControls(false);
-        BrowserTab tab = new BrowserTab(view);
+        BrowserTab tab = new BrowserTab(view,privateProfile);
         tab.pageUrl=url;
         view.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView web, WebResourceRequest request) {
@@ -326,8 +339,7 @@ public final class BrowserActivity extends Activity {
                 if(!tabs.contains(tab)||!url.equals(web.getUrl()))return;
                 tab.pageUrl=url;
                 protection.applyCosmetic(web,url);
-                CookieManager.getInstance().flush();
-                rememberPage(url,tab.title);
+                if(tab.privateProfile==null){CookieManager.getInstance().flush();rememberPage(url,tab.title);}
                 if(current()==tab) refreshToolbar();
                 refreshTabs();persistTabs();
             }
@@ -341,7 +353,7 @@ public final class BrowserActivity extends Activity {
                     return false;
                 }
                 if(!(resultMsg.obj instanceof WebView.WebViewTransport))return false;
-                addTab(START,false);
+                try{addTab(START,false,tab.privateProfile);}catch(RuntimeException failure){notice("New window unavailable");return false;}
                 BrowserTab child=tabs.get(tabs.size()-1);
                 child.popup=true;
                 ((WebView.WebViewTransport)resultMsg.obj).setWebView(child.web);
@@ -373,8 +385,9 @@ public final class BrowserActivity extends Activity {
                 refreshTabs();
             }
         });
-        view.setDownloadListener((address,agent,disposition,type,size) ->
-            confirmDownload(address,agent,disposition,type,size));
+        view.setDownloadListener((address,agent,disposition,type,size) -> {
+            if(current()==tab&&tab.web.getParent()==viewport)confirmDownload(address,agent,disposition,type,size,tab.privateProfile!=null);
+        });
         tabs.add(tab);
         if(load)view.loadUrl(url);
     }
@@ -408,7 +421,7 @@ public final class BrowserActivity extends Activity {
         viewport.removeView(old.web);
         tabs.remove(index);
         old.web.stopLoading();
-        old.web.destroy();
+        old.web.destroy();releasePrivate(old);
         if(tabs.isEmpty()) { active=-1; newTab(); return; }
         if(index<active) active--;
         else if(index==active) active=Math.min(index,tabs.size()-1);
@@ -423,10 +436,11 @@ public final class BrowserActivity extends Activity {
         LinearLayout list=DesignSystem.vertical(this);list.setPadding(dp(12),dp(8),dp(12),dp(8));
         ScrollView scroll=new ScrollView(this);scroll.addView(list);
         AlertDialog dialog=new AlertDialog.Builder(this).setTitle(tabs.size()==1?"1 tab":tabs.size()+" tabs")
-            .setView(scroll).setPositiveButton("New tab",(d,w)->newTab()).setNegativeButton("Close",null).create();
+            .setView(scroll).setPositiveButton("New tab",(d,w)->newTab())
+            .setNeutralButton("Private tab",(d,w)->newPrivateTab()).setNegativeButton("Close",null).create();
         for(int i=0;i<tabs.size();i++){
             final int index=i;BrowserTab tab=tabs.get(i);LinearLayout row=DesignSystem.horizontal(this);
-            TextView title=label((i==active?"●  ":"")+tab.title,15,DesignSystem.TEXT,true);
+            TextView title=label((i==active?"●  ":"")+(tab.privateProfile!=null?"Private · ":"")+tab.title,15,DesignSystem.TEXT,true);
             title.setMaxLines(2);title.setEllipsize(android.text.TextUtils.TruncateAt.END);
             title.setMinHeight(dp(56));title.setGravity(Gravity.CENTER_VERTICAL);title.setPadding(dp(10),0,dp(8),0);
             title.setOnClickListener(v->{dialog.dismiss();showTab(index);});row.addView(title,new LinearLayout.LayoutParams(0,-2,1));
@@ -448,14 +462,15 @@ public final class BrowserActivity extends Activity {
         String url=tab.pageUrl;
         address.setHint("Search with "+providerName()+" or enter URL");
         if(url!=null && !address.hasFocus()) address.setText(START.equals(url)?"":url);
-        site.setText(START.equals(url)?"Site":("https".equalsIgnoreCase(Uri.parse(url).getScheme())?"HTTPS":"HTTP"));
+        site.setText(tab.privateProfile!=null?"Private":(START.equals(url)?"Site":("https".equalsIgnoreCase(Uri.parse(url).getScheme())?"HTTPS":"HTTP")));
         site.setContentDescription("Site information and protection");
         back.setEnabled(tab.web.canGoBack());
         forward.setEnabled(tab.web.canGoForward());
         back.setAlpha(tab.web.canGoBack()?1f:0.4f);
         forward.setAlpha(tab.web.canGoForward()?1f:0.4f);
         if(url!=null) {
-            if(START.equals(url)){
+            if(tab.privateProfile!=null){status.setText("Isolated private profile · "+tab.blocked.get()+" requests blocked");}
+            else if(START.equals(url)){
                 status.setText("Asterion home • "+providerName()+" search • "+
                     (protection.isEnabled()?"Shields enabled":"Shields disabled"));
             }else try {
@@ -587,7 +602,7 @@ public final class BrowserActivity extends Activity {
         builder.show();
     }
 
-    private void confirmDownload(String url, String agent, String disposition, String mime, long length) {
+    private void confirmDownload(String url, String agent, String disposition, String mime, long length,boolean privateDownload) {
         Uri uri;
         try {
             uri=Uri.parse(url);
@@ -596,10 +611,10 @@ public final class BrowserActivity extends Activity {
         } catch(Exception bad) { notice("Download URL is not supported"); return; }
         String host=uri.getHost()==null?"website":uri.getHost();
         String size=length>0?(" • "+(length/1024)+" KB"):"";
-        new AlertDialog.Builder(this)
+        AlertDialog.Builder downloadDialog=new AlertDialog.Builder(this)
             .setTitle("Save download?")
             .setMessage(host+" • "+(mime==null?"unknown type":mime)+size+
-                "\n\nAndroid Download Manager will save this file.")
+                "\n\nAndroid Download Manager will save this file."+(privateDownload?" This file and its download record remain outside the private profile; no private cookies are transferred.":""))
             .setPositiveButton("Save", (dialog,which)->{
                 try {
                     DownloadManager.Request req=new DownloadManager.Request(uri);
@@ -612,17 +627,17 @@ public final class BrowserActivity extends Activity {
                         DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
                     if(mime!=null&&!mime.isBlank()) req.setMimeType(mime);
                     if(agent!=null&&!agent.isBlank())req.addRequestHeader("User-Agent",agent);
-                    String cookie=CookieManager.getInstance().getCookie(url);
+                    String cookie=privateDownload?null:CookieManager.getInstance().getCookie(url);
                     if(cookie!=null&&!cookie.isBlank())req.addRequestHeader("Cookie",cookie);
                     DownloadManager manager=(DownloadManager)getSystemService(DOWNLOAD_SERVICE);
                     if(manager==null)throw new IllegalStateException("Android download service unavailable");
                     long downloadId=manager.enqueue(req);
-                    rememberDownload(downloadId,host);
+                    if(!privateDownload)rememberDownload(downloadId,host);
                     notice("Download queued in Android Downloads");
                 }catch(Exception e){notice("Download failed: "+e.getClass().getSimpleName());}
-            }).setNeutralButton("Downloader", (dialog,which)->
-                sendToSpecialistDownloader(url))
-              .setNegativeButton("Cancel", null).show();
+            }).setNegativeButton("Cancel", null);
+        if(!privateDownload)downloadDialog.setNeutralButton("Downloader",(dialog,which)->sendToSpecialistDownloader(url));
+        downloadDialog.show();
     }
     private void sendToSpecialistDownloader(String url){
         // B06 delegates to the original signed Downloader/Nexus engine.
@@ -782,7 +797,7 @@ public final class BrowserActivity extends Activity {
             "Home","Search engine • "+providerName(),
             "Shields and trackers","Encrypted vault",
             "Bookmarks and history","Extract page evidence",
-            "Android downloads","Desktop site","Asterion assistant"};
+            "Android downloads","Desktop site","Asterion assistant","New private tab"};
         new AlertDialog.Builder(this).setTitle("Asterion Browser")
             .setItems(actions,(d,choice)->{
                 switch(choice){
@@ -807,6 +822,7 @@ public final class BrowserActivity extends Activity {
                         break;
                     }
                     case 8:startActivity(new Intent(this,AssistantActivity.class));break;
+                    case 9:newPrivateTab();break;
                 }
             }).setNegativeButton("Close",null).show();
     }
@@ -816,7 +832,8 @@ public final class BrowserActivity extends Activity {
         LinearLayout heading=DesignSystem.horizontal(this);
         DesignSystem.AsterionMark mark=new DesignSystem.AsterionMark(this);
         heading.addView(mark,new LinearLayout.LayoutParams(dp(38),dp(38)));
-        TextView title=label("Asterion Browser",22,DesignSystem.TEXT,true);title.setPadding(dp(12),0,0,0);
+        boolean privateHome=current()!=null&&current().privateProfile!=null;
+        TextView title=label(privateHome?"Private browsing":"Asterion Browser",22,DesignSystem.TEXT,true);title.setPadding(dp(12),0,0,0);
         heading.addView(title,new LinearLayout.LayoutParams(0,-2,1));add(body,heading);
         TextView search=control("Search with "+providerName(),()->{
             address.requestFocus();
@@ -824,8 +841,12 @@ public final class BrowserActivity extends Activity {
             if(keyboard!=null)keyboard.showSoftInput(address,android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
         });
         LinearLayout.LayoutParams searchLp=new LinearLayout.LayoutParams(-1,dp(52));searchLp.topMargin=dp(20);body.addView(search,searchLp);
-        homeSection(body,"Bookmarks","bookmarks",8);
-        homeSection(body,"Recent activity","history",5);
+        if(privateHome){
+            TextView detail=label("Separate website storage. This tab is not restored or saved in browsing history. Site data is cleared on close; after an unexpected stop, old private profiles are removed at the next Browser start. Downloads and network providers are outside this isolation.",14,DesignSystem.MUTED,false);
+            detail.setPadding(0,dp(22),0,dp(22));add(body,detail);
+        }else{
+            homeSection(body,"Bookmarks","bookmarks",8);homeSection(body,"Recent activity","history",5);
+        }
         TextView settings=control("Search engine · "+providerName(),this::chooseSearchProvider);
         add(body,settings);return scroll;
     }
@@ -865,11 +886,11 @@ public final class BrowserActivity extends Activity {
     }
     private void persistTabs(){
         JSONArray saved=new JSONArray();
-        for(BrowserTab tab:tabs)
-            saved.put(safeSessionUrl(tab.pageUrl));
+        for(BrowserTab tab:tabs)if(tab.privateProfile==null)saved.put(safeSessionUrl(tab.pageUrl));
         browserPrefs.edit().putString("tabs",saved.toString())
-            .putInt("active",active).apply();
+            .putInt("active",normalActiveIndex()).apply();
     }
+    private int normalActiveIndex(){int index=0,selected=0;for(int i=0;i<tabs.size();i++)if(tabs.get(i).privateProfile==null){if(i<=active)selected=index;index++;}return selected;}
     private void restorePersistedTabs(){
         try{
             JSONArray stored=new JSONArray(browserPrefs.getString("tabs","[]"));
@@ -913,6 +934,7 @@ public final class BrowserActivity extends Activity {
     private void bookmarkCurrent(){
         BrowserTab tab=current();
         if(tab==null)return;
+        if(tab.privateProfile!=null){notice("Private pages are not saved to the library");return;}
         saveBookmark(tab.web.getUrl(),tab.title);
     }
     private boolean saveBookmark(String raw,String title){
@@ -931,6 +953,7 @@ public final class BrowserActivity extends Activity {
         }catch(Exception error){notice("Unable to save bookmark");return false;}
     }
     private void showSavedPages(){
+        if(current()!=null&&current().privateProfile!=null){notice("Switch to a regular tab to use the browsing library");return;}
         String[] choices={"Open bookmarks","Open history","Bookmark this page",
             "Android downloads","Clear browsing history"};
         new AlertDialog.Builder(this).setTitle("Browser library")
@@ -1127,9 +1150,9 @@ public final class BrowserActivity extends Activity {
     @Override protected void onSaveInstanceState(Bundle out) {
         super.onSaveInstanceState(out);
         ArrayList<String> urls=new ArrayList<>();
-        for(BrowserTab tab:tabs) urls.add(safeSessionUrl(tab.pageUrl));
+        for(BrowserTab tab:tabs)if(tab.privateProfile==null)urls.add(safeSessionUrl(tab.pageUrl));
         out.putStringArrayList("urls",urls);
-        out.putInt("current",active);
+        out.putInt("current",normalActiveIndex());
     }
     @Override protected void onDestroy() {
         finishSiteRequest(false);
@@ -1137,10 +1160,15 @@ public final class BrowserActivity extends Activity {
             if(tab.web.getParent()!=null)
                 ((android.view.ViewGroup)tab.web.getParent()).removeView(tab.web);
             tab.web.stopLoading();
-            tab.web.destroy();
+            tab.web.destroy();releasePrivate(tab);
         }
         tabs.clear();
         super.onDestroy();
+    }
+    private void releasePrivate(BrowserTab tab){
+        if(tab.privateProfile==null)return;
+        try{BrowserPrivateProfiles.released(tab.privateProfile,()->{});}
+        catch(RuntimeException failure){if(!isFinishing())notice("Private cleanup pending next Browser process start");}
     }
     private static final class BrowserTab {
         final WebView web;
@@ -1148,10 +1176,10 @@ public final class BrowserActivity extends Activity {
         final AtomicInteger blocked=new AtomicInteger(0);
         final AtomicInteger popups=new AtomicInteger(0);
         String title="New tab";
-        final String mobileUserAgent;
+        final String mobileUserAgent,privateProfile;
         boolean desktop,popup;
         final java.util.Set<String> siteGrants=new java.util.LinkedHashSet<>();
         String committedUrl;
-        BrowserTab(WebView view){web=view;mobileUserAgent=view.getSettings().getUserAgentString();}
+        BrowserTab(WebView view,String profile){web=view;privateProfile=profile;mobileUserAgent=view.getSettings().getUserAgentString();}
     }
 }
