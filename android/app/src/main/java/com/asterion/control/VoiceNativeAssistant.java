@@ -30,7 +30,9 @@ final class VoiceNativeAssistant {
         }catch(RuntimeException failure){detach();throw failure;}
     }
     private void observe(){
-        if(callback==null||target==null||target.revision!=revision||target.running())return;
+        if(callback==null||target==null)return;
+        if(target.revision!=revision){Listener done=callback;detach();done.failed("superseded");return;}
+        if(target.running())return;
         if(target.messages.isEmpty())return;
         AssistantConversation.Message last=target.messages.get(target.messages.size()-1);
         Listener done=callback;detach();
