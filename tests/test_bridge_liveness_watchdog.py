@@ -165,3 +165,52 @@ def test_old_job_status_failure_does_not_starve_new_requests(tmp_path,monkeypatc
     assert worker.cycle('redacted')==1
     assert json.loads((results/'new-job.json').read_text())['status']=='complete'
     assert json.loads((results/'old-job.json').read_text())['status']=='accepted'
+
+
+def test_transfer_submission_reconciles_verified_file_not_queue_ack(tmp_path,monkeypatch):
+    prepare(tmp_path,monkeypatch)
+    command=tmp_path/'commands'/'active'/'transfer-job.json'
+    command.write_text(json.dumps({'id':'transfer-job','op':'phone_transfer_start',
+        'params':{'pc_path':'file.apk'}}))
+    native_id='a'*32
+    calls=[]
+    def invoke(task,key):
+        calls.append(task['op'])
+        if task['op']=='phone_transfer_start':return {'id':native_id,'status':'queued'}
+        return {'id':native_id,'state':'completed','size':7,'bytes_sent':7,
+            'result':{'verified':True,'size':7,'sha256':'b'*64,
+                'location':'Downloads/Asterion Control/file.apk','android_uri':'content://downloads/9'}}
+    monkeypatch.setattr(worker,'run',invoke)
+    assert worker.cycle('redacted')==1
+    receipt=tmp_path/'results'/'transfer-job.json'
+    assert json.loads(receipt.read_text())['status']=='accepted'
+    assert worker.cycle('redacted')==0
+    assert json.loads(receipt.read_text())['status']=='complete'
+    assert calls==['phone_transfer_start','phone_transfer_status']
+
+
+def test_unverified_transfer_is_not_reported_complete(tmp_path,monkeypatch):
+    prepare(tmp_path,monkeypatch)
+    path=tmp_path/'results'/'transfer-job.json'
+    path.parent.mkdir()
+    path.write_text(json.dumps({'id':'transfer-job','status':'accepted',
+        'operation':'phone_transfer_start','result':{'id':'a'*32}}))
+    monkeypatch.setattr(worker,'run',lambda *a:{'id':'a'*32,'state':'completed',
+        'size':7,'bytes_sent':7,'result':{'verified':False}})
+    assert worker.cycle('redacted')==0
+    assert json.loads(path.read_text())['status']=='uncertain'
+
+
+def test_native_capacity_refusal_is_distinguished_from_connectivity(tmp_path,monkeypatch):
+    import urllib.error
+    prepare(tmp_path,monkeypatch)
+    command=tmp_path/'commands'/'active'/'capacity-rejected.json'
+    command.write_text(json.dumps({'id':'capacity-rejected','op':'pc_command',
+        'params':{'command':'echo test'}}))
+    def reject(*a):raise urllib.error.HTTPError('http://127.0.0.1/',429,'capacity',{},None)
+    monkeypatch.setattr(worker,'run',reject)
+    assert worker.cycle('redacted')==1
+    receipt=json.loads((tmp_path/'results'/'capacity-rejected.json').read_text())
+    assert receipt['status']=='error' and receipt['retryable'] is True
+    assert receipt['http_status']==429
+    assert worker.cycle('redacted')==0

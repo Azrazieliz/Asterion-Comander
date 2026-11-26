@@ -171,6 +171,25 @@ def run(request,key):
     op=request['op']
     args=request.get('params',{})
     if not isinstance(args,dict): raise ValueError('Invalid arguments')
+    # File transfer has its own native queue and does not occupy a shell slot.
+    if op=='phone_transfer_start':
+        if set(args)-{'pc_path','name'}:
+            raise ValueError('Unsupported transfer arguments')
+        path=args.get('pc_path')
+        name=args.get('name')
+        if not isinstance(path,str) or not 1<=len(path)<=2048 or any(ord(c)<32 for c in path):
+            raise ValueError('Invalid authorized source path')
+        if name is not None and (not isinstance(name,str) or not 1<=len(name)<=180 or
+            name.startswith('.') or any(c in name for c in ('/','\\',':')) or
+            any(ord(c)<32 or ord(c)==127 for c in name)):
+            raise ValueError('Invalid transfer destination name')
+        return pc('/api/v1/phone/transfers',key,'POST',args)
+    if op in ('phone_transfer_status','phone_transfer_cancel'):
+        ident=args.get('transfer_id')
+        if set(args)!={'transfer_id'} or not isinstance(ident,str) or not re.fullmatch('[0-9a-f]{32}',ident):
+            raise ValueError('Invalid native transfer ID')
+        path='/api/v1/phone/transfers/'+ident
+        return pc(path+'/cancel',key,'POST',{}) if op=='phone_transfer_cancel' else pc(path,key)
     if op=='pc_job_status':
         ident=args.get('job_id','')
         if not re.fullmatch('[0-9a-f]{32}',ident):raise ValueError('Invalid job ID')

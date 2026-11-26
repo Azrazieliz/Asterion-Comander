@@ -349,7 +349,7 @@ def launch_command(data: CommandRequest):
         raise HTTPException(404, 'Working directory not found')
     with COMMAND_LOCK:
         if sum(1 for row in COMMANDS.values() if row['proc'].poll() is None) >= 4:
-            raise HTTPException(429, 'Maximum four active shell jobs')
+            raise HTTPException(429, 'Maximum four active shell jobs', headers={'Retry-After':'10'})
         jobid = uuid.uuid4().hex
         logs = RUNTIME / 'processes'
         logs.mkdir(parents=True, exist_ok=True)
@@ -456,7 +456,7 @@ def run_saved_scripts(data: BatchRequest):
 def _launch_argv(argv: list[str], cwd: Path) -> dict:
     with COMMAND_LOCK:
         if sum(1 for row in COMMANDS.values() if row['proc'].poll() is None) >= 4:
-            raise HTTPException(429, 'Maximum four active shell jobs')
+            raise HTTPException(429, 'Maximum four active shell jobs', headers={'Retry-After':'10'})
         jobid = uuid.uuid4().hex
         logs = RUNTIME / 'processes'
         logs.mkdir(parents=True, exist_ok=True)

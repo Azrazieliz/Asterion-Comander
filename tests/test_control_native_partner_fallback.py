@@ -52,3 +52,20 @@ def test_bad_partner_arguments_never_dispatch(monkeypatch,op,args):
     monkeypatch.setattr(bridge,"phone_native",lambda *a:pytest.fail("Invalid operation dispatched"))
     with pytest.raises(ValueError):
         bridge.run({"op":op,"params":args},"redacted")
+
+
+def test_file_transfer_uses_native_queue_not_shell(monkeypatch):
+    from asterion_remote import github_bridge as bridge
+    calls=[]
+    monkeypatch.setattr(bridge,'pc',lambda *args,**kwargs:calls.append(args) or {'ok':True})
+    bridge.run({'op':'phone_transfer_start','params':{'pc_path':'artifact.apk'}},'redacted')
+    bridge.run({'op':'phone_transfer_status','params':{'transfer_id':'a'*32}},'redacted')
+    bridge.run({'op':'phone_transfer_cancel','params':{'transfer_id':'a'*32}},'redacted')
+    assert [c[0] for c in calls]==['/api/v1/phone/transfers',
+        '/api/v1/phone/transfers/'+'a'*32,
+        '/api/v1/phone/transfers/'+'a'*32+'/cancel']
+    import pytest
+    with pytest.raises(ValueError):
+        bridge.run({'op':'phone_transfer_status','params':{'transfer_id':'../other'}},'redacted')
+    with pytest.raises(ValueError):
+        bridge.run({'op':'phone_transfer_start','params':{'pc_path':'x','name':'../x'}},'redacted')

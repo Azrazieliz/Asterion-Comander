@@ -2,7 +2,7 @@
 Uses the authorized Windows Control API; Android remains the controller.
 """
 from __future__ import annotations
-import json,os,subprocess,time,ipaddress
+import json,os,subprocess,time,ipaddress,re,urllib.error
 from urllib.parse import urlsplit
 from pathlib import Path
 from . import github_bridge
@@ -127,7 +127,10 @@ def reconcile_jobs(key,pending):
                 error='Native job identifier unavailable'))
             continue
         try:
-            job=run({'op':'pc_job_status','params':{'job_id':ident}},key)
+            if receipt.get('operation')=='phone_transfer_start':
+                job=run({'op':'phone_transfer_status','params':{'transfer_id':ident}},key)
+            else:
+                job=run({'op':'pc_job_status','params':{'job_id':ident}},key)
         except Exception as exc:
             if '404' in str(exc) or 'Unknown job' in str(exc):
                 write_result(identity,dict(receipt,ok=False,status='uncertain',
@@ -136,6 +139,25 @@ def reconcile_jobs(key,pending):
             # A transient query failure for an old job must not starve fresh
             # commands. Keep its accepted receipt and revisit on rotation.
             print('Native job reconciliation deferred:',type(exc).__name__,flush=True)
+            continue
+        if receipt.get('operation')=='phone_transfer_start':
+            if not isinstance(job,dict) or job.get('id')!=ident:continue
+            state=job.get('state')
+            if state=='outcome_unknown' and job.get('worker_active') is not False:continue
+            if state not in ('completed','failed','cancelled','outcome_unknown'):continue
+            result=job.get('result')
+            verified=(state=='completed' and isinstance(result,dict) and
+                result.get('verified') is True and type(result.get('size')) is int and
+                result['size']==job.get('size')==job.get('bytes_sent') and
+                isinstance(result.get('sha256'),str) and
+                re.fullmatch('[a-f0-9]{64}',result['sha256']) is not None and
+                isinstance(result.get('location'),str) and
+                result['location'].startswith('Downloads/Asterion Control/') and
+                isinstance(result.get('android_uri'),str) and result['android_uri'].startswith('content://'))
+            terminal='complete' if verified else ('error' if state in ('failed','cancelled') else 'uncertain')
+            write_result(identity,dict(receipt,ok=verified,status=terminal,
+                result={'id':ident,'state':state,'receipt':result if verified else None},
+                error='' if verified else 'Native transfer '+state+'; no verified publication'))
             continue
         if not isinstance(job,dict) or job.get('status')!='finished':continue
         code=job.get('exit_code')
@@ -477,19 +499,32 @@ def cycle(key):
             if task.get('id')!=identity or not isinstance(task.get('op'),str):
                 raise ValueError('Invalid request identity')
             response=run(task,key)
-            accepted=(task['op']=='pc_command' and isinstance(response,dict)
-                and response.get('status')=='running'
+            asynchronous=task['op'] in ('pc_command','phone_transfer_start')
+            expected='queued' if task['op']=='phone_transfer_start' else 'running'
+            accepted=(asynchronous and isinstance(response,dict)
+                and response.get('status')==expected
                 and isinstance(response.get('id'),str)
                 and len(response['id'])==32)
-            if task['op']=='pc_command' and not accepted:
+            if asynchronous and not accepted:
                 reply={'id':identity,'ok':False,'status':'uncertain',
-                       'error':'No durable Windows job id from native Control',
+                       'error':'No durable asynchronous job id from native Control',
                        'result':response}
             else:
                 reply={'id':identity,'ok':True,
                        'status':'accepted' if accepted else 'complete',
                        'result':response}
+            if accepted and task['op']=='phone_transfer_start':
+                reply['operation']='phone_transfer_start'
             reply['elapsed_ms']=round((time.monotonic()-started)*1000)
+        except urllib.error.HTTPError as exc:
+            reply={'id':identity,'ok':False,'status':'error',
+                   'elapsed_ms':round((time.monotonic()-started)*1000),
+                   'error':'Native Control HTTP '+str(exc.code),'http_status':exc.code}
+            if exc.code==429:
+                # The native capacity check happens before starting the job.
+                # Explicit rejection is not an ambiguous transfer or outage.
+                reply['retryable']=True
+                reply['error_code']='native_capacity_rejected'
         except Exception as exc:
             reply={'id':identity,'ok':False,'status':'error',
                    'elapsed_ms':round((time.monotonic()-started)*1000),
