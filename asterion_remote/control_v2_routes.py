@@ -80,9 +80,13 @@ def security_restore(body:RestoreRequest,
                      x_owner_approval:str|None=Header(default=None)):
     _owner_approval(x_owner_approval)
     try:
-        # The vault only holds files that were previously authorized by
-        # safe_path; restore forbids replacing any existing destination.
-        return security_scanner.restore(body.quarantine_id,_vault())
+        # Revalidate current configured scope, not the historical grant.
+        vault=_vault()
+        original=security_scanner.original_destination(body.quarantine_id,vault)
+        authorized=_authorized_path(str(original))
+        if original.is_symlink() or authorized!=original:
+            raise ValueError("restore_destination_identity_changed")
+        return security_scanner.restore(body.quarantine_id,vault,authorized)
     except FileNotFoundError as exc:
         raise HTTPException(404,"Quarantine item not found") from exc
     except (ValueError,OSError) as exc:

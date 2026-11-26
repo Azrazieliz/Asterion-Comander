@@ -82,6 +82,8 @@ def validated_public_https(url: str) -> tuple[str, str, str]:
         raise HTTPException(422, "Malformed public URL") from exc
     if parsed.scheme.lower() != "https" or not host or parsed.username or parsed.password:
         raise HTTPException(422, "Only credential-free HTTPS websites are crawlable")
+    if host.lower().rstrip(".").endswith(".onion") or host.lower().rstrip(".") == "onion":
+        raise HTTPException(403, "Onion services require separate Tor Browser routing")
     if port not in (None, 443):
         raise HTTPException(422, "Nonstandard website ports are not crawlable")
     if parsed.fragment:

@@ -139,6 +139,15 @@ final class ControlPrivateVpn {
       report.accept("Android VPN approval required");return;
     }
     if(!TRANSITION.compareAndSet(false,true)){report.accept("VPN operation already in progress");return;}
+    try{
+      android.net.ConnectivityManager cm=owner.getSystemService(android.net.ConnectivityManager.class);
+      android.net.Network n=cm==null?null:cm.getActiveNetwork();
+      android.net.NetworkCapabilities caps=n==null?null:cm.getNetworkCapabilities(n);
+      if(caps!=null&&caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN)&&
+          (backend==null||backend.getState(TUNNEL)!=Tunnel.State.UP)){
+        TRANSITION.set(false);report.accept("Disconnect the existing Android VPN before connecting Asterion");return;
+      }
+    }catch(Exception e){TRANSITION.set(false);report.accept("Could not verify existing VPN state");return;}
     connectionState="starting";
     WORKER.submit(()->{
       long started=android.os.SystemClock.elapsedRealtime();

@@ -371,7 +371,9 @@ def review(cycle_id: str, *, error_code: str = "UncertainExternalOperation") -> 
 def verify(cycle_id: str, request_id: str, *,
            evidence_sha256: str, work_summary: str,
            next_work: str, done: bool = False,
-           acceptance_verified: bool = False) -> dict:
+           acceptance_verified: bool = False,
+           candidate_task_id: str | None = None,
+           candidate_commit: str | None = None) -> dict:
     """Trusted work verifier confirms actual project progress.
 
     This cannot validate evidence itself. Only an authorized executor should
@@ -389,6 +391,11 @@ def verify(cycle_id: str, request_id: str, *,
         raise ValueError("next_work_required")
     if done and not acceptance_verified:
         raise ValueError("completion_requires_independent_acceptance")
+    if (candidate_task_id is None)!=(candidate_commit is None):
+        raise ValueError("candidate_task_and_commit_required_together")
+    if candidate_task_id is not None and (not re.fullmatch(r"[a-z][a-z0-9_-]{3,79}",candidate_task_id) or
+            not re.fullmatch(r"[a-f0-9]{40}",candidate_commit) or done or acceptance_verified):
+        raise ValueError("invalid_source_only_candidate_receipt")
     now = _now()
     with _LOCK:
         con=_db()
@@ -407,6 +414,14 @@ def verify(cycle_id: str, request_id: str, *,
                  int(acceptance_verified),now,cycle_id,request_id))
             if match.rowcount!=1:
                 raise RuntimeError("no_matching_turn_to_verify")
+            if candidate_task_id is not None:
+                # Commit the source-tested task and verified turn together. No
+                # crash window can leave an accepted task paired with an uncertain turn.
+                claimed=con.execute("""UPDATE dev_backlog SET state=\'source_tested\',
+                    verification_level=\'source_tested\',evidence_sha256=?,candidate_commit=?,
+                    updated_ms=?,last_error=\'\' WHERE cycle_id=? AND task_id=? AND state=\'claimed\'""",
+                    (evidence_sha256,candidate_commit,now,cycle_id,candidate_task_id))
+                if claimed.rowcount!=1:raise RuntimeError("candidate_task_not_claimed_in_cycle")
             reached_limit=(row["max_turns"]>0 and
                            row["turn_index"] >= row["max_turns"])
             new_state=("stopped" if row["stop_requested"] else

@@ -24,6 +24,7 @@ if str(_SOURCE_ROOT) not in sys.path:
     sys.path.insert(0,str(_SOURCE_ROOT))
 
 from asterion_remote import overnight_supervisor
+from asterion_remote.bridge_worker_lock import worker_process_lock, WorkerAlreadyRunning
 from asterion_remote.isolated_test_runner import IsolatedContainerTests
 from asterion_remote.local_model_provider import LocalModelConfig
 from scripts.control_ai_independent_dev import attempt_once, initialize
@@ -39,8 +40,9 @@ def request_stop(*_):
 def preflight(config: dict) -> tuple[bool, str]:
     """All checked BEFORE task claim. A missing tool is not model failure."""
     endpoint=LocalModelConfig(endpoint=config["endpoint"],model=config["model"])
-    IsolatedContainerTests(config["pinned_test_image"],
+    runner=IsolatedContainerTests(config["pinned_test_image"],
                            config["reviewed_test_map"])
+    runner.preflight()
     parsed=urlsplit(endpoint.endpoint)
     with socket.create_connection(("127.0.0.1",parsed.port),timeout=3):
         return True,"local_model_listener_and_verified_sandbox_configured"
@@ -61,12 +63,25 @@ def publish(path: Path,status: dict):
 
 
 def run(config: dict, *, once=False, pause_s=45, pause=time.sleep):
+    cycle=config["cycle"]
+    overnight_supervisor._require_id(cycle)
+    lock=overnight_supervisor._root()/("daemon-"+cycle+".lock")
+    try:
+        with worker_process_lock(lock):
+            return _run_owned(config,once=once,pause_s=pause_s,pause=pause)
+    except WorkerAlreadyRunning:
+        return {"state":"duplicate_daemon_refused","cycle_id":cycle}
+
+
+def _run_owned(config: dict, *, once=False, pause_s=45, pause=time.sleep):
     if not 5<=pause_s<=3600:
         raise ValueError("invalid_supervisor_idle_interval")
     home=Path(config["repo"]).resolve(strict=True)
     if not (home/".git").exists():
         raise ValueError("verified_control_repository_required")
-    manifest=home/config["tasks"]
+    manifest=(home/config["tasks"]).resolve(strict=True)
+    if home not in manifest.parents or manifest.parent!=home/"docs":
+        raise ValueError("reviewed_manifest_must_be_in_canonical_docs")
     expected_test_map=json.loads(manifest.read_text(encoding="utf-8"))["trusted_tests"]
     if config["reviewed_test_map"]!=expected_test_map:
         raise ValueError("trusted_test_map_changed_without_versioned_review")

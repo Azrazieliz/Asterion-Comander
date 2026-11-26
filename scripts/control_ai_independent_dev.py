@@ -66,13 +66,13 @@ def attempt_once(*, cycle, canonical_root, isolated_root, model_endpoint,
             return model(description,request_id)
         def trusted_execution(response,cycle_id,request_id):
             outcome=executor.run(response,cycle_id,request_id,task)
-            dev_backlog.record(task["task_id"],
-                evidence_sha256=outcome["evidence_sha256"],
-                candidate_commit=outcome["candidate_commit"],
-                verification_level=outcome["verification_level"])
-            return {k:outcome[k] for k in (
+            if outcome["verification_level"]!="source_tested":
+                raise RuntimeError("candidate_source_test_not_verified")
+            result={k:outcome[k] for k in (
                 "evidence_sha256","work_summary","next_work",
-                "done","acceptance_verified")}
+                "done","acceptance_verified","candidate_commit")}
+            result["candidate_task_id"]=task["task_id"]
+            return result
         result=overnight_supervisor.advance_once(
             cycle,local_provider,trusted_execution)
         if result["state"]=="needs_review":

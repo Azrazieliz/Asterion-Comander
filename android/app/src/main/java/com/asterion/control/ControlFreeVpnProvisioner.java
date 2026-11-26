@@ -180,6 +180,7 @@ final class ControlFreeVpnProvisioner {
             String addresses=ipv4+"/32";
             String routes="0.0.0.0/0";
             String dns="1.1.1.1,1.0.0.1";
+            if(ipv6.isEmpty())throw new IllegalStateException("provider_invalid_missing_ipv6_configuration");
             if(!ipv6.isEmpty()){
                 addresses+=", "+ipAddress(ipv6)+"/128";
                 routes+=", ::/0";

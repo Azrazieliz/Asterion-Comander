@@ -87,4 +87,5 @@ def test_grounded_context_contains_exact_sha(prepared):
     repo,scratch,task,target=prepared
     payload=json.loads(source_context(repo,task))
     assert payload["sha256"]==hashlib.sha256(target.read_bytes()).hexdigest()
-    assert payload["source"]=="value = 1\n"
+    # Grounding preserves actual bytes, including Windows CRLF.
+    assert payload["source"]==target.read_bytes().decode("utf-8")

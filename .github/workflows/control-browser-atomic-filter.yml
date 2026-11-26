@@ -7,6 +7,7 @@ on:
       - work/control-non-ai-browser-permissions-20261126
       - work/control-non-ai-download-integration-20261126
       - work/control-non-ai-private-browser-20261126
+      - work/control-network-security-autonomy-20261126
       - work/control-native-ai-reconstruction-20261126
     paths:
       - 'android/app/src/main/java/com/asterion/control/Browser*.java'
@@ -58,6 +59,7 @@ jobs:
       - name: Execute Browser navigation and privacy regressions
         run: |
           javac -encoding UTF-8 -d /tmp/asterion-browser-atomic-classes \
+            android/app/src/main/java/com/asterion/control/TorRoutePolicy.java \
             android/app/src/main/java/com/asterion/control/BrowserNavigationPolicy.java \
             tests/java/com/asterion/control/BrowserNavigationPolicyTest.java
           java -cp /tmp/asterion-browser-atomic-classes \
@@ -68,6 +70,10 @@ jobs:
             android/app/src/main/java/com/asterion/control/BrowserDownloadContract.java \
             tests/java/com/asterion/control/BrowserDownloadContractTest.java
           java -cp /tmp/asterion-browser-atomic-classes com.asterion.control.BrowserDownloadContractTest
+      - name: Execute Tor delegation policy regressions
+        run: |
+          javac -encoding UTF-8 -cp /tmp/asterion-browser-atomic-classes -d /tmp/asterion-browser-atomic-classes tests/java/com/asterion/control/TorRoutePolicyTest.java
+          java -cp /tmp/asterion-browser-atomic-classes com.asterion.control.TorRoutePolicyTest
   android-source-only:
     needs: browser-cache-jvm
     runs-on: ubuntu-latest
