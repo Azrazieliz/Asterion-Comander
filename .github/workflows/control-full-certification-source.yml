@@ -1,0 +1,62 @@
+name: Full Control cross-platform certification regression
+on:
+  push:
+    branches:
+      - work/control-certification-20261126
+    paths:
+      - 'asterion_remote/**'
+      - 'android/**'
+      - 'scripts/**'
+      - 'tests/**'
+      - '.github/workflows/control-full-certification-source.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  all-regressions:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - run: python -m pip install -r requirements.txt pytest
+      - name: Run complete regression collection on isolated CI
+        run: python -m pytest -ra --junitxml=certification-results.xml tests
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: certification-${{ matrix.os }}
+          path: certification-results.xml
+  jvm-regressions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Execute platform-independent Java policies
+        shell: bash
+        run: |
+          S=android/app/src/main/java/com/asterion/control
+          T=tests/java/com/asterion/control
+          C=$(mktemp -d)
+          javac -encoding UTF-8 -d "$C" "$S"/{BrowserCosmeticFilters,BrowserDownloadContract,BrowserFilterCacheStore,BrowserNavigationPolicy,TorAddressPolicy,TorRoutePolicy,VoiceReplyPolicy,VoiceWakeWords,VpnEvidencePolicy,VpnRouteScope,AssistantWorkspace}.java "$T"/*.java
+          for test in "$T"/*Test.java; do
+            name=$(basename "$test" .java)
+            java -cp "$C" com.asterion.control."$name"
+          done
