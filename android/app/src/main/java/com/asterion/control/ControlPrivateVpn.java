@@ -43,6 +43,7 @@ final class ControlPrivateVpn {
   private static final ExecutorService WORKER=Executors.newSingleThreadExecutor();
   private static final Handler MAIN=new Handler(Looper.getMainLooper());
   private static volatile GoBackend backend;
+  private static final java.util.concurrent.atomic.AtomicBoolean TRANSITION=new java.util.concurrent.atomic.AtomicBoolean(false);
   private static volatile String connectionState="off";
   private static volatile String lastErrorCode="";
   private static final Tunnel TUNNEL=new Tunnel(){
@@ -115,6 +116,8 @@ final class ControlPrivateVpn {
   static synchronized void importLocally(Activity owner,String text,boolean allowFullTunnel)
       throws Exception{
     requireLocal(owner);
+    if(TRANSITION.get()||(backend!=null&&backend.getState(TUNNEL)==Tunnel.State.UP))
+      throw new IllegalStateException("Disconnect the existing tunnel before replacing its configuration");
     parseAndValidate(text,allowFullTunnel);
     // Store ONLY encrypted configuration. No private keys in logs, source,
     // remote commands, public storage, exception output or UI status.
@@ -135,6 +138,7 @@ final class ControlPrivateVpn {
     if(VpnService.prepare(owner)!=null){
       report.accept("Android VPN approval required");return;
     }
+    if(!TRANSITION.compareAndSet(false,true)){report.accept("VPN operation already in progress");return;}
     connectionState="starting";
     WORKER.submit(()->{
       long started=android.os.SystemClock.elapsedRealtime();
@@ -158,16 +162,21 @@ final class ControlPrivateVpn {
         ControlEventJournal.write(context,"vpn_tunnel","wireguard",
           "failed",lastErrorCode,android.os.SystemClock.elapsedRealtime()-started);
         MAIN.post(()->report.accept("VPN failed: "+lastErrorCode));
-      }
+      }finally{TRANSITION.set(false);}
     });
   }
   static void disconnect(Activity owner,Consumer<String> report){
     requireLocal(owner);
     Context context=owner.getApplicationContext();
+    if(!TRANSITION.compareAndSet(false,true)){report.accept("VPN operation already in progress");return;}
     WORKER.submit(()->{
       try{
         GoBackend instance=backend;
-        if(instance!=null)instance.setState(TUNNEL,Tunnel.State.DOWN,null);
+        if(instance!=null){
+          Tunnel.State after=instance.setState(TUNNEL,Tunnel.State.DOWN,null);
+          if(after!=Tunnel.State.DOWN||instance.getState(TUNNEL)!=Tunnel.State.DOWN)
+            throw new IllegalStateException("Tunnel did not reach DOWN");
+        }
         connectionState="off";
         ControlEventJournal.write(context,"vpn_tunnel","wireguard",
           "disconnected","owner_requested",0);
@@ -175,7 +184,7 @@ final class ControlPrivateVpn {
       }catch(Exception e){
         lastErrorCode=e.getClass().getSimpleName();
         MAIN.post(()->report.accept("VPN disconnect was not verified: "+lastErrorCode));
-      }
+      }finally{TRANSITION.set(false);}
     });
   }
   static JSONObject status(Context c)throws Exception{
@@ -201,7 +210,17 @@ final class ControlPrivateVpn {
     }catch(Exception problem){
       evidenceError=problem.getClass().getSimpleName();
     }
+    boolean systemVpnRoute=false;
+    try{
+      android.net.ConnectivityManager cm=(android.net.ConnectivityManager)c.getSystemService(Context.CONNECTIVITY_SERVICE);
+      android.net.Network network=cm==null?null:cm.getActiveNetwork();
+      android.net.NetworkCapabilities caps=network==null?null:cm.getNetworkCapabilities(network);
+      systemVpnRoute=caps!=null&&caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN)&&caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED);
+    }catch(Exception ignored){}
     return new JSONObject().put("ok",true)
+      .put("android_validated_vpn_route",systemVpnRoute)
+      .put("verified_active_tunnel",up&&peerVerified&&systemVpnRoute)
+      .put("transition_in_progress",TRANSITION.get())
       .put("backend","wireguard_go")
       .put("active",up)
       .put("state",up?"tunnel_up":connectionState)
