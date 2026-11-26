@@ -18,7 +18,7 @@ import urllib.request
 
 REPO=re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 REVISION=re.compile(r"^[0-9a-f]{40}$")
-FILENAME=re.compile(r"^[A-Za-z0-9_.-]+\\.gguf$")
+FILENAME=re.compile(r"^[A-Za-z0-9_.-]+\.gguf$")
 SHA=re.compile(r"^[0-9a-f]{64}$")
 BLOCK=2*1024*1024
 
