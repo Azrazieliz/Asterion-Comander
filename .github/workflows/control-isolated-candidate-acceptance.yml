@@ -1,0 +1,32 @@
+name: Real isolated candidate container acceptance
+on:
+  push:
+    branches:
+      - work/control-non-ai-sandbox-integrity-20261126
+    paths:
+      - 'asterion_remote/isolated_test_runner.py'
+      - 'tests/test_isolated_candidate_snapshot.py'
+      - '.github/workflows/control-isolated-candidate-acceptance.yml'
+permissions:
+  contents: read
+jobs:
+  isolated-fixture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install pytest
+      - name: Build isolated test fixture image (CI only)
+        run: |
+          docker pull python:3.11-slim
+          BASE=$(docker image inspect python:3.11-slim --format '{{index .RepoDigests 0}}')
+          DIR=$(mktemp -d)
+          printf 'FROM %s\nRUN pip install --no-cache-dir pytest==8.4.2\n' "$BASE" > "$DIR/Dockerfile"
+          docker build --tag asterion-ci-fixture "$DIR"
+          echo "ASTERION_TEST_CONTAINER_IMAGE=$(docker image inspect asterion-ci-fixture --format '{{.Id}}')" >> "$GITHUB_ENV"
+      - name: Execute actual isolated tests
+        run: python -m pytest -q -rs tests/test_isolated_candidate_snapshot.py
