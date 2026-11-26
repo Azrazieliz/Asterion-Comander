@@ -61,13 +61,23 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Signed cross-app browser automation, richer profiles and PC crawler are separate
  * future capabilities; this Activity does not claim those are already delivered.
  */
-public final class BrowserActivity extends Activity {
+public class BrowserActivity extends Activity {
+    protected boolean torMode(){return false;}
+    private TorBrowserRoute torRoute;
+    private boolean torReady(){return !torMode()||(torRoute!=null&&torRoute.ready());}
+    private void torChanged(String message){
+        if(isFinishing()||isDestroyed())return;
+        if(!torReady())for(BrowserTab tab:tabs){tab.web.stopLoading();}
+        if(current()!=null){if(START.equals(current().pageUrl))showTab(active);else refreshToolbar();}
+        else if(status!=null)status.setText(message);
+        if(!torReady()&&current()!=null&&!START.equals(current().pageUrl))notice(message);
+    }
     // Only the real foreground WebView URL can authorize vault Autofill.
     // The OS AssistStructure's webDomain alone is not trusted.
     private static volatile BrowserActivity activeBrowser;
     static String verifiedActiveHttpsOrigin(){
         BrowserActivity browser=activeBrowser;
-        if(browser==null||browser.isFinishing())return null;
+        if(browser==null||browser.isFinishing()||browser.torMode())return null;
         final String[] value={null};
         Runnable read=()->{
             try{
@@ -158,12 +168,12 @@ public final class BrowserActivity extends Activity {
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);DesignSystem.configure(this);
         protection=new BrowserProtection(this);
-        browserPrefs=getSharedPreferences("asterion_browser_session_v1",Context.MODE_PRIVATE);
-        protection.refresh(false,(updated,reason)->{
+        browserPrefs=getSharedPreferences(torMode()?"asterion_tor_session_v1":"asterion_browser_session_v1",Context.MODE_PRIVATE);
+        if(!torMode())protection.refresh(false,(updated,reason)->{
             if(!isFinishing()&&status!=null)refreshToolbar();
         });
         // The WebView suffix is process-global; recreating this Activity must not reset it.
-        if(!webDirectoryConfigured){WebView.setDataDirectorySuffix("asterion_browser");webDirectoryConfigured=true;BrowserPrivateProfiles.cleanPreviousProcess();}
+        if(!webDirectoryConfigured){WebView.setDataDirectorySuffix(torMode()?"asterion_tor":"asterion_browser");webDirectoryConfigured=true;BrowserPrivateProfiles.cleanPreviousProcess();}
         boolean dark=(getResources().getConfiguration().uiMode &
             android.content.res.Configuration.UI_MODE_NIGHT_MASK)==android.content.res.Configuration.UI_MODE_NIGHT_YES;
         getWindow().setStatusBarColor(Color.TRANSPARENT);getWindow().setNavigationBarColor(Color.TRANSPARENT);
@@ -219,13 +229,22 @@ public final class BrowserActivity extends Activity {
         forward=navButton("forward","Forward",()->{BrowserTab t=current();if(t!=null&&t.web.canGoForward())t.web.goForward();});
         navButton("home","Home",()->navigate(""));
         navButton("reload","Reload",()->{BrowserTab t=current();if(t!=null&&!START.equals(t.pageUrl))t.web.reload();});
-        navButton("download","Downloads",this::showDownloadProgress);
+        if(!torMode())navButton("download","Downloads",this::showDownloadProgress);
         counter=control("1",this::showTabSwitcher);counter.setTextSize(16);counter.setPadding(0,0,0,0);
         navigation.addView(counter,new LinearLayout.LayoutParams(0,dp(48),1));
         navButton("menu","Browser menu",this::showBrowserMenu);
         status=label("",11,DesignSystem.MUTED,false);
         add(root,navigation);root.requestFocus();root.requestApplyInsets();
 
+        if(torMode()){
+            getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
+            if(!BrowserPrivateProfiles.supported()){
+                viewport.addView(label("Private WebView storage is unavailable. Tor navigation cannot start.",16,DesignSystem.TEXT,false));
+                address.setEnabled(false);return;
+            }
+            torRoute=new TorBrowserRoute(this,this::torChanged);
+            newTab();torRoute.start();return;
+        }
         if(saved != null) {
             ArrayList<String> urls = saved.getStringArrayList("urls");
             if(urls != null) {
@@ -250,6 +269,7 @@ public final class BrowserActivity extends Activity {
     }
     private void newTab() {
         if(tabs.size() >= MAX_TABS) { notice("Close a tab before opening another"); return; }
+        if(torMode()){newPrivateTab();return;}
         addTab(START);
         showTab(tabs.size()-1);
     }
@@ -270,22 +290,26 @@ public final class BrowserActivity extends Activity {
         }
         view.setBackgroundColor(Color.WHITE);
         WebSettings s = view.getSettings();
-        s.setJavaScriptEnabled(true);
-        s.setDomStorageEnabled(true);
+        s.setJavaScriptEnabled(!torMode());
+        s.setDomStorageEnabled(!torMode());
+        if(torMode())s.setCacheMode(WebSettings.LOAD_NO_CACHE);
         s.setGeolocationEnabled(privateProfile==null);
         s.setAllowFileAccess(false);
         s.setAllowContentAccess(false);
         s.setJavaScriptCanOpenWindowsAutomatically(false);
         s.setSupportMultipleWindows(true);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        if(Build.VERSION.SDK_INT >= 26) s.setSafeBrowsingEnabled(true);
+        if(Build.VERSION.SDK_INT >= 26) s.setSafeBrowsingEnabled(!torMode());
         s.setBuiltInZoomControls(true);
         s.setDisplayZoomControls(false);
         BrowserTab tab = new BrowserTab(view,privateProfile);
         tab.pageUrl=url;
         view.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView web, WebResourceRequest request) {
-                if(!BrowserNavigationPolicy.isWeb(request.getUrl().toString()))return true;
+                String requested=request.getUrl().toString();
+                if(!BrowserNavigationPolicy.isWeb(requested))return true;
+                if(torMode()&&!TorRoutePolicy.mayLoad(torReady(),requested))return true;
+                if(!torMode()&&TorRoutePolicy.onion(requested)){if(current()==tab)notice("Open Tor mode for .onion sites");return true;}
                 // Prevent automatic advertising/popunder navigation, never all
                 // cross-origin redirects (legitimate OAuth would be broken).
                 if(request.isForMainFrame()&&!request.hasGesture() &&
@@ -297,6 +321,9 @@ public final class BrowserActivity extends Activity {
             }
             @Override public WebResourceResponse shouldInterceptRequest(
                     WebView web,WebResourceRequest request) {
+                String requested=request.getUrl().toString();
+                if((torMode()&&!TorRoutePolicy.mayLoad(torReady(),requested))||(!torMode()&&TorRoutePolicy.onion(requested)))
+                    return new WebResourceResponse("text/plain","UTF-8",403,"Blocked",java.util.Collections.emptyMap(),new java.io.ByteArrayInputStream(new byte[0]));
                 WebResourceResponse denied=protection.intercept(request,tab.pageUrl);
                 if(denied!=null)tab.blocked.incrementAndGet();
                 return denied;
@@ -347,7 +374,7 @@ public final class BrowserActivity extends Activity {
         view.setWebChromeClient(new WebChromeClient() {
             @Override public boolean onCreateWindow(WebView web,boolean isDialog,
                     boolean isUserGesture,android.os.Message resultMsg) {
-                if(!BrowserNavigationPolicy.allowPopup(isUserGesture,current()==tab&&tab.web.getParent()==viewport,tabs.size()<MAX_TABS)){
+                if(torMode()||!BrowserNavigationPolicy.allowPopup(isUserGesture,current()==tab&&tab.web.getParent()==viewport,tabs.size()<MAX_TABS)){
                     tab.popups.incrementAndGet();
                     if(current()==tab)notice("Popup blocked");
                     return false;
@@ -386,6 +413,7 @@ public final class BrowserActivity extends Activity {
             }
         });
         view.setDownloadListener((address,agent,disposition,type,size) -> {
+            if(torMode()){notice("Downloads are disabled in Tor mode to avoid a direct transfer");return;}
             if(current()==tab&&tab.web.getParent()==viewport)confirmDownload(address,agent,disposition,type,size,tab.privateProfile!=null);
         });
         tabs.add(tab);
@@ -449,6 +477,7 @@ public final class BrowserActivity extends Activity {
         }dialog.show();
     }
     private void showSiteInfo(){
+        if(torMode()){new AlertDialog.Builder(this).setTitle("Tor route").setMessage(torRoute==null?"Unavailable":torRoute.state()+"\n\nBrowser traffic uses the isolated Tor proxy. This is not Tor Browser fingerprinting protection or a whole-device VPN.").setPositiveButton("Close",null).show();return;}
         BrowserTab t=current();String url=t==null?START:t.pageUrl;String scheme=Uri.parse(url).getScheme();
         String origin=START.equals(url)?"Home":("https".equalsIgnoreCase(scheme)?"HTTPS address":"HTTP address (not encrypted)");
         new AlertDialog.Builder(this).setTitle("Site information")
@@ -463,14 +492,15 @@ public final class BrowserActivity extends Activity {
         address.setHint("Search with "+providerName()+" or enter URL");
         address.setImeOptions(EditorInfo.IME_ACTION_GO|(tab.privateProfile!=null?EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING:0));
         if(url!=null && !address.hasFocus()) address.setText(START.equals(url)?"":url);
-        site.setText(tab.privateProfile!=null?"Private":(START.equals(url)?"Site":("https".equalsIgnoreCase(Uri.parse(url).getScheme())?"HTTPS":"HTTP")));
+        site.setText(torMode()?(torReady()?"Tor":"Wait"):tab.privateProfile!=null?"Private":(START.equals(url)?"Site":("https".equalsIgnoreCase(Uri.parse(url).getScheme())?"HTTPS":"HTTP")));
         site.setContentDescription("Site information and protection");
         back.setEnabled(tab.web.canGoBack());
         forward.setEnabled(tab.web.canGoForward());
         back.setAlpha(tab.web.canGoBack()?1f:0.4f);
         forward.setAlpha(tab.web.canGoForward()?1f:0.4f);
         if(url!=null) {
-            if(tab.privateProfile!=null){status.setText("Isolated private profile · "+tab.blocked.get()+" requests blocked");}
+            if(torMode()){status.setText(torRoute==null?"Tor unavailable":torRoute.state());}
+            else if(tab.privateProfile!=null){status.setText("Isolated private profile · "+tab.blocked.get()+" requests blocked");}
             else if(START.equals(url)){
                 status.setText("Asterion home • "+providerName()+" search • "+
                     (protection.isEnabled()?"Shields enabled":"Shields disabled"));
@@ -486,6 +516,10 @@ public final class BrowserActivity extends Activity {
         if(tab==null) return;
         String url=safeAddress(value);
         if(START.equals(url)&&value!=null&&!value.trim().isEmpty()&&!START.equals(value.trim())){notice("Unsupported or invalid address");return;}
+        if(!START.equals(url)){
+            if(torMode()&&!TorRoutePolicy.mayLoad(torReady(),url)){notice("Tor route is unavailable or address is unsupported");return;}
+            if(!torMode()&&TorRoutePolicy.onion(url)){notice("Use the Browser menu to open Tor mode");return;}
+        }
         if(pendingSiteRequest!=null)finishSiteRequest(false);
         tab.committedUrl=null;
         tab.pageUrl=url;
@@ -794,11 +828,14 @@ public final class BrowserActivity extends Activity {
             }).setNegativeButton("Cancel",null).show();
     }
     private void showBrowserMenu(){
+        if(torMode()){
+            new AlertDialog.Builder(this).setTitle("Tor browsing").setItems(new String[]{"New isolated tab","Route evidence","Close Tor"},(d,i)->{if(i==0)newTab();else if(i==1)showSiteInfo();else finish();}).setNegativeButton("Close",null).show();return;
+        }
         String[] actions={
             "Home","Search engine • "+providerName(),
             "Shields and trackers","Encrypted vault",
             "Bookmarks and history","Extract page evidence",
-            "Android downloads","Desktop site","Asterion assistant","New private tab"};
+            "Android downloads","Desktop site","Asterion assistant","New private tab","Tor browsing"};
         new AlertDialog.Builder(this).setTitle("Asterion Browser")
             .setItems(actions,(d,choice)->{
                 switch(choice){
@@ -824,6 +861,7 @@ public final class BrowserActivity extends Activity {
                     }
                     case 8:startActivity(new Intent(this,AssistantActivity.class));break;
                     case 9:newPrivateTab();break;
+                    case 10:new AlertDialog.Builder(this).setTitle("Open Tor browsing?").setMessage("Uses the embedded Tor network and a separate Browser process. The Tor Project exit check is contacted before navigation. JavaScript, downloads and credential sharing are disabled. This is not a full-device VPN or a guarantee of anonymity.").setPositiveButton("Connect",(dlg,w)->startActivity(new Intent(this,TorBrowserActivity.class))).setNegativeButton("Cancel",null).show();break;
                 }
             }).setNegativeButton("Close",null).show();
     }
@@ -834,7 +872,7 @@ public final class BrowserActivity extends Activity {
         DesignSystem.AsterionMark mark=new DesignSystem.AsterionMark(this);
         heading.addView(mark,new LinearLayout.LayoutParams(dp(38),dp(38)));
         boolean privateHome=current()!=null&&current().privateProfile!=null;
-        TextView title=label(privateHome?"Private browsing":"Asterion Browser",22,DesignSystem.TEXT,true);title.setPadding(dp(12),0,0,0);
+        TextView title=label(torMode()?"Tor browsing":privateHome?"Private browsing":"Asterion Browser",22,DesignSystem.TEXT,true);title.setPadding(dp(12),0,0,0);
         heading.addView(title,new LinearLayout.LayoutParams(0,-2,1));add(body,heading);
         TextView search=control("Search with "+providerName(),()->{
             address.requestFocus();
@@ -842,6 +880,10 @@ public final class BrowserActivity extends Activity {
             if(keyboard!=null)keyboard.showSoftInput(address,android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
         });
         LinearLayout.LayoutParams searchLp=new LinearLayout.LayoutParams(-1,dp(52));searchLp.topMargin=dp(20);body.addView(search,searchLp);
+        if(torMode()){
+            TextView detail=label((torRoute==null?"Connecting":torRoute.state())+"\n\nOnly the isolated Browser process uses Tor. No session restoration, downloads, credential vault or JavaScript. Close this mode to stop Tor.",14,DesignSystem.MUTED,false);
+            detail.setPadding(0,dp(22),0,dp(22));add(body,detail);return scroll;
+        }
         if(privateHome){
             TextView detail=label("Separate website storage. This tab is not restored or saved in browsing history. Site-data cleanup is requested on close. After an unexpected stop, cleanup is retried at the next Browser process start. Downloads and network providers are outside this isolation.",14,DesignSystem.MUTED,false);
             detail.setPadding(0,dp(22),0,dp(22));add(body,detail);
@@ -886,6 +928,7 @@ public final class BrowserActivity extends Activity {
         return BrowserNavigationPolicy.sessionUrl(value);
     }
     private void persistTabs(){
+        if(torMode())return;
         JSONArray saved=new JSONArray();
         for(BrowserTab tab:tabs)if(tab.privateProfile==null)saved.put(safeSessionUrl(tab.pageUrl));
         browserPrefs.edit().putString("tabs",saved.toString())
@@ -1166,6 +1209,7 @@ public final class BrowserActivity extends Activity {
             tab.web.destroy();releasePrivate(tab);
         }
         tabs.clear();
+        if(torRoute!=null)torRoute.close();
         super.onDestroy();
     }
     private void releasePrivate(BrowserTab tab){
