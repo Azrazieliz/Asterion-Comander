@@ -1,3 +1,13 @@
+# 2026-11-26 — P0 follow-up: CI green, production defects reproduced, diagnostic adapter fails unseen identity
+
+CI **45831474974** passed on `812bd68d` (37 tests, Android Java/resources, native ABI). Two actual original-WSS requests on installed0.9.38 reproduced false application identity and raw thinking delimiters. The adult factual variant returned an answer; its factual accuracy is not accepted and the originally reported refusal is not cleared.
+
+Six separate base/adapter free-generation probes (12 runs) show the diagnostic LoRA still fails an unseen equivalent identity question. **Reject it for owner-behavior qualification** despite improved held-out reference likelihood. No final model or release acceptance claimed. The existing Model Laboratory exposes authenticated read-only candidate/adapter lineage; original production worker is unchanged.
+
+**93 expanded pytest cases passed locally** (including the 37 earlier cases, not additive). Expanded regression protection retains existing generic Accessibility access, explicit VPN enrollment/Android consent, WSS/typed actions, transfer verification, truthful statuses and existing intelligence routes. Three inherited stale source assertions were corrected against the recovered baseline/current approved UI. Full V3–V6/Nexus and the original release hold remain binding. Exact results and continuation state remain in `reports/control-p0-20261126/` and the P0 execution-state document.
+
+---
+
 # 2026-11-26 — P0 native assistant workspace and first hash-proven diagnostic LoRA
 
 **Not a release. All V3–V6/M0–M13 and Nexus requirements remain mandatory.**

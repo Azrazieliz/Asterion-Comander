@@ -237,6 +237,12 @@ def _candidate_db():
       parameters_active_b REAL, artifact_bytes INTEGER NOT NULL,
       license TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'staged',
       created_ms INTEGER NOT NULL, UNIQUE(app,repo,revision,artifact_sha256));
+    CREATE TABLE IF NOT EXISTS model_adaptation_experiments(
+      id TEXT PRIMARY KEY,base_candidate_id TEXT NOT NULL,
+      adapter_sha256 TEXT NOT NULL,training_record_sha256 TEXT NOT NULL,
+      evaluation_record_sha256 TEXT NOT NULL,weights_changed INTEGER NOT NULL,
+      created_ms INTEGER NOT NULL,
+      FOREIGN KEY(base_candidate_id) REFERENCES model_candidate_experiments(id));
     CREATE TABLE IF NOT EXISTS model_candidate_probes (
       candidate_id TEXT NOT NULL, device TEXT NOT NULL,
       backend TEXT NOT NULL, context_tokens INTEGER NOT NULL,
@@ -373,6 +379,9 @@ def candidate_matrix(app:str="")->dict:
             row["probes"]=[dict(r) for r in db.execute(
                 "SELECT * FROM model_candidate_probes WHERE candidate_id=? "
                 "ORDER BY created_ms DESC LIMIT 40",(row["id"],))]
+            row["adaptations"]=[dict(r) for r in db.execute(
+                "SELECT * FROM model_adaptation_experiments WHERE base_candidate_id=? ORDER BY created_ms,id",
+                (row["id"],))]
             row["phone_qualified"]=False
             row["reasoning_quality_certified"]=False
             row["no_automatic_model_selection"]=True

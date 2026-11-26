@@ -32,7 +32,7 @@ jobs:
           java-version: '21'
       - name: Verify executable AI source contracts, adaptation and persistence
         run: |
-          python -m pip install --disable-pip-version-check pytest httpx
+          python -m pip install --disable-pip-version-check pytest httpx fastapi
           python -m pytest -q \
             tests/test_control_ai_model_profile.py \
             tests/test_control_ai_adaptation.py \
@@ -42,7 +42,15 @@ jobs:
             tests/test_control_ai_model_lab_candidates.py \
             tests/test_control_ai_context_requirements.py \
             tests/test_control_ai_workspace.py \
-            tests/test_control_ai_requirements_snapshot.py
+            tests/test_control_ai_requirements_snapshot.py \
+            tests/test_ui_truthful_status.py \
+            tests/test_control_capability_ui_0933.py \
+            tests/test_control_ai_routes.py \
+            tests/test_v6_native_ai_wss.py \
+            tests/test_control_partner_bridge_ui_0934.py \
+            tests/test_native_signed_intent_routing.py \
+            tests/test_model_evaluation.py \
+            tests/test_v6_native_transfer_finalization.py
   android-java-only:
     needs: python-contracts
     runs-on: ubuntu-latest

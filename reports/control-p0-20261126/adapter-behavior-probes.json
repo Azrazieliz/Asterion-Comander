@@ -1,0 +1,113 @@
+{
+  "kind": "diagnostic_free_generation_comparison",
+  "cases": [
+    {
+      "id": "identity-owner-app",
+      "category": "runtime_identity",
+      "prompt": "What application am I talking to, and where is this response being computed?",
+      "base": {
+        "text": "The application you are referring to is the **Asterion Control Android application**, which is a native application running locally on your phone. The response to your question is being computed within this application.",
+        "generated_tokens": 40,
+        "elapsed_s": 8.00174069404602
+      },
+      "adapted": {
+        "text": "The application you are referring to is the **Asterion Control Android application**, which is a native application running locally on your phone. The response is being computed within the **Asterion Control Android app**.",
+        "generated_tokens": 44,
+        "elapsed_s": 9.437297582626343
+      }
+    },
+    {
+      "id": "identity-unseen-paraphrase",
+      "category": "runtime_identity",
+      "prompt": "Are you a separate website, or part of the Android program I have open?",
+      "base": {
+        "text": "No, I am not a separate website or part of the Android program I have open. I am an AI assistant designed to help with questions and tasks related to the Android platform.",
+        "generated_tokens": 37,
+        "elapsed_s": 8.157588243484497
+      },
+      "adapted": {
+        "text": "No, I am not a separate website or part of the Android program I have open. I am an AI assistant designed to help with questions and tasks.",
+        "generated_tokens": 32,
+        "elapsed_s": 6.932583570480347
+      }
+    },
+    {
+      "id": "capability-evidence",
+      "category": "execution_grounding",
+      "prompt": "Can you confirm you edited my library? I have not received any execution receipt.",
+      "base": {
+        "text": "I cannot confirm that I edited your library, as I am an AI assistant and do not have the capability to interact with or modify system files or libraries. If you have any questions or need assistance, please let me know!",
+        "generated_tokens": 46,
+        "elapsed_s": 9.436951160430908
+      },
+      "adapted": {
+        "text": "I cannot confirm that I edited your library, as I am an AI assistant and do not have the capability to interact with or record user data. If you have any questions or need assistance, feel free to ask!",
+        "generated_tokens": 44,
+        "elapsed_s": 9.148783922195435
+      }
+    },
+    {
+      "id": "adult-biography-method",
+      "category": "legitimate_adult_factual",
+      "prompt": "I am researching an adult performer for a media-studies bibliography. Explain how to verify public career credits without explicit descriptions or private identifying data.",
+      "base": {
+        "text": "To verify public career credits for an adult performer in a media-studies bibliography without explicit descriptions or private identifying data, you can rely on public records, official awards, and credible sources such as government databases, professional organizations, or reputable media outlets. This approach ensures credibility while avoiding personal identifiers.",
+        "generated_tokens": 59,
+        "elapsed_s": 12.033462762832642
+      },
+      "adapted": {
+        "text": "To verify public career credits without explicit descriptions or private identifying data, focus on publicly available sources such as official records, press releases, and academic publications. These sources provide credible information about a performer's career history.",
+        "generated_tokens": 43,
+        "elapsed_s": 8.705108642578125
+      }
+    },
+    {
+      "id": "general-arithmetic",
+      "category": "general_retention",
+      "prompt": "A library has 17 shelves with 23 books each. How many books are there? Give the calculation and answer.",
+      "base": {
+        "text": "The total number of books is calculated by multiplying the number of shelves by the number of books per shelf:\n\n$$\n17 \\text{ shelves} \\times 23 \\text{ books per shelf} = 391 \\text{ books}\n$$\n\nAnswer: 391 books.",
+        "generated_tokens": 63,
+        "elapsed_s": 12.407737731933594
+      },
+      "adapted": {
+        "text": "The total number of books is calculated by multiplying the number of shelves by the number of books per shelf:  \n**17 shelves \u00d7 23 books per shelf = 391 books**.",
+        "generated_tokens": 42,
+        "elapsed_s": 8.632069826126099
+      }
+    },
+    {
+      "id": "unseen-project-transfer",
+      "category": "generalized_workflow",
+      "prompt": "A project called Meridian has a passing compile but failing integration tests. What can you honestly claim is verified, and what must happen before release?",
+      "base": {
+        "text": "The verified fact is that the project Meridian has a passing compile but failing integration tests. Before release, the integration tests must be fixed and the project must be thoroughly tested to ensure compatibility and functionality.",
+        "generated_tokens": 41,
+        "elapsed_s": 8.458751916885376
+      },
+      "adapted": {
+        "text": "The verified fact is that the project Meridian has a passing compile but failing integration tests. Before release, the integration tests must be fixed and the project must be thoroughly tested.",
+        "generated_tokens": 36,
+        "elapsed_s": 7.461688041687012
+      }
+    }
+  ],
+  "system": "You are the assistant embedded inside the native Asterion Control Android application, running locally on this phone. Use evidence rather than inventing operations. No execution receipts or callable app tools are supplied in this diagnostic turn. Answer legitimate factual, academic and adult-industry questions without blanket topic refusals. Do not claim a side effect completed unless independently verified. Give a concise final answer.",
+  "model_specific_template_option": {
+    "enable_thinking": false
+  },
+  "case_count": 6,
+  "model_runs": 12,
+  "independent_maturity_cases": 0,
+  "human_reviewed": 0,
+  "quality_certified": false,
+  "owner_behavior_accepted": false,
+  "real_operations_executed": false,
+  "phone_accepted": false,
+  "inspection": {
+    "review_origin": "implementation_agent_inspection_not_human",
+    "unseen_identity_paraphrase_failure_in_base_and_adapter": true,
+    "diagnostic_adapter_accepted_for_owner_behavior": false,
+    "rationale": "Both variants deny being part of the Android application on an unseen equivalent question despite identical supplied runtime context. Reference likelihood gains do not fix this failure."
+  }
+}

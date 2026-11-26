@@ -81,3 +81,23 @@ def test_adapters_link_to_full_weight_candidate_without_rewriting_evidence(lab):
         model_lab.register_adaptation('owner-lora-02','missing-base',adapter_sha256=SHA,
             training_record_sha256='b'*64,evaluation_record_sha256='c'*64,weights_changed=True)
     assert model_lab.candidate_matrix('control')['count']==1
+    assert model_lab.candidate_matrix('control')['candidates'][0]['adaptations'][0]['adapter_sha256']==SHA
+
+
+def test_authenticated_readonly_lab_candidate_lineage(lab,monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from asterion_remote.control_v2_routes import router
+    monkeypatch.setenv("ASTERION_API_TOKEN","L"*40)
+    add()
+    model_lab.register_adaptation('owner-lora-readonly','control-14b',adapter_sha256=SHA,
+        training_record_sha256='b'*64,evaluation_record_sha256='c'*64,weights_changed=True)
+    app=FastAPI();app.include_router(router)
+    with TestClient(app) as client:
+        assert client.get('/api/v1/v2/models/candidates').status_code==401
+        result=client.get('/api/v1/v2/models/candidates?app=control',headers={'Authorization':'Bearer '+'L'*40})
+        assert result.status_code==200
+        row=result.json()['candidates'][0]
+        assert row['adaptations'][0]['adapter_sha256']==SHA
+        assert row['phone_qualified'] is False
+        assert client.post('/api/v1/v2/models/candidates',headers={'Authorization':'Bearer '+'L'*40},json={}).status_code==405

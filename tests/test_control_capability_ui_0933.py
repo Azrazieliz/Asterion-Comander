@@ -58,17 +58,21 @@ class CapabilitySurfaceTests(unittest.TestCase):
             'private void showWindowsIntelligence()',1)[0]
         connect=source.split('private View scrollDevices()',1)[1].split(
             'private View scrollTools()',1)[0]
-        for item in ("Voice control","Asterion app integrations",
+        for item in ("Asterion voice","Connected applications",
                      "Direct Wi-Fi file transfer","Asterion Control updates"):
             self.assertIn(item,tools)
             self.assertNotIn(item,connect)
-        for item in ("On-device AI","Incident investigation","Network & privacy"):
+        for item in ("Asterion intelligence","Incident investigation","Network & privacy"):
             self.assertIn(item,tools)
         self.assertIn('this::showPhoneAiChat',tools)
         self.assertIn('this::showPhoneAiStatus',tools)
         self.assertIn('private void showWindowsIntelligence()',source)
         self.assertIn('"/api/v1/intelligence/capabilities"',source)
-        self.assertIn('OnDeviceLlm.generate(getApplicationContext(),prompt)',source)
+        self.assertIn('new Intent(this,AssistantActivity.class)',source)
+        workspace=(ROOT/"android/app/src/main/java/com/asterion/control/AssistantActivity.java").read_text("utf8")
+        session=(ROOT/"android/app/src/main/java/com/asterion/control/AssistantSession.java").read_text("utf8")
+        self.assertIn('session.send(this,prompt)',workspace)
+        self.assertIn('OnDeviceLlm.generate(app,target.project,target.modelMessages()',session)
 
     def test_embedded_windows_navigation_not_duplicated(self):
         text=JAVA.read_text("utf8")

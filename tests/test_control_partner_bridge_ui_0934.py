@@ -41,7 +41,8 @@ class PartnerOwnerUiTests(unittest.TestCase):
     def test_plain_ui_control_does_not_require_native_provider(self):
         s=self.main
         self.assertIn('generic Accessibility control',s)
-        self.assertIn('without a native bridge',s)
+        self.assertIn('No Asterion native bridge provided by this installed version',s)
+        self.assertIn('The shortcut already works ',s)
         self.assertIn('AppCatalog.requestLaunch(this,pkg)',s)
         self.assertIn('this::showAppBridgeApprovals',s)
 
@@ -49,9 +50,11 @@ class PartnerOwnerUiTests(unittest.TestCase):
         s=self.main
         snippet=s.split('private void showFreeVpnConfigSetup()',1)[1].split(
             'private void showVpnImportType()',1)[0]
-        self.assertIn('https://account.protonvpn.com',snippet)
-        self.assertIn('Import WireGuard profile',snippet)
-        self.assertIn('Android must separately approve the VPN',snippet)
+        self.assertIn('Cloudflare',snippet)
+        self.assertIn('.setPositiveButton("Agree & configure"',snippet)
+        self.assertIn('ControlFreeVpnProvisioner.enroll',snippet)
+        self.assertIn('this::requestVpnConsentAndConnect',snippet)
+        self.assertIn('Android will still ask you to approve the VPN connection',snippet)
         self.assertNotIn('ControlPrivateVpn.connect(',snippet)
         self.assertNotIn('ControlPrivateVpn.importLocally(',snippet)
 

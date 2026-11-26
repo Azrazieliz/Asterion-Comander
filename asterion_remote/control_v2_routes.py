@@ -107,6 +107,14 @@ def models(app:str=""):
     except ValueError as exc:raise HTTPException(422,str(exc)) from exc
 
 
+@router.get("/models/candidates")
+def model_candidates(app:str=""):
+    # Read-only view of the original laboratory, including immutable adapter
+    # lineage. Metadata never grants deployment or execution permission.
+    try:return model_lab.candidate_matrix(app)
+    except ValueError as exc:raise HTTPException(422,str(exc)) from exc
+
+
 @router.post("/models/watch")
 def model_watch(body:ModelWatch):
     try:return model_lab.watch(body.app,body.repo,body.installed_sha)

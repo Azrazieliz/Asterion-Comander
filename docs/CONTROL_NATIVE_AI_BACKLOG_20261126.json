@@ -72,5 +72,26 @@
     "ai_native_tool_receipts": [
       "tests/test_v6_native_ai_wss.py"
     ]
+  },
+  "integration_checkpoint": {
+    "source_commit": "812bd68d2523f9311ca13f9da79abfab22c9a351",
+    "source_ci_run": 45831474974,
+    "source_ci_passed": true,
+    "source_pytest_expanded": 93,
+    "jvm_assertions": 523,
+    "real_adapter_weights_changed": true,
+    "adapter_owner_behavior_qualified": false,
+    "installed_baseline_failures_reproduced": true,
+    "new_source_phone_verified": false,
+    "production_promoted": false,
+    "remaining_acceptance": [
+      "stronger model with real owner behavior improvement on unseen tasks",
+      "durable independent isolated development without ChatGPT",
+      "canonical context and TeraBox integration",
+      "full premium UI and multimodal/tool acceptance",
+      "all V3-V6 M0-M13 and Nexus preservation gates",
+      "original-owner-signed final Samsung acceptance"
+    ],
+    "evidence": "reports/control-p0-20261126/verified-state.json"
   }
 }

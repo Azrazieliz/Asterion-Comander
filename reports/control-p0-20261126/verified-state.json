@@ -33,7 +33,9 @@
     "pytest_passed": 37,
     "jvm_assertions_passed": 523,
     "android_api35_java_compiled": true,
-    "phone_accepted": false
+    "phone_accepted": false,
+    "expanded_pytest_passed": 93,
+    "inherited_stale_assertions_reconciled": 3
   },
   "adapter": {
     "purpose": "diagnostic_owner_instruction_recall",
@@ -46,7 +48,10 @@
     "heldout_likelihood_cases": 12,
     "human_reviews": 0,
     "maturity_certified": false,
-    "phone_promoted": false
+    "phone_promoted": false,
+    "behavior_probe_cases": 6,
+    "behavior_probe_model_runs": 12,
+    "unseen_identity_paraphrase_failure": true
   },
   "preserved": {
     "paired_installation": true,
@@ -65,5 +70,20 @@
     "cancellation_completed": true,
     "concurrent_model_status_unblocked": true,
     "phone_accepted": false
+  },
+  "ci": {
+    "run_id": 45831474974,
+    "commit": "812bd68d2523f9311ca13f9da79abfab22c9a351",
+    "python_contracts": "success",
+    "android_java_and_jni_abi": "success",
+    "apk_built": false
+  },
+  "installed_regressions": {
+    "receipt": "control-p0-20261126-installed-ai-results-01",
+    "cases_completed": 2,
+    "identity_failure_reproduced": true,
+    "raw_delimiter_leak_reproduced": true,
+    "adult_blanket_refusal_reproduced_in_this_probe": false,
+    "new_source_phone_accepted": false
   }
 }

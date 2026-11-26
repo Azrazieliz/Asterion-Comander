@@ -86,3 +86,30 @@ crash-resume demonstration; connect exact-source requirements/cognition and
 existing TeraBox; finish all remaining UI/integration and M0–M13 gates. Preserve
 the release hold until a meaningful original-owner-signed final candidate can
 undergo Samsung acceptance. Do not mark this checkpoint as product completion.
+
+
+## Follow-up verification and neural qualification failure
+
+CI run **45831474974** passed for integrated source `812bd68d`: 37 tests,
+Android Java/resource integration and pinned native ABI checks. A broader source
+sweep found three assertions already stale at the recovered baseline (old labels,
+old modal inference location and pre-WARP VPN setup); their permission/functional
+requirements are retained in updated checks and the expanded suite.
+
+Two actual installed-phone requests completed through the original native WSS.
+The identity variant answered that it was not running software; both returned raw
+thinking delimiters. This directly reproduces the production defects, without
+installing new source. The adult-career variant returned text rather than a
+blanket refusal; factual accuracy and the reported original refusal remain open.
+
+A separate six-case base/adapter free-generation comparison (12 model runs) also
+found that **both variants still deny application integration on an unseen
+paraphrase**, despite supplied runtime context. The diagnostic adapter is therefore
+**not accepted for owner-behavior competence**. Its reference-likelihood gain is
+not sufficient. General arithmetic and non-Asterion project questions are retained
+as limited transfer probes; no general-retention, human-review or maturity claim.
+
+Read-only `/api/v1/v2/models/candidates` now exposes full candidate and adapter
+lineage under the original authentication. No mutation/promotion API is added.
+Windows production source has not been promoted, so this endpoint is source-only
+until the existing worker's release gates are met.
