@@ -12,6 +12,8 @@ on:
       - 'scripts/control_ai_autonomous_daemon.py'
       - 'tests/test_control_security_recovery.py'
       - 'tests/test_control_ai_dev_backlog.py'
+      - 'tests/test_control_ai_executor.py'
+      - 'tests/test_control_ai_daemon.py'
       - '.github/workflows/control-network-security-autonomy.yml'
 permissions:
   contents: read
