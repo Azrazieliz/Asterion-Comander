@@ -173,12 +173,14 @@ final class ControlAssistantMemory {
         }
         hits.sort((a,b)->Integer.compare(b.score,a.score));
         StringBuilder out=new StringBuilder();
+        int selected=0;
         for(Hit hit:hits){
-            if(out.length()>=4000||out.toString().split("\\n---\\n").length>5)break;
+            if(out.length()>=4000||selected>=5)break;
             String value="Project: "+hit.project+" | Evidence: "+hit.source+
                 "\n"+hit.content+"\n---\n";
             if(out.length()+value.length()>4500)continue;
             out.append(value);
+            selected++;
         }
         return out.toString();
     }
