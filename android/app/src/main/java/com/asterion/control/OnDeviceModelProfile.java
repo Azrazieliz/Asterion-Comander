@@ -55,7 +55,8 @@ final class OnDeviceModelProfile {
         }
     }
     /** Format is supplied by the signed manifest, not guessed from vendor or weight filename. */
-    String prompt(String user) {
-        return systemPrefix+systemText+userPrefix+user.trim()+assistantPrefix;
+    String prompt(String user,String ownerInstructions) {
+        return systemPrefix+systemText+"\n"+ownerInstructions+
+            userPrefix+user.trim()+assistantPrefix;
     }
 }
