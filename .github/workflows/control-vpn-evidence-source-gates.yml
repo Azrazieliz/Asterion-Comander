@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - work/control-non-ai-vpn-evidence-20261126
+      - work/control-security-vpn-reconciled-20261126
       - work/control-native-ai-reconstruction-20261126
     paths:
       - 'android/app/src/main/java/com/asterion/control/*Vpn*.java'
@@ -24,6 +25,8 @@ jobs:
           mkdir -p /tmp/vpn-policy
           javac -encoding UTF-8 -d /tmp/vpn-policy android/app/src/main/java/com/asterion/control/VpnEvidencePolicy.java tests/java/com/asterion/control/VpnEvidencePolicyTest.java
           java -cp /tmp/vpn-policy com.asterion.control.VpnEvidencePolicyTest
+          javac -encoding UTF-8 -d /tmp/vpn-policy android/app/src/main/java/com/asterion/control/VpnRouteScope.java tests/java/com/asterion/control/VpnRouteScopeTest.java
+          java -cp /tmp/vpn-policy com.asterion.control.VpnRouteScopeTest
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'

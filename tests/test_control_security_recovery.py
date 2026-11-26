@@ -51,3 +51,37 @@ def test_onion_crawler_rejected_before_dns(monkeypatch):
     with pytest.raises(browser_crawler.HTTPException) as error:
         browser_crawler.validated_public_https("https://"+"a"*56+".onion/")
     assert error.value.status_code==403
+
+
+def test_quarantine_collision_keeps_both_files(tmp_path,monkeypatch):
+    source=tmp_path/"file";source.write_bytes(b"sample")
+    vault=tmp_path/"vault";root=scanner._vault(vault)
+    token="a"*32
+    (root/(token+".blob")).write_bytes(b"existing")
+    from types import SimpleNamespace
+    monkeypatch.setattr(scanner.uuid,"uuid4",lambda:SimpleNamespace(hex=token))
+    with pytest.raises(FileExistsError):scanner.quarantine(source,vault,digest(b"sample"))
+    assert source.read_bytes()==b"sample"
+    assert (root/(token+".blob")).read_bytes()==b"existing"
+
+def test_interrupted_move_recovers_source(tmp_path,monkeypatch):
+    source=tmp_path/"file";source.write_bytes(b"sample")
+    vault=tmp_path/"vault"
+    original=scanner.Path.unlink
+    def crash(path,*args,**kwargs):
+        if path==source:raise OSError("fixture process interruption")
+        return original(path,*args,**kwargs)
+    monkeypatch.setattr(scanner.Path,"unlink",crash)
+    with pytest.raises(OSError):scanner.quarantine(source,vault,digest(b"sample"))
+    item=scanner.inventory(vault)["items"][0]
+    assert item["state"]=="move_interrupted_source_retained"
+    monkeypatch.setattr(scanner.Path,"unlink",original)
+    assert scanner.restore(item["id"],vault)["state"]=="restored"
+    assert source.read_bytes()==b"sample"
+
+def test_quarantine_rejects_multiple_hardlinks(tmp_path):
+    source=tmp_path/"file";source.write_bytes(b"sample")
+    os.link(source,tmp_path/"other")
+    with pytest.raises(ValueError,match="multiple_hardlinks"):
+        scanner.quarantine(source,tmp_path/"vault",digest(b"sample"))
+    assert source.exists()

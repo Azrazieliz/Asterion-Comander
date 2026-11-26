@@ -18,6 +18,7 @@ import uuid
 import zipfile
 from pathlib import Path
 from typing import Callable
+from .bridge_worker_lock import worker_process_lock
 
 _CHUNK = 1024 * 1024
 _MAX_FILE = 512 * 1024 * 1024
@@ -202,7 +203,8 @@ def quarantine(source:Path,vault_root:Path,expected_sha256:str)->dict:
     if not re.fullmatch(r"[0-9a-f]{64}",expected_sha256):raise ValueError("expected_sha256_required")
     root=_vault(Path(vault_root))
     if not source.is_file() or source.is_relative_to(root):raise ValueError("invalid_source")
-    with _LOCK:
+    with _LOCK,worker_process_lock(root/".quarantine.lock"):
+        if source.stat().st_nlink!=1:raise ValueError("source_has_multiple_hardlinks")
         if _sha256(source)!=expected_sha256:raise ValueError("file_changed_before_quarantine")
         if source.stat().st_dev!=root.stat().st_dev:raise ValueError("quarantine_requires_same_filesystem")
         token=uuid.uuid4().hex
@@ -211,8 +213,12 @@ def quarantine(source:Path,vault_root:Path,expected_sha256:str)->dict:
             "created_at_ms":time.time_ns()//1000000,"state":"move_pending"}
         _write_meta(meta,entry)
         try:
-            if destination.exists():raise FileExistsError(token)
-            source.rename(destination)
+            # Atomic no-clobber publication of the vault copy. Retain the
+            # pending receipt if interruption occurs before unlinking source.
+            os.link(source,destination,follow_symlinks=False)
+            if not os.path.samefile(source,destination) or _sha256(destination)!=expected_sha256:
+                raise ValueError("file_changed_during_quarantine")
+            source.unlink()
         except BaseException:
             # Keep durable pending receipt; never remove potential evidence.
             raise
@@ -231,7 +237,7 @@ def original_destination(item_id:str,vault_root:Path)->Path:
 def restore(item_id:str,vault_root:Path,approved_destination:Path|None=None)->dict:
     """No-clobber restore. Retain the receipt even after successful restoration."""
     root=_vault(Path(vault_root))
-    with _LOCK:
+    with _LOCK,worker_process_lock(root/".quarantine.lock"):
         meta,blob,entry=_entry(root,item_id)
         original=Path(entry["source"])
         dest=original if approved_destination is None else Path(approved_destination)
@@ -239,13 +245,16 @@ def restore(item_id:str,vault_root:Path,approved_destination:Path|None=None)->di
         dest=dest.resolve()
         if entry.get("state")=="restored":
             if dest.is_file() and _sha256(dest)==entry["sha256"]:
+                if blob.exists():
+                    if not os.path.samefile(blob,dest):raise ValueError("restored_blob_identity_changed")
+                    blob.unlink()
                 return {"ok":True,"id":item_id,"state":"restored","sha256":entry["sha256"]}
             raise ValueError("restored_destination_changed")
         if not dest.parent.is_dir():raise FileNotFoundError("destination_parent_missing")
         if not blob.is_file() or _sha256(blob)!=entry["sha256"]:raise ValueError("quarantine_integrity_failed")
         # Hard-link creation fails atomically if destination exists. No silent
         # overwrite, cross-volume copy, or deletion of original bytes on failure.
-        if entry.get("state")=="restore_pending" and dest.exists():
+        if entry.get("state") in {"restore_pending","move_pending"} and dest.exists():
             if not os.path.samefile(blob,dest):raise FileExistsError("destination_already_exists")
         else:
             if dest.exists():raise FileExistsError("destination_already_exists")
@@ -266,7 +275,10 @@ def inventory(vault_root:Path,limit:int=50)->dict:
         try:
             _,blob,entry=_entry(root,file.stem)
             state=entry.get("state","quarantined")
-            if state=="move_pending":state="move_receipt_pending" if blob.is_file() else "move_not_observed"
+            if state=="move_pending":
+                original=Path(entry["source"])
+                state=("move_interrupted_source_retained" if blob.is_file() and original.exists() and os.path.samefile(blob,original)
+                       else "move_receipt_pending" if blob.is_file() else "move_not_observed")
             if state=="quarantined" and not blob.is_file():state="missing_blob_review"
             rows.append({"id":entry["id"],"sha256":entry["sha256"],"size":entry["size"],
                 "created_at_ms":entry["created_at_ms"],"state":state})
