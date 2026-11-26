@@ -81,8 +81,8 @@ def execute(llama_source,model_file,stage):
     build_times["configure_s"]=round(checked_command(configure,timeout=360,log=log),2)
     build_times["compile_s"]=round(checked_command(
         ["cmake","--build",str(build),"--config","Release","--target",
-         "llama-cli","--parallel","1"],timeout=2400,log=log),2)
-    cli=list(build.rglob("llama-cli.exe"))
+         "llama-completion","--parallel","1"],timeout=2400,log=log),2)
+    cli=list(build.rglob("llama-completion.exe"))
     if len(cli)!=1:raise RuntimeError("expected_one_compiled_llama_cli")
     output=stage/"inference-output.txt"
     started=time.monotonic()
