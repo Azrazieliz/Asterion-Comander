@@ -3,7 +3,10 @@ on:
   push:
     branches:
       - work/control-ai-research-reconciliation-20261126
+      - work/control-ai-evidence-portability-20261126
+      - work/control-native-ai-reconstruction-20261126
     paths:
+      - 'docs/CONTROL_AI_RECONCILIATION_AND_ACCEPTANCE_20261126.md'
       - 'docs/CONTROL_AI_OWNER_DIRECTIVE_PRIORITY_20261126.md'
       - 'docs/CONTROL_AI_REQUIREMENT_ANCHORS_20261126.json'
       - 'scripts/control_ai_requirements_snapshot.py'

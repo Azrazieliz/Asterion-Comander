@@ -116,8 +116,16 @@ def snapshot(root:Path,index:dict,*,max_pack_chars:int=12000)->dict:
     if result["mandatory_count"]!=len([x for x in records
             if x["importance"]=="mandatory" and x["status"] in {"active","open"}]):
         raise RuntimeError("mandatory_requirements_lost")
+    # Portable identity comes from immutable Git blob OIDs and canonicalized
+    # JSON; the separate manifest_sha256 can differ by platform because
+    # the existing evidence engine hashes the actual checkout line endings.
+    index_digest=hashlib.sha256(json.dumps(index,sort_keys=True,
+        ensure_ascii=False,separators=(",",":")).encode("utf-8")).hexdigest()
     result.update({
         "index_schema":SCHEMA,
+        "canonical_index_sha256":index_digest,
+        "source_git_blob_oids":{name:row["blob_sha"] for name,row in
+                                sorted(sources.items())},
         "source_count":len(sources),
         "indexed_records":len(records),
         "owner_topic_coverage":sorted(topics),
@@ -154,6 +162,7 @@ def main(argv=None):
         with destination.open("x",encoding="utf-8") as file:
             file.write(raw);file.flush();os.fsync(file.fileno())
     print(json.dumps({"manifest_sha256":outcome["manifest_sha256"],
+        "canonical_index_sha256":outcome["canonical_index_sha256"],
         "mandatory_count":outcome["mandatory_count"],
         "unresolved_ids":outcome["unresolved_ids"],
         "potential_conflicts":outcome["potential_conflicts"],

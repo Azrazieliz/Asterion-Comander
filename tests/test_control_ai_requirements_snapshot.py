@@ -23,6 +23,16 @@ def test_source_locked_owner_and_v3_v6_contracts_recover_exactly():
     assert result["indexed_records"]==27
     assert result["unresolved_ids"]==["V6-R09-OPEN","V3-N01-N30-OPEN"]
     assert result["source_count"]==7
+    assert len(result["canonical_index_sha256"])==64
+    assert result["source_git_blob_oids"]=={
+        name:metadata["blob_sha"] for name,metadata in index()["files"].items()}
+    # This identity is stable across Git CRLF/LF materializations even when
+    # exact checkout SHA-256 passage receipts legitimately differ by platform.
+    from scripts.control_ai_requirements_snapshot import git_blob_sha
+    import hashlib
+    sample=b"One canonical line\nSecond canonical line\n"
+    assert git_blob_sha(sample)==git_blob_sha(
+        sample.replace(b"\n",b"\r\n").replace(b"\r\n",b"\n"))
     assert len(result["partitions"])>=2
     assert result["original_source_spans_verified"]
     assert not result["all_requirements_certified"]
