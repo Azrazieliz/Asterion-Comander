@@ -48,7 +48,7 @@ def _check_id(value):
 
 
 def seed(cycle_id, tasks):
-    """Idempotent initial import; never resets previously claimed/completed work."""
+    """Atomic, idempotent import; existing claims and evidence are immutable."""
     if not isinstance(tasks, list) or not tasks:
         raise ValueError("nonempty_task_list_required")
     ids = set()
@@ -76,32 +76,38 @@ def seed(cycle_id, tasks):
             _check_id(dependency)
             if dependency==item["id"]:
                 raise ValueError("self_dependency")
-        if item.get("verification_level") not in (None,"source_tested","device_verified"):
-            raise ValueError("invalid_requested_verification")
     db=_database()
     try:
-        with db:
-            if not db.execute("SELECT id FROM cycles WHERE id=?", (cycle_id,)).fetchone():
-                raise ValueError("cycle_not_initialized")
-            stamp=time.time_ns()//1_000_000
-            for item in tasks:
-                deps=item.get("depends_on",[])
-                db.execute("""INSERT OR IGNORE INTO dev_backlog
-                  (task_id,cycle_id,priority,component,goal,target_path,
-                   dependencies,updated_ms) VALUES(?,?,?,?,?,?,?,?)""",
-                   (item["id"],cycle_id,item["priority"],item["component"],
-                    item["goal"],item["target_path"],json.dumps(deps),stamp))
-            for item in tasks:
-                current=db.execute("SELECT cycle_id,goal,target_path,dependencies FROM dev_backlog WHERE task_id=?",
-                                   (item["id"],)).fetchone()
-                if (current["cycle_id"]!=cycle_id or current["goal"]!=item["goal"] or
-                        current["target_path"]!=item["target_path"] or
-                        json.loads(current["dependencies"])!=item.get("depends_on",[])):
-                    raise ValueError("attempted_change_to_existing_task")
+        db.execute("BEGIN IMMEDIATE")
+        if not db.execute("SELECT id FROM cycles WHERE id=?", (cycle_id,)).fetchone():
+            raise ValueError("cycle_not_initialized")
+        stamp=time.time_ns()//1_000_000
+        for item in tasks:
+            deps=item.get("depends_on",[])
+            db.execute("""INSERT OR IGNORE INTO dev_backlog
+                (task_id,cycle_id,priority,component,goal,target_path,
+                 dependencies,updated_ms) VALUES(?,?,?,?,?,?,?,?)""",
+                (item["id"],cycle_id,item["priority"],item["component"],
+                 item["goal"],item["target_path"],json.dumps(deps),stamp))
+        for item in tasks:
+            current=db.execute(
+                "SELECT cycle_id,goal,target_path,dependencies FROM dev_backlog WHERE task_id=?",
+                (item["id"],)).fetchone()
+            if (current["cycle_id"]!=cycle_id or current["goal"]!=item["goal"] or
+                    current["target_path"]!=item["target_path"] or
+                    json.loads(current["dependencies"])!=item.get("depends_on",[])):
+                raise ValueError("attempted_change_to_existing_task")
+        known={row["task_id"] for row in db.execute(
+            "SELECT task_id FROM dev_backlog WHERE cycle_id=?",(cycle_id,))}
+        if any(not set(item.get("depends_on",[])) <= known for item in tasks):
+            raise ValueError("unknown_task_dependency")
+        db.execute("COMMIT")
+    except BaseException:
+        db.execute("ROLLBACK")
+        raise
     finally:
         db.close()
     return snapshot(cycle_id)
-
 
 def snapshot(cycle_id):
     db=_database()
