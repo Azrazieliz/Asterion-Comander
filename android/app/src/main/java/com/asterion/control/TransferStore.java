@@ -105,7 +105,10 @@ final class TransferStore {
           .put("stored_location","Downloads/Asterion Control");
       }
     }
-    if(jobs.size()>=4)throw new IllegalStateException("Too many active transfers");
+    // Completed/failed receipts are retained for reconciliation, but never
+    // consume an active receive/publish slot.
+    long active=jobs.values().stream().filter(j->TransferCapacityPolicy.isActive(j.phase)).count();
+    if(active>=4)throw new IllegalStateException("Too many active transfers");
     byte[] bytes=new byte[18];random.nextBytes(bytes);
     String id=Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     File dir=new File(app.getCacheDir(),"incoming-asterion");

@@ -292,6 +292,12 @@ def sync_remote():
         if not unpublished:
             git('merge','--ff-only','origin/main')
             return
+        # Even fast-forward publication must never upload arbitrary local files.
+        changed=git('log','--format=','--name-only','origin/main..HEAD').splitlines()
+        paths={p.strip() for p in changed if p.strip()}
+        if not paths or any(not p.startswith('results/') or not p.endswith('.json') or
+                            not NAME.fullmatch(Path(p).stem) for p in paths):
+            raise RuntimeError('Unpublished non-receipt commit; refusing publication')
         # Normal publishing is a fast-forward. Only reconcile if another
         # project actually advanced the remote after our base snapshot.
         if int(git('rev-list','--count','HEAD..origin/main')):

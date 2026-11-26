@@ -197,7 +197,7 @@ class DirtyReceiptRecoveryTest(unittest.TestCase):
             bridge.publish([Path('results/test-job.json')])
         self.assertFalse((self.worker/'.git'/'rebase-merge').exists())
         self.assertEqual(json.loads(local.read_text())['status'],'error')
-        refs=git(self.worker,'for-each-ref','--format=%(refname)','refs/asterion-recovery/unpublished-').splitlines()
+        refs=git(self.worker,'for-each-ref','--format=%(refname)','refs/asterion-recovery/unpublished-*').splitlines()
         self.assertTrue(any(subprocess.run(['git','show',ref+':results/test-job.json'],
             cwd=self.worker,check=True,capture_output=True).stdout==original for ref in refs))
         self.assertFalse((self.base/'receipt-recovery').exists())

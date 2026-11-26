@@ -26,6 +26,7 @@ _workers = ThreadPoolExecutor(max_workers=2,thread_name_prefix="asterion-wifi-fi
 _guard = threading.RLock()
 _jobs: dict[str,dict] = {}
 _cancels: dict[str,threading.Event] = {}
+_active_sources: dict[str,tuple[str,str]] = {}
 
 class TransferRequest(BaseModel):
     pc_path: str = Field(min_length=1,max_length=2048)
@@ -119,6 +120,55 @@ def finalize_verified_android_transfer(
     return receipt
 
 
+def _send_verified_chunk(client,base,headers,transfer_id,checksum,size,offset,payload,cancel):
+    """Retry an ambiguous PUT only after a successful identity/offset read."""
+    end=offset+len(payload)
+    for attempt in range(6):
+        if cancel.is_set():raise InterruptedError("Cancelled by user")
+        try:
+            response=client.put(base+"/transfer/chunk/"+transfer_id,
+                content=payload,headers={**headers,"Content-Type":"application/octet-stream",
+                "X-Transfer-Offset":str(offset)})
+            response.raise_for_status()
+            if int(response.json().get("received",-1))!=end:
+                raise RuntimeError("Phone acknowledged unexpected chunk length")
+            return end
+        except (httpx.HTTPError,ValueError,TypeError,RuntimeError) as exc:
+            last=exc
+        # A failed status GET must never loop back into PUT. Resolve the
+        # original write outcome using bounded READ-only retries first.
+        for probe_attempt in range(6):
+            if cancel.is_set():raise InterruptedError("Cancelled by user")
+            time.sleep(min(2.0,0.2*(probe_attempt+1)))
+            try:
+                probe=client.get(base+"/transfer/status/"+transfer_id,headers=headers)
+                probe.raise_for_status()
+                state=probe.json()
+            except (httpx.TransportError,ValueError) as exc:
+                last=exc
+                continue
+            except httpx.HTTPStatusError as exc:
+                last=exc
+                if exc.response.status_code in (408,429,500,502,503,504):continue
+                raise RuntimeError("Transfer offset outcome uncertain: status HTTP "+
+                                   str(exc.response.status_code)) from exc
+            if (state.get("sha256")!=checksum or int(state.get("size",-1))!=size or
+                state.get("id",transfer_id)!=transfer_id):
+                raise RuntimeError("Transfer identity changed during recovery")
+            current=int(state.get("received",-1))
+            if not offset<=current<=end:
+                raise RuntimeError("Transfer advanced outside expected chunk")
+            if current==end:return end
+            if state.get("phase","receiving")!="receiving":
+                raise RuntimeError("Transfer not accepting remaining bytes")
+            payload=payload[current-offset:]
+            offset=current
+            break
+        else:
+            raise RuntimeError("Transfer offset outcome uncertain: status unavailable") from last
+    raise RuntimeError("Transfer offset outcome uncertain: retry limit") from last
+
+
 def _copy(key: str, path: Path, name: str, paired: dict, cancel: threading.Event):
     transfer_id=None
     headers={"Authorization":"Bearer "+paired["token"]}
@@ -158,48 +208,8 @@ def _copy(key: str, path: Path, name: str, paired: dict, cancel: threading.Event
                     payload=file.read(min(chunk_size,size-offset))
                     if not payload:
                         raise RuntimeError("Source changed during transfer")
-                    attempts=0
-                    while True:
-                        if cancel.is_set():raise InterruptedError("Cancelled by user")
-                        try:
-                            response=client.put(base+"/transfer/chunk/"+transfer_id,
-                              content=payload,headers={**headers,
-                                "Content-Type":"application/octet-stream",
-                                "X-Transfer-Offset":str(offset)})
-                            response.raise_for_status()
-                            next_pos=int(response.json().get("received",-1))
-                            if next_pos!=offset+len(payload):
-                                raise RuntimeError("Phone acknowledged unexpected chunk length")
-                            offset=next_pos
-                            break
-                        except (httpx.HTTPError,ValueError,RuntimeError) as exc:
-                            # A network interruption can occur AFTER Android
-                            # appended bytes. Never replay that same offset
-                            # without asking the phone what was committed.
-                            attempts+=1
-                            if attempts>5:
-                                raise RuntimeError("Transfer offset outcome uncertain") from exc
-                            time.sleep(min(1.5,0.15*attempts))
-                            try:
-                                probe=client.get(base+"/transfer/status/"+transfer_id,
-                                                 headers=headers)
-                                probe.raise_for_status()
-                                state=probe.json()
-                                current=int(state["received"])
-                                if state.get("sha256")!=checksum or int(state.get("size",-1))!=size:
-                                    raise RuntimeError("Transfer identity changed during recovery")
-                                if not offset<=current<=offset+len(payload):
-                                    raise RuntimeError("Transfer advanced outside expected chunk")
-                                if current>offset:
-                                    offset=current
-                                    # Retry only the uncommitted suffix.
-                                    file.seek(offset)
-                                    payload=file.read(min(chunk_size,size-offset))
-                                    if not payload:
-                                        break
-                            except httpx.TransportError:
-                                # Retry the READ probe, never blind-write old bytes.
-                                continue
+                    offset=_send_verified_chunk(client,base,headers,transfer_id,
+                        checksum,size,offset,payload,cancel)
                     _update(key,bytes_sent=offset)
             _update(key,state="verifying")
             done=finalize_verified_android_transfer(
@@ -229,6 +239,17 @@ def _copy(key: str, path: Path, name: str, paired: dict, cancel: threading.Event
                     c.post(base+"/transfer/cancel/"+transfer_id,json={},headers=headers)
             except Exception:pass
 
+def _run_copy(key,path,name,paired,cancel):
+    try:
+        _copy(key,path,name,paired,cancel)
+    finally:
+        # outcome_unknown is an honest retained result, not a live worker.
+        # It must not permanently consume one of the three active slots.
+        with _guard:
+            _cancels.pop(key,None)
+            _active_sources.pop(key,None)
+
+
 def start_transfer(data: TransferRequest,safe_path):
     source=safe_path(data.pc_path)
     if not source.is_file() or source.is_symlink():
@@ -240,27 +261,40 @@ def start_transfer(data: TransferRequest,safe_path):
     name=_name(data.name or source.name)
     with _guard:
         # Keep the active queue bounded; old results do not occupy worker slots.
-        if sum(r["state"] not in ("completed","failed","cancelled") for r in _jobs.values())>=3:
-            raise HTTPException(429,"Asterion Control transfer queue full")
+        identity=(str(source.resolve()),name)
+        for existing,active in _active_sources.items():
+            if active==identity:
+                return {"id":existing,"status":"queued","transport":"PC-to-Android private Wi-Fi"}
+            if active[1]==name:
+                raise HTTPException(409,"Destination filename already has an active transfer")
+        if len(_cancels)>=3:
+            raise HTTPException(429,"Asterion Control transfer queue full",headers={"Retry-After":"10"})
         key=uuid.uuid4().hex
         _jobs[key]={"id":key,"state":"queued","pc_name":source.name,"android_name":name,
                     "bytes_sent":0,"size":source.stat().st_size,
                     "created_at":time.time(),"updated_at":time.time(),"result":None,"error":None}
         cancel=threading.Event();_cancels[key]=cancel
-    _workers.submit(_copy,key,source,name,paired,cancel)
+        _active_sources[key]=identity
+    try:
+        _workers.submit(_run_copy,key,source,name,paired,cancel)
+    except Exception:
+        with _guard:
+            _cancels.pop(key,None);_active_sources.pop(key,None)
+            _jobs[key].update(state='failed',error='Transfer worker unavailable')
+        raise HTTPException(503,'Transfer worker unavailable')
     return {"id":key,"status":"queued","transport":"PC-to-Android private Wi-Fi"}
 
 def transfer_status(key: str):
     with _guard:
         job=_jobs.get(key)
         if job is None:raise HTTPException(404,"Unknown transfer")
-        return job.copy()
+        return dict(job,worker_active=key in _cancels)
 
 def cancel_transfer(key: str):
     with _guard:
         job=_jobs.get(key)
         if job is None:raise HTTPException(404,"Unknown transfer")
-        if job["state"] in ("completed","failed","cancelled"):
+        if key not in _cancels or job["state"] in ("completed","failed","cancelled"):
             return {"ok":False,"state":job["state"]}
         _cancels[key].set()
     return {"ok":True,"state":"cancelling"}

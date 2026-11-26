@@ -146,3 +146,65 @@ class PublicationAcceptance(unittest.TestCase):
 
 if __name__=="__main__":
     unittest.main()
+
+
+class ChunkRecoveryAcceptance(unittest.TestCase):
+    def send(self,handler):
+        from asterion_remote.native_transfer import _send_verified_chunk
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client, \
+             patch("asterion_remote.native_transfer.time.sleep",return_value=None):
+            return _send_verified_chunk(client,"http://127.0.0.1:8765",{},
+                "stable-id-123",EXPECTED,4,0,b"abcd",threading.Event())
+
+    def test_lost_put_and_failed_status_never_replay_committed_bytes(self):
+        calls=[]
+        def handler(req):
+            calls.append(req.method)
+            if len(calls)<3:raise httpx.ReadTimeout("simulated loss")
+            return httpx.Response(200,json={"id":"stable-id-123","received":4,
+                "sha256":EXPECTED,"size":4,"phase":"receiving"})
+        self.assertEqual(self.send(handler),4)
+        self.assertEqual(calls,["PUT","GET","GET"])
+
+    def test_retry_only_uncommitted_suffix(self):
+        calls=[]
+        def handler(req):
+            calls.append((req.method,req.headers.get("X-Transfer-Offset"),req.content))
+            if len(calls)==1:raise httpx.ReadTimeout("lost ACK")
+            if req.method=="GET":return httpx.Response(200,json={"received":2,
+                "sha256":EXPECTED,"size":4,"phase":"receiving"})
+            return httpx.Response(200,json={"received":4})
+        self.assertEqual(self.send(handler),4)
+        self.assertEqual(calls[-1],("PUT","2",b"cd"))
+
+    def test_status_unavailable_never_reissues_write(self):
+        calls=[]
+        def handler(req):
+            calls.append(req.method)
+            raise httpx.ReadTimeout("no response")
+        with self.assertRaisesRegex(RuntimeError,"status unavailable"):
+            self.send(handler)
+        self.assertEqual(calls.count("PUT"),1)
+        self.assertEqual(calls.count("GET"),6)
+
+    def test_wrong_transfer_identity_never_reissues_write(self):
+        calls=[]
+        def handler(req):
+            calls.append(req.method)
+            if req.method=="PUT":raise httpx.ReadTimeout("lost ACK")
+            return httpx.Response(200,json={"received":0,"sha256":"b"*64,"size":4})
+        with self.assertRaisesRegex(RuntimeError,"identity changed"):
+            self.send(handler)
+        self.assertEqual(calls,["PUT","GET"])
+
+
+def test_uncertain_worker_releases_queue_slot(tmp_path,monkeypatch):
+    from asterion_remote import native_transfer as t
+    monkeypatch.setattr(t,"_jobs",{"job":{"state":"outcome_unknown"}})
+    monkeypatch.setattr(t,"_cancels",{"job":threading.Event()})
+    monkeypatch.setattr(t,"_active_sources",{"job":("file","name")})
+    monkeypatch.setattr(t,"_copy",lambda *a:None)
+    t._run_copy("job",tmp_path/"file","name",{},threading.Event())
+    assert t.transfer_status("job")["state"]=="outcome_unknown"
+    assert not t.transfer_status("job")["worker_active"]
+    assert t.cancel_transfer("job")=={"ok":False,"state":"outcome_unknown"}
