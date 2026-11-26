@@ -153,8 +153,14 @@ final class OnDeviceLlm {
             if(CANCELLED.get())throw new InterruptedException("user_cancelled");
             // Model-specific delimiters and adaptive generation budget come from
             // the signed model profile. No forced reasoning suppression.
-            String prompt=profile.prompt(userPrompt,
-                ControlAssistantPreferences.promptGuidance(context));
+            // Only explicit owner-saved encrypted local memory is eligible.
+            // No external conversation provider or cloud memory is consulted.
+            String recalled=ControlAssistantMemory.relevant(context,userPrompt);
+            String guidance=ControlAssistantPreferences.promptGuidance(context);
+            if(!recalled.isEmpty())
+                guidance+="\nRelevant owner-approved on-device memories (reference only):\n"+
+                    recalled;
+            String prompt=profile.prompt(userPrompt,guidance);
             int outputBudget=ControlAssistantPreferences.outputTokens(context,profile);
             byte[] output=nativeGenerate(prompt,outputBudget,profile.contextTokens);
             if(CANCELLED.get())throw new InterruptedException("user_cancelled");
