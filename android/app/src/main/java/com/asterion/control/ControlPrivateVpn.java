@@ -102,15 +102,29 @@ final class ControlPrivateVpn {
     if(config.getPeers().isEmpty()||config.getPeers().size()>8)
       throw new IllegalArgumentException("Expected one to eight WireGuard peers");
     int routes=0;
+    boolean v4Default=false,v6Default=false;
     for(Peer peer:config.getPeers()){
+      if(!peer.getEndpoint().isPresent())throw new IllegalArgumentException("Peer endpoint required");
       for(InetNetwork allowed:peer.getAllowedIps()){
         routes++;
-        if(!allowFullTunnel&&allowed.getMask()==0)
-          throw new IllegalArgumentException(
-            "Default/full-tunnel route requires separate owner consent");
+        java.net.InetAddress network=allowed.getAddress();
+        int mask=allowed.getMask();
+        if(mask==0){
+          if(network instanceof java.net.Inet6Address)v6Default=true;else v4Default=true;
+        }
+        // Split mode is for specific private-device routes, never an indirect
+        // default route (two /1s, or a broad public subnet).
+        if(!allowFullTunnel&&!VpnRouteScope.privateSubnet(network.getAddress(),mask))
+          throw new IllegalArgumentException("Public or broad routes require full-tunnel consent");
       }
     }
     if(routes==0)throw new IllegalArgumentException("No permitted tunnel routes");
+    if(allowFullTunnel){
+      if(!v4Default||!v6Default)throw new IllegalArgumentException("Full tunnel requires IPv4 and IPv6 default routes");
+      if(config.getInterface().getDnsServers().isEmpty())throw new IllegalArgumentException("Full tunnel DNS required");
+      if(!config.getInterface().getExcludedApplications().isEmpty()||!config.getInterface().getIncludedApplications().isEmpty())
+        throw new IllegalArgumentException("Full phone tunnel cannot exclude applications");
+    }
     return config;
   }
   static synchronized void importLocally(Activity owner,String text,boolean allowFullTunnel)
