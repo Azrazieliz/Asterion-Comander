@@ -1,4 +1,4 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <!-- B09: optional site camera/location, only after origin-specific owner
@@ -37,6 +37,10 @@
       <!-- Isolate website cookies/storage from the authenticated Control dashboard. -->
       <activity android:name=".BrowserActivity" android:exported="false"
           android:process=":asterion_browser" android:screenOrientation="unspecified"/>
+      <activity android:name=".TorActivity" android:exported="false"
+          android:process=":asterion_tor" android:configChanges="orientation|screenSize|keyboardHidden"/>
+      <service android:name="org.torproject.jni.TorService" android:exported="false"
+          android:process=":asterion_tor" tools:replace="android:exported,android:process"/>
       <!-- Same-UID internal access to the existing main-process signed transfer authority. -->
       <provider android:name=".BrowserDownloadProvider"
           android:authorities="${applicationId}.browser.download.internal"
