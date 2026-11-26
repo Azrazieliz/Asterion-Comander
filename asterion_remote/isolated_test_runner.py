@@ -11,6 +11,8 @@ import os
 from pathlib import Path
 import re
 import shutil
+import json
+import tempfile
 import subprocess
 
 
@@ -40,16 +42,36 @@ class IsolatedContainerTests:
         self.tests=task_tests
         self.timeout_s=timeout_s
 
+    def preflight(self):
+        # A binary on PATH is not proof of a functioning isolated runtime.
+        # Never pull an image or contact a remote Docker context.
+        environment={k:v for k,v in os.environ.items() if k not in
+                     {"DOCKER_HOST","DOCKER_CONTEXT","DOCKER_TLS_VERIFY","DOCKER_CERT_PATH"}}
+        result=subprocess.run(["docker","context","inspect","default","--format","{{.Endpoints.docker.Host}}"],
+            env=environment,capture_output=True,text=True,timeout=10,check=False)
+        host=result.stdout.strip()
+        if result.returncode or not (host.startswith("unix://") or host.startswith("npipe://")):
+            raise RuntimeError("local_container_context_not_verified")
+        checked=subprocess.run(["docker","--context","default","image","inspect","--format","{{.Id}}",self.image],
+            env=environment,capture_output=True,text=True,timeout=15,check=False)
+        if checked.returncode or checked.stdout.strip()!=self.image:
+            raise RuntimeError("pinned_local_test_image_unavailable")
+        return environment
+
     def __call__(self, worktree, task_id):
         test_paths=self.tests.get(task_id)
         if not test_paths:
             raise ValueError("task_has_no_reviewed_test_suite")
         worktree=Path(worktree).resolve(strict=True)
+        environment=self.preflight()
+        test_hashes={}
         for p in test_paths:
-            if not (worktree/p).is_file():
+            target=worktree/p
+            if target.is_symlink() or worktree not in target.resolve().parents or not target.is_file():
                 raise ValueError("trusted_test_missing")
+            test_hashes[p]=hashlib.sha256(target.read_bytes()).hexdigest()
         argv=[
-            "docker","run","--rm","--pull=never","--network=none",
+            "docker","--context","default","run","--rm","--pull=never","--network=none",
             "--read-only","--cap-drop=ALL","--security-opt=no-new-privileges",
             "--pids-limit=128","--memory=1536m","--cpus=2",
             "--tmpfs","/tmp:rw,noexec,nosuid,size=256m",
@@ -59,9 +81,9 @@ class IsolatedContainerTests:
             self.image,"python","-m","pytest","-q",*test_paths
         ]
         process=subprocess.run(argv,stdin=subprocess.DEVNULL,capture_output=True,
-            timeout=self.timeout_s,check=False)
+            env=environment,timeout=self.timeout_s,check=False)
         receipt=hashlib.sha256(
-            b"ASTERION-ISOLATED-TEST-V1\0"+str(process.returncode).encode()+
+            b"ASTERION-ISOLATED-TEST-V2\0"+json.dumps({"image":self.image,"task":task_id,"test_sha256":test_hashes,"timeout":self.timeout_s},sort_keys=True).encode()+b"\0"+str(process.returncode).encode()+
             b"\0"+process.stdout[-50000:]+b"\0"+process.stderr[-50000:]).hexdigest()
         return {"exit_code":process.returncode,
                 "receipt_sha256":receipt,"runner_kind":"isolated_container",
