@@ -299,6 +299,26 @@
       "status": "active",
       "importance": "mandatory",
       "supersedes": []
+    },
+    {
+      "id": "V6-R09-OPEN",
+      "file": "roadmap",
+      "start_match": "**R modules approved:**",
+      "topic": "open.v6.r09",
+      "kind": "decision",
+      "status": "open",
+      "importance": "supporting",
+      "supersedes": []
+    },
+    {
+      "id": "V3-N01-N30-OPEN",
+      "file": "v3",
+      "start_match": "unapproved N01–N30 proposals remain preserved",
+      "topic": "open.v3.n01-n30",
+      "kind": "decision",
+      "status": "open",
+      "importance": "supporting",
+      "supersedes": []
     }
   ],
   "required_topics": [
