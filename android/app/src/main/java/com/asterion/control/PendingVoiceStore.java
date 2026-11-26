@@ -38,6 +38,7 @@ final class PendingVoiceStore {
     return generator.generateKey();
   }
   static synchronized void save(Context context,String message)throws Exception{
+    if(hasNativeClaim(context))throw new IllegalStateException("Previous submission requires review");
     if(message==null||message.isBlank()||message.length()>MAX_TEXT)
       throw new IllegalArgumentException("Invalid voice command");
     Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");
@@ -56,12 +57,12 @@ final class PendingVoiceStore {
   }
   static synchronized String restore(Context context){
     SharedPreferences p=prefs(context);
-    if(p.getBoolean("dispatch_claimed",false))return ""; // uncertain submission is never replayed
     long created=p.getLong("created",0L);
     if(created<=0||System.currentTimeMillis()<created||
        System.currentTimeMillis()-created>MAX_AGE_MS){
       clear(context);return "";
     }
+    if(p.getBoolean("dispatch_claimed",false))return ""; // uncertain submission is never replayed
     try{
       String raw=p.getString("ciphertext","");
       if(raw.isEmpty())return "";
