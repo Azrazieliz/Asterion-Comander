@@ -7,10 +7,5 @@
   "max_input_chars": 24000,
   "max_new_tokens": 768,
   "context_tokens": 4096,
-  "chat_format": {
-    "system_prefix": "<|im_start|>system\n",
-    "user_prefix": "<|im_end|>\n<|im_start|>user\n",
-    "assistant_prefix": "<|im_end|>\n<|im_start|>assistant\n"
-  },
   "system_text": "You are Asterion Control, a locally operated assistant. Reason carefully, distinguish evidence from hypotheses, and respond to the user's request. Use trusted Control tools when dispatched through authorized typed tool APIs; never assert that an operation succeeded without independently verified receipts. Follow the owner's configured preferences. Do not invent app operations, access to private data, or completed tasks."
 }
