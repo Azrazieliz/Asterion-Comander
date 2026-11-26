@@ -59,3 +59,18 @@ jobs:
       - name: Java source compilation only — never assemble, sign or install APK
         working-directory: android
         run: gradle --no-daemon --console=plain :app:compileDebugJavaWithJavac
+      - name: Fetch immutable, publicly licensed llama.cpp headers for JNI ABI verification
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          ref: 4b77dee0524c64b8471869232e2958bd9589607d
+          path: _pinned_llama_cpp_headers
+          persist-credentials: false
+      - name: Compile-check native JNI against exact llama.cpp public ABI (not link or APK)
+        shell: bash
+        run: |
+          clang++ -std=c++17 -fsyntax-only \
+            -I "${{ github.workspace }}/_pinned_llama_cpp_headers/include" \
+            -I "${{ github.workspace }}/_pinned_llama_cpp_headers/ggml/include" \
+            -I "$JAVA_HOME/include" -I "$JAVA_HOME/include/linux" \
+            android/app/src/main/cpp/on_device_llm.cpp
