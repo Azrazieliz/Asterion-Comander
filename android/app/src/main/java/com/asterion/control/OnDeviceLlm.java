@@ -57,6 +57,8 @@ final class OnDeviceLlm {
             .put("model_context_tokens",profile.contextTokens)
             .put("max_generation_tokens",profile.outputTokens)
             .put("max_input_chars",profile.inputChars)
+            .put("reasoning_effort",ControlAssistantPreferences.effort(context))
+            .put("owner_content_preferences_local",true)
             .put("model_private_file_bytes",file.isFile()?file.length():0L)
             .put("model_sha_verified",modelReady && LIBRARY_LOADED)
             .put("model_loaded",LIBRARY_LOADED && modelReady && nativeReady())
@@ -151,8 +153,10 @@ final class OnDeviceLlm {
             if(CANCELLED.get())throw new InterruptedException("user_cancelled");
             // Model-specific delimiters and adaptive generation budget come from
             // the signed model profile. No forced reasoning suppression.
-            String prompt=profile.prompt(userPrompt);
-            byte[] output=nativeGenerate(prompt,profile.outputTokens,profile.contextTokens);
+            String prompt=profile.prompt(userPrompt,
+                ControlAssistantPreferences.promptGuidance(context));
+            int outputBudget=ControlAssistantPreferences.outputTokens(context,profile);
+            byte[] output=nativeGenerate(prompt,outputBudget,profile.contextTokens);
             if(CANCELLED.get())throw new InterruptedException("user_cancelled");
             if(output==null||output.length==0)
                 throw new IllegalStateException("native_context_or_generation_failed");
