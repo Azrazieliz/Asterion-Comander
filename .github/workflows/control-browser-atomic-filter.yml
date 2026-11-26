@@ -18,6 +18,10 @@ on:
       - 'android/app/src/main/java/com/asterion/control/ControlSecurityPolicy.java'
       - 'android/app/src/main/AndroidManifest.xml'
       - 'android/app/build.gradle'
+      - 'android/build.gradle'
+      - 'android/app/proguard-rules.pro'
+      - '.github/workflows/control-ai-source-gates.yml'
+      - '.github/workflows/control-vpn-evidence-source-gates.yml'
       - 'tests/java/com/asterion/control/Browser*.java'
       - 'android/app/src/main/java/com/asterion/control/BrowserProtection.java'
       - 'tests/java/com/asterion/control/BrowserFilterCacheStoreTest.java'
@@ -107,4 +111,4 @@ jobs:
           test -s "$SDK/platforms/android-37.0/android.jar"
       - name: Integrate Browser Java compilation without APK creation or installation
         working-directory: android
-        run: gradle --no-daemon --console=plain :app:compileDebugJavaWithJavac
+        run: gradle --no-daemon --console=plain :app:compileDebugJavaWithJavac :app:processDebugMainManifest :app:mergeExtDexDebug
