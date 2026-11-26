@@ -89,7 +89,7 @@ def attempt_once(*, cycle, canonical_root, isolated_root, model_endpoint,
 def main(argv=None):
     p=argparse.ArgumentParser()
     p.add_argument("operation",choices=("init","status","once","run"))
-    p.add_argument("--cycle",default="native_ai_reconstruction_20261126")
+    p.add_argument("--cycle",default="native-ai-reconstruction-20261126")
     p.add_argument("--repo",required=True)
     p.add_argument("--tasks",default="docs/CONTROL_NATIVE_AI_BACKLOG_20261126.json")
     p.add_argument("--isolated-root",default="")
