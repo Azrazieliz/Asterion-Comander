@@ -1,3 +1,15 @@
+# 2026-11-26 — Non-AI Tor, VPN, autonomy and security
+
+Merged [#35](https://github.com/Azrazieliz/Asterion-Comander/pull/35), [#36](https://github.com/Azrazieliz/Asterion-Comander/pull/36) and [#37](https://github.com/Azrazieliz/Asterion-Comander/pull/37). Canonical implementation now includes signature-pinned official Tor routing with ordinary-browser/crawler onion rejection; strict dual-stack VPN route and provider checks, existing-VPN transition guards; scanner and no-clobber recoverable quarantine; durable dependency/cycle receipts, pinned local container policy and exact staged-tree isolation without Git metadata/untracked data.
+
+Evidence: [security/autonomy CI 45848275213](https://github.com/Azrazieliz/Asterion-Comander/actions/runs/45848275213) passed 54 tests + 5 subtests on each of Windows/Linux; [VPN CI 45848275220](https://github.com/Azrazieliz/Asterion-Comander/actions/runs/45848275220) passed JVM, Python and Android source gates; [real Docker fixture 45848600384](https://github.com/Azrazieliz/Asterion-Comander/actions/runs/45848600384) passed 2 tests, including a real passing and failing isolated candidate. Fixture is not evidence that the owner's Windows host has a functioning pinned sandbox or qualified local model.
+
+Embedded native Tor is separately staged in [draft #38](https://github.com/Azrazieliz/Asterion-Comander/pull/38): Guardian Project 0.4.9.17, isolated process/storage, native exit proof, SOCKS-only WebView configuration, v3 onion validation. [Original isolated source gate 45848657776](https://github.com/Azrazieliz/Asterion-Comander/actions/runs/45848657776) passed after adopting SDK package android-37.0, AGP 9.1.1, Gradle 9.3.1 and JDK25. Reconciled manifest/DEX gates are [45849210679](https://github.com/Azrazieliz/Asterion-Comander/actions/runs/45849210679) and [45849242523](https://github.com/Azrazieliz/Asterion-Comander/actions/runs/45849242523); do not infer acceptance from the older run.
+
+Release hold, original app signer, Android target SDK35, installed phone and Windows worker unchanged. No live Tor circuit or WebView leak test; VPN remains unconfigured in last authenticated device receipt, real provider enrollment and Android consent outstanding; sustained leak/speed/rotation evidence and model-driven owner-PC autonomy not certified. Astra model/training files were not edited.
+
+---
+
 # 2026-11-26 — Phone precision, owner learning and signed requirements integration
 
 **Source integrated; owner requested implementation without compilation or APK builds.**
