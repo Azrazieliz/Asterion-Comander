@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - work/control-network-security-autonomy-20261126
+      - work/control-security-vpn-reconciled-20261126
       - work/control-native-ai-reconstruction-20261126
     paths:
       - 'asterion_remote/security_scanner.py'
