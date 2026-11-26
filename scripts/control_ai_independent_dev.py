@@ -12,6 +12,11 @@ import json
 from pathlib import Path
 import sys
 
+# Executable from an isolated checkout without installing a second Python app.
+_SOURCE_ROOT=Path(__file__).resolve().parents[1]
+if str(_SOURCE_ROOT) not in sys.path:
+    sys.path.insert(0,str(_SOURCE_ROOT))
+
 from asterion_remote import dev_backlog, overnight_supervisor
 from asterion_remote.independent_dev_executor import CandidateExecutor, source_context
 from asterion_remote.isolated_test_runner import IsolatedContainerTests
