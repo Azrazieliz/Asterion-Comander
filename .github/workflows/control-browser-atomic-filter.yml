@@ -1,0 +1,62 @@
+name: Control Browser atomic subscription cache — real JVM and Android source gates
+on:
+  push:
+    branches:
+      - fix/control-browser-atomic-filter-cache-20261126
+      - work/control-native-ai-reconstruction-20261126
+    paths:
+      - 'android/app/src/main/java/com/asterion/control/BrowserFilterCacheStore.java'
+      - 'android/app/src/main/java/com/asterion/control/BrowserProtection.java'
+      - 'tests/java/com/asterion/control/BrowserFilterCacheStoreTest.java'
+      - '.github/workflows/control-browser-atomic-filter.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  browser-cache-jvm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Compile the real filter cache code without Android stubs
+        run: |
+          mkdir -p /tmp/asterion-browser-atomic-classes
+          javac -encoding UTF-8 -d /tmp/asterion-browser-atomic-classes \
+            android/app/src/main/java/com/asterion/control/BrowserFilterCacheStore.java \
+            tests/java/com/asterion/control/BrowserFilterCacheStoreTest.java
+          java -cp /tmp/asterion-browser-atomic-classes \
+            com.asterion.control.BrowserFilterCacheStoreTest
+      - name: Keep existing CSS filter contract regressions
+        run: |
+          javac -encoding UTF-8 -d /tmp/asterion-browser-atomic-classes \
+            android/app/src/main/java/com/asterion/control/BrowserCosmeticFilters.java \
+            tests/java/com/asterion/control/BrowserCosmeticFiltersTest.java
+          java -cp /tmp/asterion-browser-atomic-classes \
+            com.asterion.control.BrowserCosmeticFiltersTest
+  android-source-only:
+    needs: browser-cache-jvm
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - name: Ensure Android 35 platform
+        run: |
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          if [ ! -f "$SDK/platforms/android-35/android.jar" ]; then
+            yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" 'platforms;android-35' || true
+          fi
+          test -s "$SDK/platforms/android-35/android.jar"
+      - name: Integrate Browser Java compilation without APK creation or installation
+        working-directory: android
+        run: gradle --no-daemon --console=plain :app:compileDebugJavaWithJavac

@@ -222,14 +222,14 @@ final class BrowserProtection {
             });
         });
     }
-    private File cached(int n){return new File(folder,CACHE[n]);}
     private void loadCached(){
         try{
             if(!folder.isDirectory())return;
+            // Resolve one immutable, fully hash-verified list pair. A partial
+            // refresh or interrupted process cannot mix subscriptions.
+            File[] files=BrowserFilterCacheStore.activeFiles(folder,CACHE,MAX_SOURCE);
             Builder builder=new Builder();
-            for(int n=0;n<CACHE.length;n++){
-                File file=cached(n);
-                if(!file.isFile()||file.length()>MAX_SOURCE)return;
+            for(File file:files){
                 try(BufferedReader reader=new BufferedReader(new InputStreamReader(
                         new FileInputStream(file),StandardCharsets.UTF_8))){
                     for(String line;(line=reader.readLine())!=null;)builder.accept(line);
@@ -241,7 +241,8 @@ final class BrowserProtection {
         }
     }
     void refresh(boolean force,Listener callback){
-        if(!force&&System.currentTimeMillis()-lastUpdated()<REFRESH_MS){
+        if(!force&&active.get().loaded&&
+           System.currentTimeMillis()-lastUpdated()<REFRESH_MS){
             if(callback!=null)new Handler(Looper.getMainLooper()).post(
                 ()->callback.updated(false,"Lists already current"));
             return;
@@ -257,14 +258,14 @@ final class BrowserProtection {
         WORK.execute(()->{
             String reason="Filter update unavailable";
             boolean success=false;
+            File stageDirectory=null;
             try{
-                if(!folder.isDirectory()&&!folder.mkdirs())
-                    throw new IOException("Cannot prepare private filter storage");
+                stageDirectory=BrowserFilterCacheStore.newStagingDirectory(folder);
                 Builder builder=new Builder();
                 MessageDigest hash=MessageDigest.getInstance("SHA-256");
                 File[] staging=new File[SOURCES.length];
                 for(int n=0;n<SOURCES.length;n++){
-                    staging[n]=new File(folder,CACHE[n]+".partial");
+                    staging[n]=new File(stageDirectory,CACHE[n]);
                     HttpURLConnection http=(HttpURLConnection)new URL(SOURCES[n]).openConnection();
                     http.setInstanceFollowRedirects(false);
                     http.setConnectTimeout(12000);
@@ -298,10 +299,10 @@ final class BrowserProtection {
                 }
                 if(builder.parsed<MIN_RULES)
                     throw new IOException("Downloaded lists contain too few usable rules");
-                for(int n=0;n<staging.length;n++){
-                    if(!staging[n].renameTo(cached(n)))
-                        throw new IOException("Filter cache could not commit");
-                }
+                // Publish one atomic generation pointer only after both
+                // complete lists have been downloaded and parsed. A failed
+                // refresh leaves the previous pair active across app restarts.
+                BrowserFilterCacheStore.commit(folder,stageDirectory,CACHE,MAX_SOURCE);
                 StringBuilder digest=new StringBuilder(64);
                 for(byte value:hash.digest())
                     digest.append(String.format(Locale.ROOT,"%02x",value&255));
@@ -316,6 +317,7 @@ final class BrowserProtection {
                 reason=failure.getClass().getSimpleName();
                 pref.edit().putString("update_error",reason).apply();
             }finally{
+                BrowserFilterCacheStore.discardStaging(folder,stageDirectory,CACHE);
                 synchronized(this){updating=false;}
             }
             final boolean completed=success;
