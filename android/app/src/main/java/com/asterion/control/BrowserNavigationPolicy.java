@@ -24,7 +24,7 @@ final class BrowserNavigationPolicy {
         return isWeb(address)?address:HOME;
     }
     static boolean isWeb(String value){
-        if(value==null||value.indexOf('\\')>=0)return false;
+        if(value==null||value.indexOf('\\')>=0||TorRoutePolicy.onionHost(value))return false;
         try{
             URI u=URI.create(value);String scheme=u.getScheme();
             return ("https".equalsIgnoreCase(scheme)||"http".equalsIgnoreCase(scheme))&&
