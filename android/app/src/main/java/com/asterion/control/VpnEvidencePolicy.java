@@ -3,6 +3,12 @@ package com.asterion.control;
 /** Conservative acceptance rules for actual measured VPN observations. */
 final class VpnEvidencePolicy {
     private VpnEvidencePolicy(){}
+    // A provider reply must not replace a profile imported after enrollment began.
+    static boolean mayCommitEnrollment(String expected,String current,boolean configured,
+                                       boolean transition,boolean active){
+        return expected!=null&&!expected.isEmpty()&&expected.equals(current)&&
+            !configured&&!transition&&!active;
+    }
     static boolean knownTransport(String transport){
         return "wifi".equals(transport)||"cellular".equals(transport)||"ethernet".equals(transport);
     }

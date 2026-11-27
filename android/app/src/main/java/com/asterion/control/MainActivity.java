@@ -839,7 +839,7 @@ public final class MainActivity extends Activity {
       gap(hero,11);
       wide(hero,t(active?
           "Live tunnel state from Android's WireGuard backend, not a simulated connection.":
-          "A free provider can be enrolled in-app. Existing Windows control remains unaffected.",
+          "A free provider can be enrolled in-app. Connection and routing must be verified after activation.",
           12,DesignSystem.MUTED,false));
       wide(content,hero);gap(content,13);
 
@@ -852,6 +852,15 @@ public final class MainActivity extends Activity {
       gap(proof,9);
       wide(proof,t("Encrypted configuration  •  "+
           (configured?"Safely stored":"Not registered"),12,DesignSystem.TEXT,false));
+      String enrollment=tunnel.optString("provider_enrollment_state","not_started");
+      if("registering".equals(enrollment)||"outcome_unknown".equals(enrollment)||
+          "failed_or_unknown".equals(enrollment)){
+        gap(proof,9);
+        wide(proof,t("Provider enrollment  •  "+
+            ("registering".equals(enrollment)?"Registration in progress":
+                "Previous registration not confirmed; no automatic retry"),
+            12,DesignSystem.WARNING,false));
+      }
       gap(proof,9);
       String handshakeLabel=lastHandshake>0?
           new java.util.Date(lastHandshake).toString():
@@ -928,7 +937,7 @@ public final class MainActivity extends Activity {
       .setTitle("Activate Asterion Free VPN")
       .setMessage("Asterion will automatically generate a private WireGuard key on your phone, register a free Cloudflare WARP tunnel, and securely store the configuration in Android Keystore. No account creation, profile download or manual setup is required.\n\n"+
         "Cloudflare is an external provider. By tapping Agree & configure, you accept Cloudflare's terms for the free service. The connection is subject to provider availability and there is no guaranteed country, IP rotation or speed.\n\n"+
-        "Android will still ask you to approve the VPN connection. Your existing Control connection and saved data are preserved.")
+        "Android may still ask you to approve the VPN connection. The saved pairing and data are preserved, but connectivity must be checked after activation. If a previous registration was unconfirmed, a new attempt may create another provider registration.")
       .setPositiveButton("Agree & configure",(dialog,which)->
         ControlFreeVpnProvisioner.enroll(this,this::toast,
           this::requestVpnConsentAndConnect))

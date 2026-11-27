@@ -3,6 +3,13 @@ public final class VpnEvidencePolicyTest {
     private static int n;
     static void expect(Object expected,Object actual){n++;if(!expected.equals(actual))throw new AssertionError("case "+n);}
     public static void main(String[] args){
+        expect(true,VpnEvidencePolicy.mayCommitEnrollment("attempt","attempt",false,false,false));
+        expect(false,VpnEvidencePolicy.mayCommitEnrollment("old","new",false,false,false));
+        expect(false,VpnEvidencePolicy.mayCommitEnrollment(null,"attempt",false,false,false));
+        expect(false,VpnEvidencePolicy.mayCommitEnrollment("","",false,false,false));
+        expect(false,VpnEvidencePolicy.mayCommitEnrollment("attempt","attempt",true,false,false));
+        expect(false,VpnEvidencePolicy.mayCommitEnrollment("attempt","attempt",false,true,false));
+        expect(false,VpnEvidencePolicy.mayCommitEnrollment("attempt","attempt",false,false,true));
         expect(true,VpnEvidencePolicy.comparable("wifi","wifi",100,1000));
         expect(false,VpnEvidencePolicy.comparable("wifi","cellular",100,1000));
         expect(false,VpnEvidencePolicy.comparable("unknown","unknown",100,1000));

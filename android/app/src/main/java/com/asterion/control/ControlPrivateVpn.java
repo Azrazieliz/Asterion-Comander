@@ -127,18 +127,53 @@ final class ControlPrivateVpn {
     }
     return config;
   }
+  private static boolean tunnelUp() throws Exception{
+    return backend!=null&&backend.getState(TUNNEL)==Tunnel.State.UP;
+  }
+  private static boolean configured(Context context){
+    return !pref(context).getString("encrypted_configuration","").isEmpty();
+  }
+  static synchronized String reserveProviderEnrollment(Activity owner)throws Exception{
+    requireLocal(owner);
+    if(configured(owner)||TRANSITION.get()||tunnelUp())
+      throw new IllegalStateException("Existing VPN configuration or operation");
+    String attempt=java.util.UUID.randomUUID().toString();
+    if(!pref(owner).edit().putString("provider_attempt",attempt)
+        .putString("provider_enrollment_state","registering").commit())
+      throw new IllegalStateException("Could not persist enrollment reservation");
+    return attempt;
+  }
+  static synchronized void completeProviderEnrollment(Context context,String attempt,String text)throws Exception{
+    if(!VpnEvidencePolicy.mayCommitEnrollment(attempt,pref(context).getString("provider_attempt",""),
+          configured(context),TRANSITION.get(),tunnelUp()))
+      throw new IllegalStateException("Enrollment superseded by newer VPN state");
+    // Authorization was recorded in the foreground before registration began.
+    // Saving the profile is not activating a VPN or approving Android consent.
+    storeConfiguration(context,text,true,"configured");
+    ControlEventJournal.write(context,"vpn_config_imported","owner_ui",
+        "completed","provider_profile_full_tunnel",0);
+  }
+  static synchronized void failProviderEnrollment(Context context,String attempt){
+    if(attempt.equals(pref(context).getString("provider_attempt",""))){
+      pref(context).edit().remove("provider_attempt")
+          .putString("provider_enrollment_state","failed_or_unknown").commit();
+    }
+  }
+  private static void storeConfiguration(Context context,String text,boolean full,String enrollment)throws Exception{
+    parseAndValidate(text,full);
+    // Keep the existing Keystore and single encrypted configuration.
+    String encrypted=encrypt(text);
+    if(!pref(context).edit().putString("encrypted_configuration",encrypted)
+        .putBoolean("allow_full_tunnel",full).remove("provider_attempt")
+        .putString("provider_enrollment_state",enrollment).commit())
+      throw new IllegalStateException("Could not save encrypted config");
+  }
   static synchronized void importLocally(Activity owner,String text,boolean allowFullTunnel)
       throws Exception{
     requireLocal(owner);
-    if(TRANSITION.get()||(backend!=null&&backend.getState(TUNNEL)==Tunnel.State.UP))
+    if(TRANSITION.get()||tunnelUp())
       throw new IllegalStateException("Disconnect the existing tunnel before replacing its configuration");
-    parseAndValidate(text,allowFullTunnel);
-    // Store ONLY encrypted configuration. No private keys in logs, source,
-    // remote commands, public storage, exception output or UI status.
-    String encrypted=encrypt(text);
-    if(!pref(owner).edit().putString("encrypted_configuration",encrypted)
-       .putBoolean("allow_full_tunnel",allowFullTunnel).commit())
-      throw new IllegalStateException("Could not save encrypted config");
+    storeConfiguration(owner,text,allowFullTunnel,"manual_profile");
     ControlEventJournal.write(owner,"vpn_config_imported","owner_ui",
       "completed",allowFullTunnel?"full_tunnel":"private_routes_only",0);
   }
@@ -210,6 +245,12 @@ final class ControlPrivateVpn {
       }finally{TRANSITION.set(false);}
     });
   }
+  private static String providerEnrollmentState(Context context){
+    String state=pref(context).getString("provider_enrollment_state","not_started");
+    if("registering".equals(state)&&!ControlFreeVpnProvisioner.busy())
+      return "outcome_unknown";
+    return state;
+  }
   static JSONObject status(Context c)throws Exception{
     boolean up=false;
     boolean peerVerified=false;
@@ -242,6 +283,7 @@ final class ControlPrivateVpn {
     }catch(Exception ignored){}
     return new JSONObject().put("ok",true)
       .put("android_validated_vpn_route",systemVpnRoute)
+      .put("provider_enrollment_state",providerEnrollmentState(c))
       .put("verified_active_tunnel",up&&peerVerified&&systemVpnRoute)
       .put("transition_in_progress",TRANSITION.get())
       .put("backend","wireguard_go")

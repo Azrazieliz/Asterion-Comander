@@ -4,6 +4,7 @@ on:
     branches:
       - work/control-non-ai-vpn-evidence-20261126
       - work/control-security-vpn-reconciled-20261126
+      - 'work/control-non-ai-vpn-enrollment-*'
       - work/control-native-ai-reconstruction-20261126
     paths:
       - 'android/app/src/main/java/com/asterion/control/*Vpn*.java'
