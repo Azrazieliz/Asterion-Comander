@@ -1,3 +1,17 @@
+# 2026-11-27 — Non-neural reliability, credential protection and regression recovery
+
+Owner requested completion of remaining non-AI work before neural reconstruction. Existing authenticated bridge, paired device, signing identity, credential store and release hold preserved. No new PC staging directory, backup, bridge or neural source/model/training change.
+
+- f90efbb2: durable Android transfer journal, persisted offsets/identity/publication intent and URI; process-restart reconciliation, fsync before acknowledgement, verified MediaStore file hash; uncertain cancellation/publication stays uncertain. Focused relay recovery and Android source CI passed (46016864259, 46016864199).
+- 5e9aa6fd: persist transfer monitoring IDs, resume receipt checks after activity restart, guard concurrent submissions, verify final identity/size/hash/location; restore direct status and local speaker/microphone test, expose existing owner cycle controls. Focused relay and VPN gates passed (46017166288, 46017166335). Initial source gate 46017166340 failed on two obsolete UI strings, reconciled in next commit.
+- 86d87cd3: fix global fake-phone module contamination during test collection; exercise real transport fallback and quarantine path authorization, retired public endpoint denial; strengthen transfer UI contract and trigger full inventory on source/test changes. Linux inventory 46017491665: 421 passed, 23 failed, 2 skipped, 36 subtests passed.
+- 84df64f3: update obsolete historical non-neural assertions to current owner-approved guarded cycle, private transport, version and UI contracts. No removal of security checks or neural test edits. Linux 46017774479: 441 passed, 3 failed, 2 skipped, 36 subtests passed; remaining failures all neural/model-release assertions.
+- 35853216: optional application-level device-credential gate in the existing Keystore-encrypted vault, process-local timed lease (1/5/15 minutes), explicit lock and SecureRandom password generation, exact-origin check on save. Existing key, ciphertext and sessions retained. This is not a new hardware authentication-bound encryption key; no claim of passkey or export completion. Latest Linux inventory 46017896289: 444 passed, 3 neural-only failures, 2 skipped, 36 subtests passed. Latest Windows, Browser and Android compile jobs still running at this checkpoint (46017896289, 46017896381, 46017896541); Browser JVM and source Python contracts passed. No APK assembled or deployed.
+
+Remaining actual acceptance: existing deployed worker/APK not updated by this work; prior in-place deployment attempt blocked; do not bypass. Physical Wi-Fi/cellular/relay disconnect and process-death transfer/publication tests, legitimate VPN provisioning/consent/new IP/rotation/performance, Tor and browser interaction, vault device-auth/autofill/restart, passkey/secure export scope, signed partner functions, voice, autonomous workflows, security and premium UI acceptance are not certified. Full non-AI completion must not be claimed from source checks alone.
+
+---
+
 # 2026-11-26 — Relay recurrence and transfer reliability
 
 Owner requested completion of non-neural Control, especially recurring November 22–23 relay outages and file transfers. Original authenticated bridge retained. No replacement bridge, additional PC checkout or recovery backup created, no existing project jobs terminated.
