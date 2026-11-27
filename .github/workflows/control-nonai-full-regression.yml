@@ -4,6 +4,7 @@ on:
     branches:
       - work/control-native-ai-reconstruction-20261126
       - 'work/control-non-ai-transfer-resume-*'
+      - 'work/control-six-domain-hardening-*'
     paths:
       - '.github/workflows/control-nonai-full-regression.yml'
       - 'asterion_remote/**'
@@ -29,7 +30,7 @@ jobs:
       - name: Complete existing test inventory without modifying tests or device state
         run: python -m pytest -q tests --tb=short
   candidate-android-source:
-    if: startsWith(github.ref, 'refs/heads/work/control-non-ai-transfer-resume-')
+    if: startsWith(github.ref, 'refs/heads/work/control-non-ai-transfer-resume-') || startsWith(github.ref, 'refs/heads/work/control-six-domain-hardening-')
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -48,6 +49,15 @@ jobs:
             yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" --channel=3 'platforms;android-37.0' || true
           fi
           test -s "$SDK/platforms/android-37.0/android.jar"
+      - name: Execute actual VPN Tor voice and continuation policy regressions
+        run: |
+          mkdir -p /tmp/control-six-domain-policy
+          SRC=android/app/src/main/java/com/asterion/control
+          TEST=tests/java/com/asterion/control
+          javac -encoding UTF-8 -d /tmp/control-six-domain-policy "$SRC"/{VpnEvidencePolicy,TorProofPolicy,VoiceReplyPolicy,VoiceWakeWords,CycleRecoveryPolicy,PartnerDispatchPolicy}.java "$TEST"/{VpnEvidencePolicyTest,TorProofPolicyTest,VoiceReplyPolicyTest,VoiceWakeWordsTest,CycleRecoveryPolicyTest,PartnerDispatchPolicyTest}.java
+          for test in VpnEvidencePolicyTest TorProofPolicyTest VoiceReplyPolicyTest VoiceWakeWordsTest CycleRecoveryPolicyTest PartnerDispatchPolicyTest; do
+            java -ea -cp /tmp/control-six-domain-policy com.asterion.control.$test
+          done
       - name: Compile integrated Android UI without packaging or installation
         working-directory: android
         run: gradle --no-daemon --console=plain :app:compileDebugJavaWithJavac
