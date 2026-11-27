@@ -265,7 +265,7 @@ final class OnDeviceLlm {
                 +"Do not claim you are outside the app or that unverified tools are available. "
                 +"Return the final answer in the user-visible channel; do not print internal reasoning delimiters.";
             guidance+="\nActive project: "+project+". This label scopes local memory; project source access requires verified retrieval evidence. "+
-                "Reference blocks may be omitted to fit the active context. Do not assume complete retrieval.\n"+AssistantStructured.GUIDANCE+"\n"+AssistantSchedulePlan.GUIDANCE;
+                "Reference blocks may be omitted to fit the active context. Do not assume complete retrieval.\n"+AssistantStructured.GUIDANCE+"\n"+AssistantSchedulePlan.GUIDANCE+"\n"+AssistantCalculator.GUIDANCE;
             java.util.ArrayList<byte[]> references=new java.util.ArrayList<>();
             try{
                 String local=AssistantLocalContext.observe(context,userPrompt);
@@ -328,6 +328,7 @@ final class OnDeviceLlm {
             if(output==null||output.length==0)throw new IllegalStateException("native_context_or_generation_failed");
             String result=stream.output.finish(output);
             if(result.isBlank())throw new IllegalStateException("no_visible_model_answer");
+            result=AssistantCalculator.attachResult(result);
             long answerReady=System.nanoTime();
             if(stream.firstVisibleNanos==0)stream.firstVisibleNanos=answerReady;
             OnDeviceModelResources after=new OnDeviceModelResources(context);
