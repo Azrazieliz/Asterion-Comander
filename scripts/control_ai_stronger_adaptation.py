@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import time
+import tempfile
 from pathlib import Path
 from scripts.control_ai_adaptation import file_hash, validate, training_device
 from scripts.control_ai_quality_probe import cases
@@ -68,7 +69,65 @@ def corpus():
     return [row(x) for x in train],[row(x) for x in hold]
 
 def dump(path, value):
-    path.write_text(json.dumps(value,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
+    temporary=None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w",encoding="utf-8",dir=path.parent,delete=False) as stream:
+            temporary=Path(stream.name)
+            stream.write(json.dumps(value,ensure_ascii=False,indent=2)+"\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary,path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+def prepare_evaluation(root,evaluation_id):
+    """Admit retained evidence and reserve a distinct, immutable attempt identity."""
+    from scripts.control_ai_native_adapter_export import canonical_paths,verified_file
+    import hashlib
+    root=Path(root).resolve(strict=True)
+    if not evaluation_id or not evaluation_id.isascii() or not all(c.isalnum() or c in "-_" for c in evaluation_id):
+        raise ValueError("invalid_evaluation_id")
+    original=(root/"report.json").read_bytes()
+    report=json.loads(original)
+    if report.get("model")!=MODEL or report.get("base")!=BASE:
+        raise ValueError("evaluation_foundation_mismatch")
+    if report.get("revision")!="5d19c438a3f72bd74a2b1e1f7aa90e24d359c690" or report.get("base_revision")!="6e5971d9eba42665f5bd5a0fcf047f299ce1dccc":
+        raise ValueError("evaluation_revision_mismatch")
+    verified_file(root,"generation-evaluation.jsonl",report.get("suite_sha256"))
+    candidate=root/"candidate"
+    if candidate.resolve(strict=True).parent!=root:
+        raise ValueError("evaluation_candidate_outside_root")
+    manifest_path=candidate/"candidate.json"
+    manifest=json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("weights_changed") is not True or manifest.get("adapter_only") is not True:
+        raise ValueError("completed_changed_adapter_required")
+    if manifest.get("base_revision_declared")!=report["revision"]:
+        raise ValueError("evaluation_lineage_mismatch")
+    inventory=canonical_paths(manifest["artifact_sha256"])
+    for required in ("adapter/adapter_model.safetensors","adapter/adapter_config.json"):
+        if required not in inventory:
+            raise ValueError("missing_adapter_artifact")
+    for name,digest in inventory.items():
+        if not name.startswith("adapter/"):
+            raise ValueError("invalid_adapter_path")
+        verified_file(candidate,name,digest)
+    adapter=inventory["adapter/adapter_model.safetensors"]
+    if report.get("adapter_sha256") not in (None,adapter):
+        raise ValueError("evaluation_lineage_mismatch")
+    parent=root/"evaluations"
+    parent.mkdir(exist_ok=True)
+    if parent.resolve().parent!=root:
+        raise ValueError("evaluation_directory_outside_root")
+    evaluation=parent/evaluation_id
+    evaluation.mkdir(exist_ok=False)
+    for key in ("base_score","adapted_score","application_score","error"):
+        report.pop(key,None)
+    report.update(state="evaluation_admitted",evaluation_id=evaluation_id,
+                  training_report_sha256=hashlib.sha256(original).hexdigest(),
+                  training_record_sha256=file_hash(manifest_path),
+                  adapter_sha256=adapter)
+    return report,evaluation
 
 def step_budget(device, expanded, steps):
     if device == "cpu" and steps is None:
@@ -103,19 +162,18 @@ def run(root,expanded=False,device="cuda",steps=None,parent=None,phase="train",e
     import psutil
     from huggingface_hub import HfApi,snapshot_download
     root=root.resolve()
+    report_path=root/"report.json"
+    evaluation=None
     if phase=="evaluate":
-        report=json.loads((root/"report.json").read_text(encoding="utf-8"))
-        if report.get("model")!=MODEL or report.get("base")!=BASE:
-            raise ValueError("evaluation_foundation_mismatch")
+        report,evaluation=prepare_evaluation(root,evaluation_id)
+        report_path=evaluation/"report.json"
         expanded=report.get("curriculum")=="native_application_v1"
-        for key in ("base_score","adapted_score","application_score"):
-            report.pop(key,None)
     else:
         root.mkdir(parents=True,exist_ok=False)
         report={"state":"admission","model":MODEL,"base":BASE,"production_promoted":False,
                 "device_verified":False,"owner_private_data":False,"maturity_certified":False}
     report.update(execution_device=device,execution_phase=phase)
-    def save(): dump(root/"report.json",report);print(json.dumps(report),flush=True)
+    def save(): dump(report_path,report);print(json.dumps(report),flush=True)
     save()
     try:
         api=HfApi(token=False)
@@ -188,6 +246,10 @@ def run(root,expanded=False,device="cuda",steps=None,parent=None,phase="train",e
             report.update(state="trained",adapter_sha256=file_hash(root/"candidate/adapter/adapter_model.safetensors"));save()
             if phase=="train":
                 return
+            report,evaluation=prepare_evaluation(root,evaluation_id)
+            report_path=evaluation/"report.json"
+            report.update(execution_device=device,execution_phase="evaluate")
+            save()
         from scripts.control_ai_native_adapter_export import admit, canonical_paths, verified_file
         evidence=admit(root/"candidate",snapshot)
         manifest=json.loads((root/"candidate/candidate.json").read_text(encoding="utf-8"))
@@ -195,11 +257,8 @@ def run(root,expanded=False,device="cuda",steps=None,parent=None,phase="train",e
             raise ValueError("evaluation_lineage_mismatch")
         for name,digest in canonical_paths(manifest["base_files_sha256"]).items():
             verified_file(snapshot,name,digest)
-        report["adapter_sha256"]=evidence["peft_adapter_sha256"]
-        if not evaluation_id or not evaluation_id.isascii() or not all(c.isalnum() or c in "-_" for c in evaluation_id):
-            raise ValueError("invalid_evaluation_id")
-        evaluation=root/"evaluations"/evaluation_id
-        evaluation.mkdir(parents=True,exist_ok=False)
+        if evidence["peft_adapter_sha256"]!=report["adapter_sha256"] or evidence["training_record_sha256"]!=report["training_record_sha256"]:
+            raise ValueError("evaluation_artifact_changed_after_admission")
         report.update(state="evaluating",evaluation_id=evaluation_id);save()
         # Real free-generation comparison; never certify the model on these fixtures.
         os.environ["HF_HUB_OFFLINE"]="1";os.environ["TRANSFORMERS_OFFLINE"]="1"
@@ -239,7 +298,9 @@ def run(root,expanded=False,device="cuda",steps=None,parent=None,phase="train",e
         save()
         if report["state"]!="evaluated":raise RuntimeError("incomplete_evaluation")
     except Exception as e:
-        report.update(state="blocked_or_failed",error=str(e)[:1000]);save();raise
+        if not (phase=="both" and report_path==root/"report.json" and report.get("state")=="trained"):
+            report.update(state="blocked_or_failed",error=str(e)[:1000]);save()
+        raise
 
 def parse_args(argv=None):
     p=argparse.ArgumentParser(description=__doc__)
