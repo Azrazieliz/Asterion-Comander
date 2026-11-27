@@ -28,8 +28,7 @@ final class AssistantScheduleUi {
                 labels[i+1]=r.getString("title")+" · "+(r.optBoolean("enabled")?"Enabled":"No next execution")+
                     "\nNext: "+date(r.getLong("next_ms"))+" · Last: "+r.optString("last_state");
             }
-            new AlertDialog.Builder(a).setTitle("Scheduled tasks")
-                .setMessage(AgentService.running?"Existing Control service is active. Tasks run when the device permits; overdue intervals are not replayed.":"Control service is stopped. Tasks remain saved but do not execute until you enable it.")
+            new AlertDialog.Builder(a).setTitle(AgentService.running?"Scheduled tasks · service active":"Scheduled tasks · service stopped")
                 .setItems(labels,(d,which)->{
                     if(which==0)create(a);
                     else try{detail(a,list.getJSONObject(which-1));}catch(Exception failure){notice(a,"Task unavailable.");}
@@ -80,20 +79,25 @@ final class AssistantScheduleUi {
             "\nLast state: "+r.optString("last_state")+"\nLast finished: "+date(r.optLong("last_finished_ms"))+
             "\nNotification: "+r.optString("notification","not attempted")+"\n\nInstructions:\n"+r.getString("prompt")+
             (result.isEmpty()?"":"\n\nLatest result:\n"+result);
-        String[] options=active?new String[]{"Pause future runs","Cancel current inference","Close"}:
-            new String[]{enabled?"Pause":"Resume","Delete task","Close"};
-        new AlertDialog.Builder(a).setTitle(r.getString("title")).setMessage(summary)
-            .setItems(options,(d,which)->{
-                try{
-                    if(which==0)AssistantSchedules.pause(a,id,!active&&!enabled);
-                    else if(which==1){
-                        if(active)AssistantSchedules.cancel(a,id);
-                        else {new AlertDialog.Builder(a).setTitle("Delete this schedule and retained result?")
-                            .setPositiveButton("Delete",(x,y)->{try{AssistantSchedules.delete(a,id);show(a);}catch(Exception failure){notice(a,"Unable to delete.");}})
-                            .setNegativeButton("Cancel",null).show();return;}
-                    }
-                    show(a);
-                }catch(Exception failure){notice(a,failure.getMessage()==null?"Task change unavailable.":failure.getMessage());}
-            }).setNegativeButton("Back",(d,w)->show(a)).show();
+        String primary=active?"Pause future runs":enabled?"Pause":"Resume";
+        AlertDialog.Builder dialog=new AlertDialog.Builder(a).setTitle(r.getString("title")).setMessage(summary)
+            .setNegativeButton("Back",(d,w)->show(a));
+        if(active||r.getLong("next_ms")>0)dialog.setPositiveButton(primary,(d,w)->{
+            try{AssistantSchedules.pause(a,id,!active&&!enabled);show(a);}
+            catch(Exception failure){notice(a,"Task change unavailable.");}
+        });
+        if(active&&r.getString("kind").equals("inference")){
+            dialog.setNeutralButton("Cancel run",(d,w)->{
+                try{AssistantSchedules.cancel(a,id);show(a);}
+                catch(Exception failure){notice(a,"Cancellation could not be confirmed.");}
+            });
+        }else if(!active){
+            dialog.setNeutralButton("Delete",(d,w)->{
+                new AlertDialog.Builder(a).setTitle("Delete this schedule and retained result?")
+                    .setPositiveButton("Delete",(x,y)->{try{AssistantSchedules.delete(a,id);show(a);}catch(Exception failure){notice(a,"Unable to delete.");}})
+                    .setNegativeButton("Cancel",null).show();
+            });
+        }
+        dialog.show();
     }
 }

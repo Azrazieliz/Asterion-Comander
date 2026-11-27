@@ -8,7 +8,7 @@ public final class AssistantSchedulePlanTest {
         check(AssistantSchedulePlan.next(base,base+period*10+1,15)==base+period*11);
         check(AssistantSchedulePlan.next(base,base-1,15)==base);
         check(AssistantSchedulePlan.next(base,base,0)==0);
-        String fence="``";
+        String fence=String.valueOf((char)96).repeat(3);
         String block=fence+"asterion_schedule\nkind|inference\ntitle|Review notes\ndelay_minutes|5\ninterval_minutes|30\nprompt|Summarize locally\n"+fence;
         check(AssistantSchedulePlan.parse(block).intervalMinutes==30);
         check(AssistantSchedulePlan.parse(block+"\n"+block)==null);

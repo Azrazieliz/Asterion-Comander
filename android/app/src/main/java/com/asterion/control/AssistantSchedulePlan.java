@@ -10,7 +10,7 @@ final class AssistantSchedulePlan {
         if(!"reminder".equals(kind)&&!"inference".equals(kind))throw new IllegalArgumentException("Unknown task type");
         if(title==null||title.isBlank()||title.length()>120||title.codePoints().anyMatch(Character::isISOControl))
             throw new IllegalArgumentException("Invalid title");
-        if(prompt==null||prompt.isBlank()||prompt.length()>6000||prompt.indexOf('\0')>=0)
+        if(prompt==null||prompt.isBlank()||prompt.length()>6000||prompt.getBytes(java.nio.charset.StandardCharsets.UTF_8).length>12000||prompt.indexOf('\0')>=0)
             throw new IllegalArgumentException("Invalid task instructions");
         if(delay<1||delay>525600||interval<0||interval>525600||(interval>0&&interval<15))
             throw new IllegalArgumentException("Delay must be 1–525600 minutes; recurrence 0 or 15–525600");

@@ -120,6 +120,7 @@ final class AssistantSchedules {
         if(!AgentService.running)return;
         synchronized(LOCK){
             JSONArray a=copy(c);
+            boolean inferenceActive=false;
             for(int i=0;i<a.length();i++){
                 JSONObject r=a.getJSONObject(i);
                 if(!active(r))continue;
@@ -132,10 +133,10 @@ final class AssistantSchedules {
                     finish(c,a,r,"outcome_unknown","No recoverable inference receipt. No automatic replay.");return;
                 }
                 String phase=observation.optString("state","outcome_unknown");
-                if("queued".equals(phase)||"running".equals(phase)||"cancel_requested".equals(phase))return;
+                if("queued".equals(phase)||"running".equals(phase)||"cancel_requested".equals(phase)){inferenceActive=true;continue;}
                 String answer=observation.optString("text","");
                 if(phase.equals("completed")&&!answer.isBlank()){
-                    if(answer.length()>16000)finish(c,a,r,"failed","Generated result exceeded the retained output budget.");
+                    if(answer.getBytes(java.nio.charset.StandardCharsets.UTF_8).length>12000)finish(c,a,r,"failed","Generated result exceeded the retained output budget.");
                     else finish(c,a,r,"completed",answer);
                 }else if(phase.equals("cancelled")||phase.equals("failed"))
                     finish(c,a,r,phase,"Local inference "+phase+". No external action was executed.");
@@ -147,7 +148,7 @@ final class AssistantSchedules {
             for(int i=0;i<a.length();i++){
                 JSONObject r=a.getJSONObject(i);long due=r.getLong("next_ms");
                 if(!r.optBoolean("enabled")||due<=0||due>now)continue;
-                if(r.getString("kind").equals("inference")&&OnDeviceLlm.inferenceBusy())continue;
+                if(r.getString("kind").equals("inference")&&(inferenceActive||OnDeviceLlm.inferenceBusy()))continue;
                 if(chosen==null||due<chosen.getLong("next_ms"))chosen=r;
             }
             if(chosen==null)return;
