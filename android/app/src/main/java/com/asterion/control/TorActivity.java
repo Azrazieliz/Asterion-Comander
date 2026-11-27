@@ -45,7 +45,8 @@ public final class TorActivity extends Activity {
     private EditText address;
     private TextView status,go;
     private TorService tor;
-    private boolean bound,closed,probing;
+    private boolean bound,probing;
+    private volatile boolean closed;
     private volatile boolean ready;
     private volatile boolean checkingWebView;
     private long probeDeadline;
@@ -67,7 +68,7 @@ public final class TorActivity extends Activity {
         @Override public void onNullBinding(ComponentName name){fail("Tor service binding unavailable");}
     };
     @Override public void onCreate(Bundle saved){
-        super.onCreate(saved);
+        super.onCreate(saved);DesignSystem.configure(this);
         if(!directoryConfigured){
             WebView.setDataDirectorySuffix("asterion_tor");
             directoryConfigured=true;
@@ -138,7 +139,8 @@ public final class TorActivity extends Activity {
                 }
                 @Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest request){
                     boolean proof=checkingWebView&&request.isForMainFrame()&&CHECK_API.equals(request.getUrl().toString());
-                    if((!ready&&!proof)||!"GET".equals(request.getMethod())||TorAddressPolicy.resolve(request.getUrl().toString())==null)
+                    if(!TorProofPolicy.allowRequest(closed,ready,checkingWebView,proof,request.getMethod(),
+                         TorAddressPolicy.resolve(request.getUrl().toString())!=null))
                         return new WebResourceResponse("text/plain","UTF-8",403,"Blocked",java.util.Collections.emptyMap(),new ByteArrayInputStream(new byte[0]));
                     return null;
                 }
@@ -192,6 +194,14 @@ public final class TorActivity extends Activity {
             if(!bound)fail("Native Tor service unavailable");
         }catch(Exception|LinkageError failure){fail("Tor initialization failed: "+failure.getClass().getSimpleName());}
     }
+    @Override protected void onNewIntent(Intent intent){
+        super.onNewIntent(intent);
+        setIntent(intent);
+        String requested=TorAddressPolicy.resolve(intent.getStringExtra("tor_url"));
+        if(requested==null)return;
+        if(closed){status.setText("Tor session closed · Close and reopen Tor");return;}
+        if(ready)navigate(requested);else pending=requested;
+    }
     private TextView button(String title,Runnable action){
         TextView v=DesignSystem.text(this,title,14,DesignSystem.TEXT,true);v.setGravity(Gravity.CENTER);
         DesignSystem.clickable(v,this,DesignSystem.SURFACE2,DesignSystem.EDGE,12);
@@ -200,7 +210,7 @@ public final class TorActivity extends Activity {
     private void suspendNavigation(){
         String current=web.getUrl();
         if(current!=null&&!CHECK_API.equals(current)&&TorAddressPolicy.resolve(current)!=null)pending=current;
-        ready=false;go.setEnabled(false);web.stopLoading();web.getSettings().setBlockNetworkLoads(true);
+        ready=false;go.setEnabled(false);web.getSettings().setBlockNetworkLoads(true);web.stopLoading();
     }
     private void poll(){
         if(closed||tor==null)return;
@@ -274,7 +284,7 @@ public final class TorActivity extends Activity {
     }
     private void fail(String reason){
         ready=false;checkingWebView=false;closed=true;epoch++;ui.removeCallbacksAndMessages(null);go.setEnabled(false);status.setText(reason+" · No direct fallback");
-        if(web!=null){web.stopLoading();web.getSettings().setJavaScriptEnabled(false);web.getSettings().setBlockNetworkLoads(true);}
+        if(web!=null){web.getSettings().setBlockNetworkLoads(true);web.stopLoading();web.getSettings().setJavaScriptEnabled(false);}
         releaseService();
     }
     private void releaseService(){
