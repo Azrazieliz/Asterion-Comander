@@ -125,7 +125,7 @@ final class AssistantSession {
             save(app);changed();
         });
     }
-    void importModel(Context context,android.net.Uri uri,boolean adapter){
+    void importModel(Context context,java.util.List<android.net.Uri> documents,boolean adapter){
         if(busy())return;
         Context app=context.getApplicationContext();
         InferenceGate.Request request=new InferenceGate.Request();
@@ -135,7 +135,7 @@ final class AssistantSession {
             try{
                 OnDeviceModelProfile profile=OnDeviceModelProfile.read(app);
                 long total=adapter?profile.adapterBytes:profile.bytes;
-                OnDeviceLlm.importOwnerModelArtifact(app,uri,adapter,request,received->main.post(()->{
+                OnDeviceLlm.importOwnerModelArtifact(app,documents,adapter,request,received->main.post(()->{
                     if(modelImportRequest!=request||request.isCancelled())return;
                     status="Verifying "+(adapter?"adapter":"model")+" · "+(received*100/total)+"%";
                     changed();
