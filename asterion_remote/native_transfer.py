@@ -35,6 +35,9 @@ class TransferRequest(BaseModel):
     pc_path: str = Field(min_length=1,max_length=2048)
     name: str | None = Field(default=None,max_length=180)
 
+class ResumeTransferRequest(BaseModel):
+    pc_path: str = Field(min_length=1,max_length=2048)
+
 def _name(value: str) -> str:
     if not value or len(value)>180 or value in (".","..") or value.startswith(".") or any(
         c in value for c in ("/","\\",":","\0")) or any(ord(c)<32 or ord(c)==127 for c in value):
@@ -273,8 +276,32 @@ def _admit_source(path):
     except OSError as exc:
         raise HTTPException(503,"Source file unavailable") from exc
 
-def _copy(key: str, path: Path, name: str, paired: dict, cancel: threading.Event, signature=None):
+def _resume_remote(client,base,headers,receipt,checksum,size):
+    # A resumed job never requests a second Android transfer identity.
+    if checksum!=receipt.get("sha256") or size!=receipt.get("size"):
+        raise ValueError("Selected source does not match the retained transfer")
+    ident=receipt["phone_transfer_id"]
+    reply=client.get(base+"/transfer/status/"+ident,headers=headers)
+    reply.raise_for_status()
+    init=reply.json()
+    if (init.get("id")!=ident or init.get("name")!=receipt.get("android_name") or
+        init.get("sha256")!=checksum or int(init.get("size",-1))!=size):
+        raise RuntimeError("Retained Android transfer identity does not match")
+    offset=int(init.get("received",-1))
+    if not receipt.get("bytes_sent",0)<=offset<=size:
+        raise RuntimeError("Retained Android transfer offset is inconsistent")
+    phase=init.get("phase")
+    if phase not in ("receiving","verifying","publishing","completed"):
+        raise RuntimeError("Retained Android transfer is not resumable")
+    # Older installs may not expose an idempotent publication phase. Require
+    # a real phase for recovery and never reissue a lost initial start.
+    if phase!="receiving" and offset!=size:
+        raise RuntimeError("Retained Android transfer has incomplete publication")
+    return init
+
+def _copy(key: str, path: Path, name: str, paired: dict, cancel: threading.Event, signature=None, resume=None):
     transfer_id=None
+    resume_admitted=False
     headers={"Authorization":"Bearer "+paired["token"]}
     base=paired["base_url"]
     try:
@@ -291,6 +318,8 @@ def _copy(key: str, path: Path, name: str, paired: dict, cancel: threading.Event
             _require_source_unchanged(file,admitted)
             if size!=admitted[2]:raise RuntimeError("Source changed during transfer")
             checksum=expected.hexdigest()
+            if resume is not None and (checksum!=resume.get("sha256") or size!=resume.get("size")):
+                raise ValueError("Selected source does not match the retained transfer")
             with httpx.Client(timeout=httpx.Timeout(30.0,connect=5.0),
                               trust_env=False,follow_redirects=False) as http:
                 client=_TransferTransport(http,base,paired["token"])
@@ -298,8 +327,12 @@ def _copy(key: str, path: Path, name: str, paired: dict, cancel: threading.Event
                 client.get(base+"/health",headers=headers).raise_for_status()
                 _require_source_unchanged(file,admitted)
                 _update(key,state="starting",size=size,sha256=checksum)
-                init=_post(client,base,paired["token"],"/transfer/start",
-                    {"name":name,"size":size,"sha256":checksum})
+                if resume is None:
+                    init=_post(client,base,paired["token"],"/transfer/start",
+                        {"name":name,"size":size,"sha256":checksum})
+                else:
+                    init=_resume_remote(client,base,headers,resume,checksum,size)
+                    resume_admitted=True
                 transfer_id=init["id"]
                 if not isinstance(transfer_id,str) or not transfer_id or len(transfer_id)>64 or not all(
                     character.isalnum() or character in "_-" for character in transfer_id):
@@ -348,6 +381,10 @@ def _copy(key: str, path: Path, name: str, paired: dict, cancel: threading.Event
             "outcome_unknown" in str(e).lower() or \
             "cancel_ambiguous" in str(e).lower()
         label="cancelled" if aborted and transfer_id is None else ("outcome_unknown" if unknown or aborted else "failed")
+        if resume is not None and not resume_admitted:
+            # Hash mismatch, temporarily unavailable device, or cancelled local
+            # hashing must not erase the existing partial Android receipt.
+            label="outcome_unknown"
         if transfer_id and aborted:
             try:
                 with httpx.Client(timeout=4,trust_env=False,follow_redirects=False) as c:
@@ -361,9 +398,9 @@ def _copy(key: str, path: Path, name: str, paired: dict, cancel: threading.Event
                 "Source file unavailable" if isinstance(e,OSError) and not aborted else str(e)[:160])
         _update(key,state=label,error=type(e).__name__+": "+detail)
 
-def _run_copy(key,path,name,paired,cancel,signature=None):
+def _run_copy(key,path,name,paired,cancel,signature=None,resume=None):
     try:
-        _copy(key,path,name,paired,cancel,signature)
+        _copy(key,path,name,paired,cancel,signature,resume)
     finally:
         # outcome_unknown is an honest retained result, not a live worker.
         # It must not permanently consume one of the three active slots.
@@ -411,6 +448,54 @@ def start_transfer(data: TransferRequest,safe_path):
         raise HTTPException(503,'Transfer worker unavailable')
     return {"id":key,"status":"queued","transport":"PC-to-Android paired LAN / native WSS"}
 
+def resume_transfer(key: str,data: ResumeTransferRequest,safe_path):
+    try:
+        source=safe_path(data.pc_path)
+    except PermissionError as exc:
+        raise HTTPException(403,"Source path access denied") from exc
+    signature=_admit_source(source)
+    paired=phone_pairing()
+    if not paired:raise HTTPException(503,"Phone not paired")
+    with _guard:
+        if key in _cancels:
+            raise HTTPException(409,"Transfer already has an active worker")
+        record=_jobs.get(key) or session_journal.get_transfer_receipt(key)
+        if record is None:raise HTTPException(404,"Unknown transfer")
+        identity=record.get("phone_transfer_id")
+        digest=record.get("sha256")
+        if (record.get("state")!="outcome_unknown" or not isinstance(identity,str)
+            or not identity or len(identity)>64 or not all(c.isalnum() or c in "_-" for c in identity)
+            or not isinstance(digest,str) or len(digest)!=64
+            or any(c not in "0123456789abcdef" for c in digest)):
+            raise HTTPException(409,"No unambiguous resumable Android transfer identity")
+        if signature[2]!=record.get("size"):
+            raise HTTPException(409,"Selected source size does not match retained transfer")
+        name=_name(record["android_name"])
+        if any(active[1]==name for active in _active_sources.values()):
+            raise HTTPException(409,"Destination filename already has an active transfer")
+        if len(_cancels)>=3:
+            raise HTTPException(429,"Asterion Control transfer queue full",headers={"Retry-After":"10"})
+        saved=dict(record)
+        candidate=dict(saved,state="queued",error=None,updated_at=time.time())
+        try:
+            persisted=session_journal.save_transfer_receipt(candidate)
+        except Exception as exc:
+            raise HTTPException(503,"Transfer receipt storage unavailable; nothing resumed") from exc
+        if persisted.get("state")!="queued":
+            raise HTTPException(409,"Transfer receipt advanced; refresh its status")
+        _jobs[key]=candidate
+        cancel=threading.Event()
+        _cancels[key]=cancel
+        _active_sources[key]=(str(source.resolve()),name)
+    try:
+        _workers.submit(_run_copy,key,source,name,paired,cancel,signature,saved)
+    except Exception:
+        with _guard:
+            _cancels.pop(key,None);_active_sources.pop(key,None)
+            _update(key,state="outcome_unknown",error="Resume worker unavailable")
+        raise HTTPException(503,"Transfer worker unavailable; retained receipt preserved")
+    return {"id":key,"status":"queued","resuming":True,"phone_transfer_id":identity}
+
 def _reconcile_receipt(job: dict) -> dict:
     """Read only: an interrupted transfer must never dispatch a new start/finish."""
     identity=job.get("phone_transfer_id")
@@ -451,8 +536,14 @@ def _reconcile_receipt(job: dict) -> dict:
             observed.update(state="failed",error="Android reported publication failure")
         else:
             observed["error"]="Android phase: "+phase if phase in ("receiving","verifying","publishing","outcome_unknown") else "Android outcome unverified"
-        durable=session_journal.save_transfer_receipt(observed)
-        return dict(durable,worker_active=False,source='durable_transfer_receipt')
+        with _guard:
+            current=_jobs.get(job["id"])
+            if job["id"] in _cancels:
+                return dict(current,worker_active=True)
+            if current is not None and current.get("updated_at")!=job.get("updated_at"):
+                return dict(current,worker_active=False)
+            durable=session_journal.save_transfer_receipt(observed)
+            return dict(durable,worker_active=False,source='durable_transfer_receipt')
     except Exception:
         return job
 
@@ -468,8 +559,10 @@ def transfer_status(key: str):
     # Never hold the worker lock during network reads.
     observed=_reconcile_receipt(snapshot)
     with _guard:
+        if key in _cancels:
+            return dict(_jobs[key],worker_active=True)
         if key in _jobs and key not in _cancels:
-            if _jobs[key]["state"] not in ("completed","failed","cancelled"):
+            if _jobs[key]["state"] not in ("completed","failed","cancelled") and _jobs[key].get("updated_at")==snapshot.get("updated_at"):
                 _jobs[key].update(observed)
             else:
                 return dict(_jobs[key],worker_active=False)

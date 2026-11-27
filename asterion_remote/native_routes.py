@@ -4,7 +4,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from .security import require_token
 from .phone_bridge import PairPhone, PhoneInput, register, request, load, probe_native_wss_roundtrip, request_native_only
-from .native_transfer import TransferRequest, start_transfer, transfer_status, cancel_transfer
+from .native_transfer import TransferRequest, ResumeTransferRequest, start_transfer, resume_transfer, transfer_status, cancel_transfer
 
 router = APIRouter(prefix='/api/v1', dependencies=[Depends(require_token)])
 
@@ -150,6 +150,12 @@ def phone_transfer_status(key: str):
 @router.post('/phone/transfers/{key}/cancel')
 def phone_transfer_cancel(key: str):
     return cancel_transfer(key)
+
+@router.post('/phone/transfers/{key}/resume')
+def phone_transfer_resume(key: str,data: ResumeTransferRequest):
+    from .app import safe_path
+    return resume_transfer(key,data,safe_path)
+
 
 # A session executes explicitly authorized UI steps locally without a ChatGPT turn per gesture.
 from .interaction_sessions import SessionRequest, start as start_session, status as session_status, cancel as cancel_session

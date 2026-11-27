@@ -396,3 +396,101 @@ def test_admission_rejects_directory_and_oversized_source(tmp_path,monkeypatch):
     with pytest.raises(HTTPException) as e:
         t._admit_source(src)
     assert e.value.status_code==422
+
+
+def _resume_fixture(tmp_path,monkeypatch,source_bytes=b"abcd"):
+    import hashlib
+    from asterion_remote import native_transfer as t, session_journal as j
+    monkeypatch.setenv("ASTERION_DIAGNOSTIC_ROOT",str(tmp_path/"journal"))
+    for name in ("_jobs","_cancels","_active_sources"):
+        monkeypatch.setattr(t,name,{})
+    monkeypatch.setattr(t,"phone_pairing",lambda:{"base_url":"http://127.0.0.1:8973","token":"test"})
+    class InlineWorker:
+        def submit(self,fn,*args):fn(*args)
+    monkeypatch.setattr(t,"_workers",InlineWorker())
+    src=tmp_path/"reselected.txt";src.write_bytes(source_bytes)
+    ident="e"*32
+    digest=hashlib.sha256(b"abcd").hexdigest()
+    j.save_transfer_receipt({"id":ident,"state":"transferring","size":4,
+        "bytes_sent":2,"android_name":"test.txt","pc_name":"old.txt",
+        "sha256":digest,"phone_transfer_id":"phone-identifier","error":None})
+    return t,j,src,ident,digest
+
+def test_explicit_resume_continues_existing_remote_identity(tmp_path,monkeypatch):
+    t,j,src,ident,digest=_resume_fixture(tmp_path,monkeypatch)
+    calls=[]
+    def handler(req):
+        calls.append((req.method,req.url.path))
+        if req.url.path=="/health":return httpx.Response(200,json={"ok":True})
+        if req.url.path=="/transfer/status/phone-identifier":
+            return httpx.Response(200,json={"id":"phone-identifier","name":"test.txt",
+                "sha256":digest,"size":4,"received":2,"phase":"receiving","chunk_max":4096})
+        if req.url.path=="/transfer/chunk/phone-identifier":
+            assert req.headers["X-Transfer-Offset"]=="2" and req.content==b"cd"
+            return httpx.Response(200,json={"received":4})
+        if req.url.path=="/transfer/finish/phone-identifier":
+            return httpx.Response(200,json={"ok":True,"sha256":digest,"size":4,
+                "name":"test.txt","location":"Downloads/Asterion Control/test.txt",
+                "uri":"content://downloads/1"})
+        raise AssertionError("Unexpected route "+req.url.path)
+    factory=httpx.Client
+    monkeypatch.setattr(t.httpx,"Client",lambda **kw:factory(transport=httpx.MockTransport(handler),**kw))
+    reply=t.resume_transfer(ident,t.ResumeTransferRequest(pc_path=str(src)),lambda _:src)
+    assert reply["id"]==ident and reply["resuming"] is True
+    result=t.transfer_status(ident)
+    assert result["state"]=="completed" and result["result"]["verified"] is True
+    assert result["recovered_bytes"]==2 and result["bytes_sent"]==4
+    assert calls==[("GET","/health"),("GET","/transfer/status/phone-identifier"),
+                   ("PUT","/transfer/chunk/phone-identifier"),("POST","/transfer/finish/phone-identifier")]
+    assert j.get_transfer_receipt(ident)["state"]=="completed"
+
+def test_resume_same_size_wrong_digest_never_contacts_phone(tmp_path,monkeypatch):
+    import pytest
+    t,j,src,ident,digest=_resume_fixture(tmp_path,monkeypatch,b"wxyz")
+    monkeypatch.setattr(t.httpx,"Client",lambda **kw:pytest.fail("wrong source must not contact phone"))
+    t.resume_transfer(ident,t.ResumeTransferRequest(pc_path=str(src)),lambda _:src)
+    saved=j.get_transfer_receipt(ident)
+    assert saved["state"]=="outcome_unknown" and saved["bytes_sent"]==2
+    assert saved["sha256"]==digest and saved["phone_transfer_id"]=="phone-identifier"
+
+def test_resume_without_retained_remote_id_refuses_new_start(tmp_path,monkeypatch):
+    import pytest
+    from fastapi import HTTPException
+    t,j,src,ident,digest=_resume_fixture(tmp_path,monkeypatch)
+    j.save_transfer_receipt({"id":ident,"state":"outcome_unknown","size":4,
+        "bytes_sent":2,"android_name":"test.txt","sha256":digest})
+    monkeypatch.setattr(t.httpx,"Client",lambda **kw:pytest.fail("must not connect"))
+    with pytest.raises(HTTPException) as exc:
+        t.resume_transfer(ident,t.ResumeTransferRequest(pc_path=str(src)),lambda _:src)
+    assert exc.value.status_code==409
+
+def test_resume_rejects_rewound_android_offset(tmp_path,monkeypatch):
+    t,j,src,ident,digest=_resume_fixture(tmp_path,monkeypatch)
+    calls=[]
+    def handler(req):
+        calls.append(req.method)
+        if req.url.path=="/health":return httpx.Response(200,json={"ok":True})
+        return httpx.Response(200,json={"id":"phone-identifier","name":"test.txt",
+            "sha256":digest,"size":4,"received":1,"phase":"receiving"})
+    factory=httpx.Client
+    monkeypatch.setattr(t.httpx,"Client",lambda **kw:factory(transport=httpx.MockTransport(handler),**kw))
+    t.resume_transfer(ident,t.ResumeTransferRequest(pc_path=str(src)),lambda _:src)
+    assert calls==["GET","GET"]
+    assert j.get_transfer_receipt(ident)["state"]=="outcome_unknown"
+
+def test_resume_completed_remote_never_writes(tmp_path,monkeypatch):
+    t,j,src,ident,digest=_resume_fixture(tmp_path,monkeypatch)
+    calls=[]
+    def handler(req):
+        calls.append(req.method)
+        if req.url.path=="/health":return httpx.Response(200,json={"ok":True})
+        done={"ok":True,"sha256":digest,"size":4,"name":"test.txt",
+              "location":"Downloads/Asterion Control/test.txt","uri":"content://downloads/1"}
+        return httpx.Response(200,json={"id":"phone-identifier","name":"test.txt",
+            "sha256":digest,"size":4,"received":4,"phase":"completed","result":done})
+    factory=httpx.Client
+    monkeypatch.setattr(t.httpx,"Client",lambda **kw:factory(transport=httpx.MockTransport(handler),**kw))
+    monkeypatch.setattr(t.time,"sleep",lambda _:None)
+    t.resume_transfer(ident,t.ResumeTransferRequest(pc_path=str(src)),lambda _:src)
+    assert calls==["GET","GET","GET"]
+    assert j.get_transfer_receipt(ident)["state"]=="completed"
