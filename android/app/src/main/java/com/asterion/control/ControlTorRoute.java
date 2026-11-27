@@ -43,10 +43,13 @@ final class ControlTorRoute {
     }
     static void panel(Activity owner){
         boolean browser=trusted(owner,TorRoutePolicy.BROWSER),vpn=trusted(owner,TorRoutePolicy.VPN);
-        String[] choices={browser?"Open verified Tor Browser":"Get official Tor Browser",vpn?"Open verified Tor VPN Beta":"Get official Tor VPN Beta"};
+        String[] choices={"Open embedded Tor · restricted browser",browser?"Open verified Tor Browser":"Get official Tor Browser",vpn?"Open verified Tor VPN Beta":"Get official Tor VPN Beta"};
         new AlertDialog.Builder(owner).setTitle("Tor network")
             .setItems(choices,(d,w)->{
-                if(w==0){offer(owner,null);return;}
+                if(w==0){
+                    owner.startActivity(new Intent(owner,TorActivity.class));return;
+                }
+                if(w==1){offer(owner,null);return;}
                 new AlertDialog.Builder(owner).setTitle("Tor VPN Beta")
                     .setMessage("Experimental only: the Tor Project warns that it may leak information. Do not use for sensitive activity. Android permits one active VPN; Control will not silently replace another tunnel.")
                     .setPositiveButton(vpn?"Open app":"Official download",(a,b)->{
