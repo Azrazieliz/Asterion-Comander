@@ -95,8 +95,10 @@ final class AssistantSession {
                 invoking=true;
                 JSONObject receipt=AppBridge.invoke(app,request);
                 observed=observed.submitted(receipt.optString("status","outcome_unknown"));
+                observed=observed.withData(AssistantPartnerEvidence.capture(observed,receipt));
                 JSONObject state=AppBridge.operation(app,initial.appPackage,initial.requestId,false);
                 observed=observed.observed(state.optString("status","outcome_unknown"));
+                observed=observed.withData(AssistantPartnerEvidence.capture(observed,state));
             }catch(Exception failure){
                 if(!invoking)observed=observed.submitted("not_dispatched");
             }
@@ -112,6 +114,7 @@ final class AssistantSession {
             try{
                 JSONObject state=AppBridge.operation(app,initial.appPackage,initial.requestId,false);
                 observed=initial.observed(state.optString("status","outcome_unknown"));
+                observed=observed.withData(AssistantPartnerEvidence.capture(observed,state));
             }catch(Exception failure){observed=initial.observed("outcome_unknown");}
             finishAction(app,owner,message,observed);
         });
