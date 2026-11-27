@@ -217,50 +217,54 @@ def run_batch(file:str|Path,model_revision:str,provider:Callable,
         pending.append(case)
         if len(pending)>=batch_limit:
             break
-    # Do not hold a SQLite lock while running potentially expensive inference.
-    results=[]
-    for case in pending:
-        ident="eval-"+hashlib.sha256(
-            (suite+":"+model_revision+":"+case["id"]).encode()).hexdigest()[:40]
-        began=time.perf_counter()
-        try:
-            output=provider(case["prompt"],ident)
-            if not isinstance(output,dict) or not isinstance(
-                output.get("content"),str):
-                raise ValueError("actual_model_text_required")
-            answer=output["content"]
-            if len(answer)>500000:
-                raise ValueError("oversized_model_response")
-            verdict,external_proof=_score(case,answer,external_judge)
-            answer_sha=hashlib.sha256(answer.encode()).hexdigest()
-            evidence=external_proof or hashlib.sha256(
-                (suite+case["id"]+answer_sha+verdict).encode()).hexdigest()
-        except Exception:
-            verdict="error"
-            answer_sha=""
-            evidence=""
-        elapsed=round((time.perf_counter()-began)*1000,3)
-        results.append((suite,model_revision,case["id"],case["category"],
-                        case["split"],case["mode"],verdict,answer_sha,
-                        evidence,elapsed,time.time_ns()//1000000))
-    # Fail if another process changed the dataset while queries were running.
+    # Freeze the selected cases against the admitted suite before inference.
+    # Completed cases are committed individually; cancellation or process death
+    # cannot discard earlier scores from a long-running batch.
+    with path.open("rb") as source:
+        if hashlib.file_digest(source,"sha256").hexdigest()!=suite:
+            raise RuntimeError("evaluation_dataset_changed_before_run")
+    with _LOCK:
+        db=_db()
+    try:
+        for case in pending:
+            ident="eval-"+hashlib.sha256(
+                (suite+":"+model_revision+":"+case["id"]).encode()).hexdigest()[:40]
+            began=time.perf_counter()
+            try:
+                output=provider(case["prompt"],ident)
+                if not isinstance(output,dict) or not isinstance(
+                    output.get("content"),str):
+                    raise ValueError("actual_model_text_required")
+                answer=output["content"]
+                if len(answer)>500000:
+                    raise ValueError("oversized_model_response")
+                verdict,external_proof=_score(case,answer,external_judge)
+                answer_sha=hashlib.sha256(answer.encode()).hexdigest()
+                evidence=external_proof or hashlib.sha256(
+                    (suite+case["id"]+answer_sha+verdict).encode()).hexdigest()
+            except Exception:
+                verdict="error"
+                answer_sha=""
+                evidence=""
+            elapsed=round((time.perf_counter()-began)*1000,3)
+            row=(suite,model_revision,case["id"],case["category"],
+                 case["split"],case["mode"],verdict,answer_sha,
+                 evidence,elapsed,time.time_ns()//1000000)
+            # Autocommit + FULL synchronous WAL: no transaction is held during
+            # generation, and a persisted score is available for a later batch.
+            with _LOCK:
+                db.execute("""INSERT OR IGNORE INTO evaluations
+                    (suite_sha256,model_revision,case_id,category,split,mode,verdict,
+                     response_sha256,evidence_sha256,latency_ms,scored_at_ms)
+                     VALUES(?,?,?,?,?,?,?,?,?,?,?)""",row)
+    finally:
+        db.close()
+    # The previously captured cases remain bound to the original hash; never
+    # report completion of a different file if it changed during generation.
     with path.open("rb") as source:
         current=hashlib.file_digest(source,"sha256").hexdigest()
     if current!=suite:
         raise RuntimeError("evaluation_dataset_changed_during_run")
-    with _LOCK:
-        db=_db()
-        try:
-            db.execute("BEGIN IMMEDIATE")
-            db.executemany("""INSERT OR IGNORE INTO evaluations
-                (suite_sha256,model_revision,case_id,category,split,mode,verdict,
-                 response_sha256,evidence_sha256,latency_ms,scored_at_ms)
-                 VALUES(?,?,?,?,?,?,?,?,?,?,?)""",results)
-            db.execute("COMMIT")
-        except BaseException:
-            db.execute("ROLLBACK")
-            raise
-        finally:db.close()
     return summary(path,model_revision)
 
 
