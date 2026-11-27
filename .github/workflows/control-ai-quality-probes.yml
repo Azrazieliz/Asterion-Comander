@@ -1,0 +1,70 @@
+name: Control Model Lab stronger candidate free-generation diagnostics
+on:
+  push:
+    branches: [work/control-native-ai-reconstruction-20261126]
+    paths:
+      - 'scripts/control_ai_quality_probe.py'
+      - '.github/workflows/control-ai-quality-probes.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-runner:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          ref: 4b77dee0524c64b8471869232e2958bd9589607d
+          persist-credentials: false
+      - run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DGGML_NATIVE=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_SERVER=ON -DLLAMA_BUILD_UI=OFF -DLLAMA_USE_PREBUILT_UI=OFF -DLLAMA_OPENSSL=OFF -DLLAMA_CURL=OFF
+          cmake --build build --target llama-server -j 4
+          tar -C build/bin -czf native-runner.tar.gz llama-server
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quality-native-runner
+          path: native-runner.tar.gz
+          retention-days: 3
+  quality:
+    needs: native-runner
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        candidate: [olmo7, granite8, nemo12, phi14, olmo32]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: quality-native-runner
+      - uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          ref: 4b77dee0524c64b8471869232e2958bd9589607d
+          path: runtime
+          sparse-checkout: gguf-py
+          persist-credentials: false
+      - name: Evaluate actual generated answers, not just perplexity
+        env:
+          CANDIDATE: ${{ matrix.candidate }}
+          HF_HUB_DISABLE_IMPLICIT_TOKEN: '1'
+        run: |
+          mkdir native-tools
+          tar -xzf native-runner.tar.gz -C native-tools
+          python -m pip install huggingface-hub==0.34.4 psutil ./runtime/gguf-py
+          python -m scripts.control_ai_quality_probe "$CANDIDATE" --binary native-tools/llama-server --output measured
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: quality-${{ matrix.candidate }}
+          path: measured/
+          if-no-files-found: warn
