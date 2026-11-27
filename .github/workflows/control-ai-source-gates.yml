@@ -37,6 +37,7 @@ jobs:
             tests/test_control_ai_model_profile.py \
             tests/test_control_ai_adaptation.py \
             tests/test_control_ai_native_adapter_export.py \
+            tests/test_control_ai_application_evaluate.py \
             tests/test_control_ai_stronger_adaptation.py \
             tests/test_control_ai_dev_backlog.py \
             tests/test_control_ai_executor.py \

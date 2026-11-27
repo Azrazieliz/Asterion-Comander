@@ -164,6 +164,9 @@ def run(root,expanded=False):
         with model.disable_adapter():
             report["base_score"]=model_evaluation.run_batch(suite,identity,provider)
         report["adapted_score"]=model_evaluation.run_batch(suite,report["adapter_sha256"],provider)
+        if expanded:
+            from scripts.control_ai_application_evaluate import evaluate
+            report["application_score"]=evaluate(provider,report["adapter_sha256"],root/"application-evaluation")
         report["state"]="evaluated" if all(report[x]["fully_evaluated"] and not report[x]["model_errors"] for x in ("base_score","adapted_score")) else "evaluation_errors"
         save()
         if report["state"]!="evaluated":raise RuntimeError("incomplete_evaluation")
