@@ -15,8 +15,9 @@ import org.json.JSONObject;
 import java.security.MessageDigest;
 import java.util.Map;
 import java.util.regex.Pattern;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -33,7 +34,7 @@ final class AppBridge {
   private static final Pattern ACTION=Pattern.compile("[a-z][a-z0-9_.-]{0,79}");
   private static final Pattern REQUEST_ID=Pattern.compile("[A-Za-z0-9_.:-]{8,100}");
   private static final Object LOCK=new Object();
-  private static final ExecutorService CALLS=Executors.newFixedThreadPool(2);
+  private static final ThreadPoolExecutor CALLS=PartnerDispatchPolicy.executor();
   private static SharedPreferences prefs(Context ctx){
     return ctx.getSharedPreferences(PREF,Context.MODE_PRIVATE);
   }
@@ -67,6 +68,22 @@ final class AppBridge {
     for(byte b:sha)hex.append(String.format(java.util.Locale.US,"%02x",b&255));
     return hex.toString();
   }
+  private static void requireCurrentApproval(Context ctx,String pkg,String expected)throws Exception{
+    provider(ctx,pkg);
+    if(!PartnerDispatchPolicy.approved(expected,prefs(ctx).getString("approved:"+pkg,""),signer(ctx,pkg)))
+      throw new SecurityException("Partner approval or signing identity changed");
+  }
+  private static Future<Bundle> submitApproved(Context ctx,String pkg,String expected,
+      String method,String argument,Bundle extras){
+    CALLS.purge();
+    return CALLS.submit(()->{
+      requireCurrentApproval(ctx,pkg,expected);
+      Bundle reply=ctx.getContentResolver().call(Uri.parse("content://"+authority(pkg)),method,argument,extras);
+      // A late reply from an obsolete approval is not trusted evidence.
+      requireCurrentApproval(ctx,pkg,expected);
+      return reply;
+    });
+  }
   static JSONObject list(Context ctx)throws Exception{
     JSONArray found=new JSONArray();
     for(Map.Entry<String,String> app:AppCatalog.launchable(ctx).entrySet()){
@@ -99,14 +116,21 @@ final class AppBridge {
     arg.putInt("protocol_version",1);
     Bundle response;
     try{
-      Future<Bundle> task=CALLS.submit(()->ctx.getContentResolver().call(
-        Uri.parse("content://"+authority(pkg)),"asterion.v1.capabilities",null,arg));
+      Future<Bundle> task=submitApproved(ctx,pkg,expected,"asterion.v1.capabilities",null,arg);
       try{response=task.get(4,TimeUnit.SECONDS);}
       catch(TimeoutException timeout){
-        task.cancel(true);
+        task.cancel(true);CALLS.purge();
         return new JSONObject().put("ok",false).put("package",pkg)
             .put("capabilities_available",false).put("reason","signed_partner_capability_timeout");
       }
+    }catch(RejectedExecutionException busy){
+      return new JSONObject().put("ok",false).put("package",pkg)
+          .put("capabilities_available",false).put("reason","partner_queue_busy");
+    }catch(ExecutionException failure){
+      return new JSONObject().put("ok",false).put("package",pkg)
+          .put("capabilities_available",false)
+          .put("reason",failure.getCause() instanceof SecurityException?
+              "signed_partner_approval_changed":"signed_partner_did_not_publish_capabilities");
     }catch(Exception failure){
       return new JSONObject().put("ok",false).put("package",pkg)
           .put("capabilities_available",false)
@@ -224,12 +248,19 @@ final class AppBridge {
     args.putString("payload_json",data.toString());
     String status="outcome_unknown";
     try{
-      Future<Bundle> executing=CALLS.submit(()->ctx.getContentResolver().call(
-        Uri.parse("content://"+authority(pkg)),"asterion.v1.invoke",null,args));
+      Future<Bundle> executing;
+      try{executing=submitApproved(ctx,pkg,expected,"asterion.v1.invoke",null,args);}
+      catch(RejectedExecutionException busy){
+        boolean saved;
+        synchronized(LOCK){saved=prefs(ctx).edit().putString(receiptKey,binding+"|not_dispatched").commit();}
+        return new JSONObject().put("ok",false).put("package",pkg).put("request_id",requestId)
+            .put("status",saved?"not_dispatched":"outcome_unknown")
+            .put("reason","partner_queue_busy").put("dispatch_attempted",false).put("retry_safe",false);
+      }
       Bundle result;
       try{result=executing.get(7L,TimeUnit.SECONDS);}
       catch(TimeoutException timeout){
-        executing.cancel(true);
+        executing.cancel(true);CALLS.purge();
         throw new IllegalStateException("Partner bridge timed out; outcome uncertain");
       }
       if(result==null)throw new IllegalStateException("App returned no result");
@@ -268,12 +299,17 @@ final class AppBridge {
     extras.putString("request_id",requestId);
     String operation=cancel?"asterion.v1.cancel":"asterion.v1.status";
     try{
-      Future<Bundle> executing=CALLS.submit(()->ctx.getContentResolver().call(
-        Uri.parse("content://"+authority(pkg)),operation,requestId,extras));
+      Future<Bundle> executing;
+      try{executing=submitApproved(ctx,pkg,cert,operation,requestId,extras);}
+      catch(RejectedExecutionException busy){
+        return new JSONObject().put("ok",false).put("package",pkg).put("request_id",requestId)
+            .put("status","not_dispatched").put("reason","partner_queue_busy")
+            .put("dispatch_attempted",false).put("retry_safe",false);
+      }
       Bundle reply;
       try{reply=executing.get(6L,TimeUnit.SECONDS);}
       catch(TimeoutException timeout){
-        executing.cancel(true);
+        executing.cancel(true);CALLS.purge();
         throw new IllegalStateException("Partner outcome uncertain");
       }
       if(reply==null)throw new IllegalStateException("No partner response");
