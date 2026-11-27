@@ -4,6 +4,11 @@ package com.asterion.control;
  * Does not certify DNS leaks, fingerprinting, or anonymity beyond that request.
  */
 final class TorProofPolicy {
+    static boolean allowRequest(boolean closed,boolean ready,boolean checking,boolean fixedProof,
+                                String method,boolean validDestination){
+        return !closed&&"GET".equals(method)&&validDestination&&
+            (checking?fixedProof:ready);
+    }
     static boolean isTor(boolean claim,String ip){
         if(!claim||ip==null||ip.isBlank()||ip.length()>45||ip.indexOf('%')>=0)return false;
         if(ip.indexOf(':')>=0){
