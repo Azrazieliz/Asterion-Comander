@@ -49,7 +49,8 @@ public final class VoiceDialogueService extends Service {
   private AudioManager speechAudioManager;
   private AudioFocusRequest speechAudioRequest;
   private volatile boolean exclusiveSpeechAudio=false;
-  private SpeechRecognizer listener;
+  private volatile SpeechRecognizer listener;
+  private volatile long recognitionGeneration;
   private volatile String phase="stopped", question="", transcript="", error="";
   private volatile long updatedAt=0L;
   private volatile String questionId="";
@@ -132,13 +133,34 @@ public final class VoiceDialogueService extends Service {
     ambientWakeRefresh=null;
     if(ambientWakeLock!=null&&ambientWakeLock.isHeld())ambientWakeLock.release();
   }
+  // Invalidate before posting cleanup. A delayed cleanup always closes the
+  // captured recognizer, never whichever recognizer was installed later.
+  private synchronized long closeRecognizer(boolean cancel){
+    final SpeechRecognizer old=listener;
+    listener=null;
+    long generation=++recognitionGeneration;
+    microphoneActive=false;
+    if(old!=null){
+      Runnable cleanup=()->{
+        try{if(cancel)old.cancel();}catch(RuntimeException ignored){}
+        try{old.destroy();}catch(RuntimeException ignored){}
+      };
+      if(Looper.myLooper()==Looper.getMainLooper())cleanup.run();
+      else ui.post(cleanup);
+    }
+    return generation;
+  }
+  private boolean currentRecognizer(String id,long generation,SpeechRecognizer source){
+    return listener==source&&VoiceReplyPolicy.currentExchange(active==this,id,questionId,
+        generation,recognitionGeneration);
+  }
   private void cancelAmbient(){
     if(ambientRetry!=null)ui.removeCallbacks(ambientRetry);
     ambientRetry=null;
     if(ambientCapture){
       ambientCapture=false;
       clearDeadline();
-      if(listener!=null){listener.cancel();listener.destroy();listener=null;}
+      closeRecognizer(true);
       microphoneActive=false;
       state("ready","");
     }
@@ -249,7 +271,7 @@ public final class VoiceDialogueService extends Service {
     deadline=()->{
       if(active!=this||!id.equals(questionId))return;
       if("answered".equals(phase)||"acknowledged".equals(phase))return;
-      if(listener!=null){listener.cancel();listener.destroy();listener=null;}
+      closeRecognizer(true);
       microphoneActive=false;
       if(ambientCapture&&ambientEnabled){
         ambientCapture=false;
@@ -257,6 +279,8 @@ public final class VoiceDialogueService extends Service {
         state("ambient_retry","Recognition session timed out");
         scheduleAmbient(Math.min(20000L,1000L*(1L<<Math.min(4,ambientErrors))));
       }else{
+        if("speaking".equals(phase)&&speaker!=null)speaker.stop();
+        ownerCommandMode=false;speakOnly=false;
         state("failed","Speech answer timed out; microphone closed");
         if(ambientEnabled&&pendingOwnerSpeech.isEmpty())
           scheduleAmbient(800L);
@@ -433,8 +457,8 @@ public final class VoiceDialogueService extends Service {
     if(!speakerReady)throw new IllegalStateException("Android speaker not ready");
     if(text==null||text.isBlank()||text.length()>700)
       throw new IllegalArgumentException("Question must contain 1-700 characters");
-    if(!locale.matches("[a-z]{2}(-[A-Z]{2})?"))
-      throw new IllegalArgumentException("Invalid speech locale");
+    if(!VoiceReplyPolicy.englishLocale(locale))
+      throw new IllegalArgumentException("Voice supports English locales only");
     if(requestId!=null&&!requestId.isEmpty()&&
        !requestId.matches("[A-Za-z0-9_.-]{3,100}"))
       throw new IllegalArgumentException("Invalid voice question identifier");
@@ -523,25 +547,28 @@ public final class VoiceDialogueService extends Service {
     return voiceSettings();
   }
   private void speakNow(String text,String locale,String id){
-    if(active!=this)return;
+    if(active!=this||!id.equals(questionId)||!"speaking".equals(phase))return;
     Locale language=Locale.forLanguageTag(locale);
     speaker.setAudioAttributes(new android.media.AudioAttributes.Builder()
       .setUsage(android.media.AudioAttributes.USAGE_ASSISTANT)
       .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH).build());
     int languageResult=speaker.setLanguage(language);
     if(languageResult==TextToSpeech.LANG_MISSING_DATA || languageResult==TextToSpeech.LANG_NOT_SUPPORTED){
-      clearDeadline();state("failed","Requested speech voice data is unavailable");return;
+      clearDeadline();ownerCommandMode=false;speakOnly=false;state("failed","Requested speech voice data is unavailable");return;
     }
     applyNaturalVoice(language);
     speaker.setOnUtteranceProgressListener(new UtteranceProgressListener(){
       @Override public void onStart(String utteranceId){
-        if(id.equals(utteranceId))speakerPlaybackStarted=true;
+        if(id.equals(utteranceId))ui.post(()->{
+          if(active==VoiceDialogueService.this&&id.equals(questionId)&&"speaking".equals(phase))
+            speakerPlaybackStarted=true;
+        });
       }
       @Override public void onDone(String utteranceId){
         if(id.equals(utteranceId)){
-          speakerPlaybackCompleted=true;
           ui.post(()->{
-            if(active!=VoiceDialogueService.this||!id.equals(questionId))return;
+            if(active!=VoiceDialogueService.this||!id.equals(questionId)||!"speaking".equals(phase))return;
+            speakerPlaybackCompleted=true;
             releaseAudioFocus();
             if(speakOnly){
               clearDeadline();speakOnly=false;state("ready","");
@@ -551,14 +578,15 @@ public final class VoiceDialogueService extends Service {
         }
       }
       @Override public void onError(String utteranceId){
-        if(id.equals(utteranceId)){
-          ui.post(()->clearDeadline());
+        if(id.equals(utteranceId))ui.post(()->{
+          if(active!=VoiceDialogueService.this||!id.equals(questionId)||!"speaking".equals(phase))return;
+          clearDeadline();ownerCommandMode=false;speakOnly=false;
           state("failed","Android speech playback failed");
-        }
+        });
       }
     });
     int response=speaker.speak(text,TextToSpeech.QUEUE_FLUSH,null,id);
-    if(response!=TextToSpeech.SUCCESS){clearDeadline();state("failed","Could not start speaker");}
+    if(response!=TextToSpeech.SUCCESS){clearDeadline();ownerCommandMode=false;speakOnly=false;state("failed","Could not start speaker");}
   }
   private void startListening(String locale,String id){
     if(active!=this||!id.equals(questionId))return;
@@ -585,17 +613,20 @@ public final class VoiceDialogueService extends Service {
    * language model is missing (error 13). It may use Android's network speech
    * service; the app never uploads audio to Asterion servers or embeds AI.
    */
-  private void beginRecognition(String locale,String id,boolean offline)throws Exception {
+  private synchronized void beginRecognition(String locale,String id,boolean offline)throws Exception {
     if(active!=this||!id.equals(questionId))return;
-    if(listener!=null){listener.cancel();listener.destroy();listener=null;}
+    if(Looper.myLooper()!=Looper.getMainLooper())
+      throw new IllegalStateException("Recognition must start on Android main thread");
+    closeRecognizer(true);
     recognizerBackend=offline?"on_device":"android_system";
-    listener=offline?SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
+    final SpeechRecognizer source=offline?SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
       :SpeechRecognizer.createSpeechRecognizer(this);
+    listener=source;
+    final long generation=++recognitionGeneration;
     scheduleDeadline(id,ambientCapture?20000L:ANSWER_TIMEOUT_MS);
-    final String backend=recognizerBackend;
-    listener.setRecognitionListener(new RecognitionListener(){
+    source.setRecognitionListener(new RecognitionListener(){
       @Override public void onReadyForSpeech(Bundle extras){
-        if(id.equals(questionId)&&backend.equals(recognizerBackend)){
+        if(currentRecognizer(id,generation,source)){
           microphoneActive=true;state("listening","");
         }
       }
@@ -603,12 +634,12 @@ public final class VoiceDialogueService extends Service {
       @Override public void onRmsChanged(float rmsdB){}
       @Override public void onBufferReceived(byte[] data){}
       @Override public void onEndOfSpeech(){
-        if(id.equals(questionId)&&backend.equals(recognizerBackend))
+        if(currentRecognizer(id,generation,source))
           state("processing","");
       }
       @Override public void onError(int code){
-        if(!id.equals(questionId)||!backend.equals(recognizerBackend))return;
-        microphoneActive=false;
+        if(!currentRecognizer(id,generation,source))return;
+        long closedGeneration=closeRecognizer(false);
         if(offline && (code==SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE
             || code==SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED
             || code==SpeechRecognizer.ERROR_CLIENT)
@@ -616,10 +647,11 @@ public final class VoiceDialogueService extends Service {
           preferSystemRecognizer=true;
           state("fallback","Offline recognizer unavailable (error "+code+"); trying Android system speech");
           ui.post(()->{
-            if(active!=VoiceDialogueService.this||!id.equals(questionId))return;
+            if(!VoiceReplyPolicy.currentExchange(active==VoiceDialogueService.this,id,questionId,
+                closedGeneration,recognitionGeneration)||!"fallback".equals(phase))return;
             try{beginRecognition(locale,id,false);}
             catch(Exception failure){
-              clearDeadline();
+              clearDeadline();closeRecognizer(true);ownerCommandMode=false;ambientCapture=false;
               state("failed","Android system speech fallback unavailable: "+
                 failure.getClass().getSimpleName());
             }
@@ -629,18 +661,17 @@ public final class VoiceDialogueService extends Service {
         clearDeadline();
         boolean ambient=ambientCapture;
         ambientCapture=false;
-        ui.post(()->{if(listener!=null){listener.destroy();listener=null;}});
         if(ambient&&ambientEnabled){
           ambientErrors=code==SpeechRecognizer.ERROR_NO_MATCH||
             code==SpeechRecognizer.ERROR_SPEECH_TIMEOUT?0:Math.min(6,ambientErrors+1);
           state("ambient_retry",speechError(code));
           scheduleAmbient(ambientErrors==0?400L:
             Math.min(30000L,600L*(1L<<Math.min(5,ambientErrors))));
-        }else state("failed",speechError(code));
+        }else{ownerCommandMode=false;state("failed",speechError(code));}
       }
       @Override public void onResults(Bundle results){
-        if(!id.equals(questionId)||!backend.equals(recognizerBackend))return;
-        microphoneActive=false;clearDeadline();
+        if(!currentRecognizer(id,generation,source))return;
+        closeRecognizer(false);clearDeadline();
         ArrayList<String> phrases=results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
         transcript=phrases==null||phrases.isEmpty()?"":phrases.get(0);
         if(ambientCapture){
@@ -648,15 +679,13 @@ public final class VoiceDialogueService extends Service {
           String detected=transcript;
           transcript="";
           state("ambient_ready","");
-          ui.post(()->{if(listener!=null){listener.destroy();listener=null;}});
-          onAmbientTranscript(detected);
+            onAmbientTranscript(detected);
           return;
         }
         boolean command=ownerCommandMode;
         ownerCommandMode=false;
         state(transcript.isEmpty()?"failed":command?"processing":"answered",
           transcript.isEmpty()?"No recognized speech":"");
-        ui.post(()->{if(listener!=null){listener.destroy();listener=null;}});
         if(command&&!transcript.isEmpty()){
           releaseAudioFocus();
           releaseCpuForExchange();
@@ -670,8 +699,7 @@ public final class VoiceDialogueService extends Service {
         }
       }
       @Override public void onPartialResults(Bundle results){
-        if(!ambientCapture||!id.equals(questionId)||
-           !backend.equals(recognizerBackend))return;
+        if(!ambientCapture||!currentRecognizer(id,generation,source))return;
         ArrayList<String> partial=results.getStringArrayList(
           SpeechRecognizer.RESULTS_RECOGNITION);
         if(partial==null||partial.isEmpty())return;
@@ -690,7 +718,11 @@ public final class VoiceDialogueService extends Service {
     request.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS,true);
     if(offline)request.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE,true);
     state("listening","");
-    listener.startListening(request);
+    try{source.startListening(request);}
+    catch(RuntimeException failure){
+      if(currentRecognizer(id,generation,source))closeRecognizer(true);
+      throw failure;
+    }
   }
   /** One explicit owner-initiated voice turn. The recognizer transcribes what the
    * owner says, then Control submits to the selected owner voice route.
@@ -716,7 +748,7 @@ public final class VoiceDialogueService extends Service {
   synchronized JSONObject sayOnly(String text,String locale)throws Exception{
     if(active!=this||!speakerReady)throw new IllegalStateException("Speaker not ready");
     if(text==null||text.isBlank()||text.length()>700||
-       locale==null||!locale.matches("[a-z]{2}(-[A-Z]{2})?"))
+       !VoiceReplyPolicy.englishLocale(locale))
       throw new IllegalArgumentException("Invalid spoken reply");
     if(ambientCapture)cancelAmbient();
     if("listening".equals(phase)||"processing".equals(phase)||"speaking".equals(phase))
@@ -967,7 +999,7 @@ public final class VoiceDialogueService extends Service {
       .put("exclusive_audio_focus",exclusiveSpeechAudio);
   }
   @Override public void onDestroy(){
-    active=null;
+    if(active==this)active=null;
     nativeAssistant.interrupt();nativeVoiceBusy=false;
     if(unlockedReceiver!=null){
       try{unregisterReceiver(unlockedReceiver);}catch(Exception ignored){}
@@ -975,7 +1007,7 @@ public final class VoiceDialogueService extends Service {
     }
     ui.post(()->{
       clearDeadline();microphoneActive=false;
-      if(listener!=null){listener.destroy();listener=null;}
+      closeRecognizer(true);
       if(speaker!=null){speaker.stop();speaker.shutdown();}
       releaseAudioFocus();
       releaseCpuForExchange();
