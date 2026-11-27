@@ -167,6 +167,10 @@ public final class AssistantActivity extends Activity {
                              tools.addView(control("Interpret receipt",()->interpretReceipt(c,m)));
                         }else try{JSONObject proposal=m.state.equals("completed")?AssistantCapabilities.proposal(m.text):null;if(proposal!=null)tools.addView(control("Review action",()->reviewAction(c,m,proposal)));}catch(Exception ignored){}
                         if(m.state.equals("completed"))try{
+                            String query=AssistantResearchPlan.parse(m.text);
+                            if(query!=null)tools.addView(control("Review search",()->reviewResearch(c,m,query)));
+                        }catch(IllegalArgumentException ignored){}
+                        if(m.state.equals("completed"))try{
                             AssistantSchedulePlan schedule=AssistantSchedulePlan.parse(m.text);
                             if(schedule!=null)tools.addView(control("Review schedule",()->{
                                 if(idle()&&session.conversation==c&&c.messages.contains(m))
@@ -394,6 +398,17 @@ public final class AssistantActivity extends Activity {
                 String attachment=new String(bytes,StandardCharsets.UTF_8);runOnUiThread(()->{if(alive)composer.append("\n\nAttached text:\n"+attachment);});
             }catch(Exception failure){runOnUiThread(()->notice("Choose a readable text file up to 16 KB."));}
         });}
+    }
+    private void reviewResearch(AssistantConversation owner,AssistantConversation.Message message,String query){
+        if(!idle()||session.conversation!=owner||!owner.messages.contains(message))return;
+        new AlertDialog.Builder(this).setTitle("Review external web search")
+            .setMessage("Send only these search terms to the Browser's configured provider?\n\n"+query+
+                "\n\nPin relevant pages to the encrypted research board to use captured evidence. No search has run yet.")
+            .setNegativeButton("Cancel",null).setPositiveButton("Search",(d,w)->{
+                if(!idle()||session.conversation!=owner||!owner.messages.contains(message))return;
+                startActivity(new Intent(this,BrowserActivity.class).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                    .putExtra("assistant_search_query",query));
+            }).show();
     }
     private void interpretReceipt(AssistantConversation owner,AssistantConversation.Message message){
         if(!idle()||session.conversation!=owner||message.actionRecord==null)return;
