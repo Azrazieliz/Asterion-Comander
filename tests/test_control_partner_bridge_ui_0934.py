@@ -54,7 +54,14 @@ class PartnerOwnerUiTests(unittest.TestCase):
         self.assertIn('.setPositiveButton("Agree & configure"',snippet)
         self.assertIn('ControlFreeVpnProvisioner.enroll',snippet)
         self.assertIn('this::requestVpnConsentAndConnect',snippet)
-        self.assertIn('Android will still ask you to approve the VPN connection',snippet)
+        self.assertIn('Android may still ask you to approve the VPN connection',snippet)
+        consent=s.split('private void requestVpnConsentAndConnect()',1)[1].split('private TextView serviceLine',1)[0]
+        self.assertIn('ControlPrivateVpn.consentIntent(this)',consent)
+        self.assertIn('startActivityForResult(permission,VPN_REQUEST)',consent)
+        self.assertIn('if(permission!=null)',consent)
+        controller=(ROOT/"android/app/src/main/java/com/asterion/control/ControlPrivateVpn.java").read_text("utf8")
+        self.assertIn('return VpnService.prepare(owner)',controller)
+        self.assertIn('if(VpnService.prepare(owner)!=null)',controller)
         self.assertNotIn('ControlPrivateVpn.connect(',snippet)
         self.assertNotIn('ControlPrivateVpn.importLocally(',snippet)
 
