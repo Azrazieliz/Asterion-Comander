@@ -1,0 +1,65 @@
+name: Control verified retained adapter native export
+on:
+  push:
+    branches: [ai-candidate/continuation-native-export-20261128]
+    paths:
+      - '.github/workflows/control-ai-native-adapter-export.yml'
+      - 'scripts/control_ai_native_adapter_export.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+env:
+  HF_HUB_DISABLE_IMPLICIT_TOKEN: '1'
+  HF_HUB_DISABLE_TELEMETRY: '1'
+  TOKENIZERS_PARALLELISM: 'false'
+  OMP_NUM_THREADS: '4'
+jobs:
+  native-adapter:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          ref: 4b77dee0524c64b8471869232e2958bd9589607d
+          path: runtime
+          persist-credentials: false
+      - name: Fetch exact completed public training archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl --fail --silent --show-error --location --retry 2 -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "${{ github.api_url }}/repos/${{ github.repository }}/actions/artifacts/15230982528/zip" --output retained.zip
+          echo '964e0da062daf5b74458b4366732d9ee233a25973920d34634d5f17756e91b42  retained.zip' | sha256sum -c -
+      - name: Restore exact verified parent and stage only converter metadata
+        run: |
+          python -m pip install huggingface-hub==0.34.4
+          python -m scripts.control_ai_retained_candidate retained.zip retained
+      - name: Convert the actual learned adapter to native F16 GGUF
+        run: |
+          python -m pip install -r runtime/requirements/requirements-convert_lora_to_gguf.txt
+          python -m pip install ./runtime/gguf-py
+          python -m scripts.control_ai_native_adapter_export --candidate retained/candidate --base retained/base --runtime runtime --output native-parent
+      - name: Preserve exact learned weights and native conversion
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: retained-7b-native-adapter-f16
+          retention-days: 30
+          if-no-files-found: warn
+          path: |
+            retained/candidate/adapter/
+            retained/candidate/candidate.json
+            retained/retained-lineage.json
+            retained/report.json
+            retained/train.jsonl
+            retained/holdout.jsonl
+            retained/generation-evaluation.jsonl
+            native-parent/
