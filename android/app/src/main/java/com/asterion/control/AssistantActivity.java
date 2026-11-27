@@ -164,6 +164,7 @@ public final class AssistantActivity extends Activity {
                         }
                         if(m.actionRecord!=null){
                             tools.addView(control("Check receipt",()->session.recheck(this,c,m)));
+                             tools.addView(control("Interpret receipt",()->interpretReceipt(c,m)));
                         }else try{JSONObject proposal=m.state.equals("completed")?AssistantCapabilities.proposal(m.text):null;if(proposal!=null)tools.addView(control("Review action",()->reviewAction(c,m,proposal)));}catch(Exception ignored){}
                         if(m.state.equals("completed"))try{
                             AssistantSchedulePlan schedule=AssistantSchedulePlan.parse(m.text);
@@ -393,6 +394,15 @@ public final class AssistantActivity extends Activity {
                 String attachment=new String(bytes,StandardCharsets.UTF_8);runOnUiThread(()->{if(alive)composer.append("\n\nAttached text:\n"+attachment);});
             }catch(Exception failure){runOnUiThread(()->notice("Choose a readable text file up to 16 KB."));}
         });}
+    }
+    private void interpretReceipt(AssistantConversation owner,AssistantConversation.Message message){
+        if(!idle()||session.conversation!=owner||message.actionRecord==null)return;
+        String id=message.actionRecord.requestId;
+        // A new local inference turn interprets existing evidence only. No
+        // new app action, re-dispatch or automatic permission is granted.
+        session.send(this,"Interpret the recorded signed partner receipt "+id+
+            ". State the actual observed values, limitations and next useful step. "+
+            "Treat provider status as a reported observation, not independent proof; do not invoke another action.");
     }
     private void reviewAction(AssistantConversation owner,AssistantConversation.Message message,JSONObject proposal){
         if(!idle()||session.conversation!=owner||message.actionRecord!=null)return;
