@@ -1,6 +1,8 @@
 package com.asterion.control;
 
 import android.content.Context;
+import android.app.KeyguardManager;
+import android.os.SystemClock;
 import android.content.SharedPreferences;
 import android.net.Uri;
 import android.security.keystore.KeyGenParameterSpec;
@@ -47,6 +49,55 @@ final class ControlPasswordVault {
         .getBytes(StandardCharsets.UTF_8);
     private static final SecureRandom RNG=new SecureRandom();
     private static final Object LOCK=new Object();
+    private static final String AUTH_TIMEOUT="device_auth_timeout_minutes";
+    private static long unlockedUntilElapsed=0L;
+    // Application-level gate over the existing Keystore-encrypted vault.
+    // No password or reusable authentication token is written to preferences.
+    static int authTimeout(Context c){
+        return preferences(c).getInt(AUTH_TIMEOUT,0);
+    }
+    static boolean canAccess(Context c){
+        synchronized(LOCK){
+            if(authTimeout(c)==0)return true;
+            KeyguardManager manager=c.getSystemService(KeyguardManager.class);
+            if(manager==null||!manager.isDeviceSecure()||manager.isDeviceLocked()){
+                unlockedUntilElapsed=0L;return false;
+            }
+            return unlockedUntilElapsed>SystemClock.elapsedRealtime();
+        }
+    }
+    private static void requireAccess(Context c){
+        if(!canAccess(c))throw new SecurityException("Vault locked");
+    }
+    // BrowserActivity calls this only after a successful Android credential
+    // confirmation result. The authenticated lease is process-local.
+    static void confirmDeviceAuth(Context c,int newTimeout){
+        synchronized(LOCK){
+            KeyguardManager manager=c.getSystemService(KeyguardManager.class);
+            if(manager==null||!manager.isDeviceSecure()||manager.isDeviceLocked())
+                throw new SecurityException("Device authentication unavailable");
+            if(newTimeout!=-1){
+                if(newTimeout!=0&&newTimeout!=1&&newTimeout!=5&&newTimeout!=15)
+                    throw new IllegalArgumentException("Invalid vault timeout");
+                if(!preferences(c).edit().putInt(AUTH_TIMEOUT,newTimeout).commit())
+                    throw new IllegalStateException("Vault policy write failed");
+            }
+            unlockedUntilElapsed=SystemClock.elapsedRealtime()+authTimeout(c)*60_000L;
+        }
+    }
+    static void lock(){synchronized(LOCK){unlockedUntilElapsed=0L;}}
+    static String generatePassword(){
+        final String[] groups={"ABCDEFGHJKLMNPQRSTUVWXYZ","abcdefghijkmnopqrstuvwxyz",
+            "23456789","!@#$%&*+-=?"};
+        String alphabet=String.join("",groups);
+        char[] result=new char[24];
+        for(int i=0;i<groups.length;i++)result[i]=groups[i].charAt(RNG.nextInt(groups[i].length()));
+        for(int i=groups.length;i<result.length;i++)result[i]=alphabet.charAt(RNG.nextInt(alphabet.length()));
+        for(int i=result.length-1;i>0;i--){
+            int j=RNG.nextInt(i+1);char swap=result[i];result[i]=result[j];result[j]=swap;
+        }
+        return new String(result);
+    }
     private ControlPasswordVault(){}
 
     /** Refuse insecure HTTP and all non-web or credential-bearing origins. */
@@ -128,6 +179,7 @@ final class ControlPasswordVault {
             password==null||password.isBlank()||password.length()>4096)
             throw new IllegalArgumentException("Invalid credential length");
         synchronized(LOCK){
+            requireAccess(context);
             JSONObject value=new JSONObject().put("origin",origin)
                 .put("username",username).put("password",password)
                 .put("updated_ms",System.currentTimeMillis());
@@ -140,6 +192,7 @@ final class ControlPasswordVault {
     static List<Entry> accounts(Context context,String url)throws Exception{
         String origin=exactOrigin(url);
         synchronized(LOCK){
+            requireAccess(context);
             List<Entry> found=new ArrayList<>();
             for(Map.Entry<String,?> item:preferences(context).getAll().entrySet()){
                 if(!item.getKey().startsWith(PREFIX)||!(item.getValue() instanceof String))
@@ -157,6 +210,7 @@ final class ControlPasswordVault {
         String origin=exactOrigin(url);
         if(username==null||username.isBlank())return false;
         synchronized(LOCK){
+            requireAccess(context);
             String id=itemKey(origin,username);
             if(!preferences(context).contains(id))return false;
             if(!preferences(context).edit().remove(id).commit())

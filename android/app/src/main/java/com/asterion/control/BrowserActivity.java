@@ -1,6 +1,7 @@
 package com.asterion.control;
 
 import android.app.Activity;
+import android.app.KeyguardManager;
 import android.app.AlertDialog;
 import android.app.DownloadManager;
 import android.database.Cursor;
@@ -97,6 +98,9 @@ public final class BrowserActivity extends Activity {
     private EditText address;
     private TextView status, counter, site;
     private static final int SITE_PERMISSION_CODE=4107;
+    private static final int VAULT_AUTH_CODE=4108;
+    private Integer pendingVaultPolicy;
+    private String pendingVaultOrigin;
     private SiteRequest pendingSiteRequest, androidPermissionInFlight;
     private AlertDialog siteRequestDialog;
     private View back, forward;
@@ -1067,6 +1071,40 @@ public final class BrowserActivity extends Activity {
     }
 
     /** Password vault is a purely local native screen, never AI or JavaScript. */
+    private void requestVaultAuth(int policy,String origin){
+        if(pendingVaultPolicy!=null){notice("Device confirmation is already open");return;}
+        KeyguardManager manager=getSystemService(KeyguardManager.class);
+        if(manager==null||!manager.isDeviceSecure()){
+            notice("Set an Android device screen lock to use vault authentication");return;
+        }
+        Intent confirm=manager.createConfirmDeviceCredentialIntent(
+            "Asterion Vault","Confirm your Android device credential to unlock or change vault protection.");
+        if(confirm==null){notice("Android device confirmation unavailable");return;}
+        pendingVaultPolicy=policy;pendingVaultOrigin=origin;
+        try{startActivityForResult(confirm,VAULT_AUTH_CODE);}
+        catch(Exception failure){pendingVaultPolicy=null;pendingVaultOrigin=null;notice("Could not open Android confirmation");}
+    }
+    @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){
+        super.onActivityResult(requestCode,resultCode,data);
+        if(requestCode!=VAULT_AUTH_CODE)return;
+        Integer policy=pendingVaultPolicy;String origin=pendingVaultOrigin;
+        pendingVaultPolicy=null;pendingVaultOrigin=null;
+        if(policy==null||resultCode!=RESULT_OK){notice("Vault confirmation cancelled");return;}
+        try{
+            ControlPasswordVault.confirmDeviceAuth(this,policy);
+            if(origin!=null&&origin.equals(verifiedActiveHttpsOrigin()))showVault();
+            else notice("Vault policy confirmed. Open a verified HTTPS login to use it.");
+        }catch(Exception failure){notice("Vault confirmation could not be applied");}
+    }
+    private void showVaultProtection(String origin){
+        int[] values={0,1,5,15};
+        int selected=0;
+        for(int i=0;i<values.length;i++)if(values[i]==ControlPasswordVault.authTimeout(this))selected=i;
+        new AlertDialog.Builder(this).setTitle("Vault device authentication")
+            .setSingleChoiceItems(new String[]{"Off","After 1 minute","After 5 minutes","After 15 minutes"},selected,
+                (dialog,which)->{dialog.dismiss();requestVaultAuth(values[which],origin);})
+            .setNegativeButton("Cancel",null).show();
+    }
     private void showVault(){
         BrowserTab tab=current();
         if(tab==null){notice("Open an HTTPS website first");return;}
@@ -1079,14 +1117,23 @@ public final class BrowserActivity extends Activity {
                 .setPositiveButton("Close",null).show();
             return;
         }
+        if(!ControlPasswordVault.canAccess(this)){
+            new AlertDialog.Builder(this).setTitle("Vault locked")
+                .setMessage("Confirm your Android device credential. Website sessions remain intact.")
+                .setPositiveButton("Unlock",(d,w)->requestVaultAuth(-1,origin))
+                .setNeutralButton("Protection",(d,w)->showVaultProtection(origin))
+                .setNegativeButton("Cancel",null).show();return;
+        }
         try{
             List<ControlPasswordVault.Entry> accounts=
                 ControlPasswordVault.accounts(this,origin);
-            String[] actions=new String[accounts.size()+2];
+            String[] actions=new String[accounts.size()+4];
             for(int i=0;i<accounts.size();i++)
                 actions[i]="Saved account • "+accounts.get(i).username;
             actions[accounts.size()]="Add HTTPS login";
             actions[accounts.size()+1]="Enable Android Autofill";
+            actions[accounts.size()+2]="Device authentication and timeout";
+            actions[accounts.size()+3]="Lock vault now";
             new AlertDialog.Builder(this).setTitle("Encrypted Vault • "+origin)
                 .setMessage("One Android Keystore-encrypted vault. Existing authorized website cookies are kept. Passwords are never sent to AI, Windows or logs.")
                 .setItems(actions,(d,choice)->{
@@ -1103,7 +1150,11 @@ public final class BrowserActivity extends Activity {
                             })
                             .setNegativeButton("Cancel",null).show();
                     }else if(choice==accounts.size())addVaultAccount(origin);
-                    else enableSystemAutofill();
+                    else if(choice==accounts.size()+1)enableSystemAutofill();
+                    else if(choice==accounts.size()+2)showVaultProtection(origin);
+                    else if(ControlPasswordVault.authTimeout(this)>0){
+                        ControlPasswordVault.lock();notice("Vault locked");
+                    }else notice("Enable device authentication first");
                 }).setNegativeButton("Close",null).show();
         }catch(Exception failure){
             notice("Encrypted vault unavailable: "+failure.getClass().getSimpleName());
@@ -1123,11 +1174,20 @@ public final class BrowserActivity extends Activity {
         password.setHint("Password");
         password.setInputType(InputType.TYPE_CLASS_TEXT |
             InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        password.setSaveEnabled(false);
+        password.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
+        username.setSaveEnabled(false);
+        username.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
         add(form,password);
+        android.widget.Button generate=new android.widget.Button(this);
+        generate.setText("Generate strong password");
+        generate.setOnClickListener(v->password.setText(ControlPasswordVault.generatePassword()));
+        add(form,generate);
         new AlertDialog.Builder(this).setTitle("Save login • "+origin)
             .setView(form)
             .setPositiveButton("Save",(d,which)->{
                 try{
+                    if(!origin.equals(verifiedActiveHttpsOrigin()))throw new SecurityException("Site changed");
                     ControlPasswordVault.save(this,origin,
                         username.getText().toString(),password.getText().toString());
                     notice("Encrypted login saved for this site");
