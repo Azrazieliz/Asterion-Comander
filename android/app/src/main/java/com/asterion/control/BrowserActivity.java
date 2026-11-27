@@ -247,6 +247,25 @@ public final class BrowserActivity extends Activity {
         }
         if(tabs.isEmpty() && saved==null) restorePersistedTabs();
         if(tabs.isEmpty()) newTab();
+        if(saved==null)consumeAssistantSearch(getIntent());
+    }
+    @Override protected void onNewIntent(Intent incoming){
+        super.onNewIntent(incoming);setIntent(incoming);
+        consumeAssistantSearch(incoming);
+    }
+    private void consumeAssistantSearch(Intent incoming){
+        if(incoming==null)return;
+        String raw=incoming.getStringExtra("assistant_search_query");
+        incoming.removeExtra("assistant_search_query");
+        if(raw==null)return;
+        try{
+            String query=AssistantResearchPlan.query(raw);
+            if(tabs.size()>=MAX_TABS){notice("Close a tab before starting the reviewed search");return;}
+            // Search terms are encoded as query data even if they look like a URL.
+            String url=searchPrefix()+java.net.URLEncoder.encode(query,java.nio.charset.StandardCharsets.UTF_8);
+            if(!BrowserNavigationPolicy.isWeb(url))throw new IllegalArgumentException("invalid_search_provider");
+            addTab(url);showTab(tabs.size()-1);
+        }catch(IllegalArgumentException invalid){notice("Reviewed search terms were invalid");}
     }
 
     private String safeAddress(String raw) {
