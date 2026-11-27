@@ -108,6 +108,8 @@ def test_workspace_uses_existing_encrypted_store_and_retains_failed_turns():
     assert "response incomplete" in workspace
     assert "cipher.updateAAD(conversation.id" in memory
     assert 'CREATE TABLE IF NOT EXISTS conversation' in memory
-    assert 'super(c,DB,null,2)' in memory
+    assert 'super(c,DB,null,3)' in memory
+    assert 'if(oldVersion==1&&newVersion<=3){createConversations(db);oldVersion=2;}' in memory
+    assert 'if(oldVersion==2&&newVersion==3){createProjectSources(db);return;}' in memory
     assert "oldVersion==1&&newVersion==2" in memory
     assert "session.conversation.fork()" in workspace
