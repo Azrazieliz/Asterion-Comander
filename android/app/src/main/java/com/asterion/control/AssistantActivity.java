@@ -253,7 +253,6 @@ public final class AssistantActivity extends Activity {
             String[] options=profile.adapterFile.isEmpty()?new String[]{"Base · "+profile.file}:
                 new String[]{"Base · "+profile.file,"Adapter · "+profile.adapterFile};
             new AlertDialog.Builder(this).setTitle("Install signed model pack")
-                .setMessage("Select the exact delivered GGUF file. Its size, SHA-256 and base/adapter binding come from this signed app. No unsigned profile can replace them.")
                 .setItems(options,(dialog,index)->{
                     if(!idle())return;
                     Intent picker=new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE);
