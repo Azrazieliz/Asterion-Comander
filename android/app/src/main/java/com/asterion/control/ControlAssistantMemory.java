@@ -219,56 +219,28 @@ final class ControlAssistantMemory {
             }finally{helper.close();}
         }
     }
-    private static Set<String> terms(String value){
-        Set<String> result=new HashSet<>();
-        java.util.regex.Matcher m=java.util.regex.Pattern.compile(
-            "[\\p{L}\\p{N}]{2,}").matcher(value.toLowerCase(Locale.ROOT));
-        while(m.find()&&result.size()<90)result.add(m.group());
-        return result;
-    }
-    private static final class Hit{
-        final String id,project,source,content;
-        final int score;
-        Hit(String id,String project,String source,String content,int score){
-            this.id=id;this.project=project;this.source=source;
-            this.content=content;this.score=score;
-        }
-    }
     static String relevant(Context context,String query)throws Exception{return relevant(context,query,"General");}
     static String relevant(Context context,String query,String selectedProject)throws Exception{
         if(query==null||query.isBlank())return "";
-        Set<String> words=terms(query);
-        if(words.isEmpty())return "";
-        ArrayList<Hit> hits=new ArrayList<>();
+        AssistantMemorySearch search=new AssistantMemorySearch(query);
+        if(search.empty())return "";
         synchronized(LOCK){
             SecretKey secret=key();
             Database helper=new Database(context.getApplicationContext());
             try(SQLiteDatabase db=helper.getReadableDatabase();
                 Cursor cursor=db.rawQuery(
-                    "SELECT id,project,origin,nonce,payload FROM memory "+
-                    "WHERE (project=? OR project='General') ORDER BY created_ms DESC LIMIT 128",new String[]{selectedProject})){
+                    "SELECT id,project,origin,nonce,payload,created_ms FROM memory "+
+                    "WHERE (project=? OR project='General') ORDER BY created_ms DESC",new String[]{selectedProject})){
+                int scanned=0;
                 while(cursor.moveToNext()){
+                    if(++scanned>MAX_RECORDS)throw new IllegalStateException("memory_record_budget_exceeded");
                     String content=decrypt(secret,cursor.getBlob(3),cursor.getBlob(4));
                     String project=cursor.getString(1);
-                    Set<String> indexed=terms(content+" "+project);
-                    int score=0;
-                    for(String word:words)if(indexed.contains(word))score++;
-                    if(score>0)hits.add(new Hit(cursor.getString(0),project,
-                        cursor.getString(2),content,score));
+                    search.add(cursor.getString(0),project,cursor.getString(2),content,
+                        cursor.getLong(5),project.equals(selectedProject));
                 }
             }finally{helper.close();}
         }
-        hits.sort((a,b)->Integer.compare(b.score,a.score));
-        StringBuilder out=new StringBuilder();
-        int selected=0;
-        for(Hit hit:hits){
-            if(out.length()>=4000||selected>=5)break;
-            String value="Project: "+hit.project+" | Evidence: "+hit.source+
-                "\n"+hit.content+"\n---\n";
-            if(out.length()+value.length()>4500)continue;
-            out.append(value);
-            selected++;
-        }
-        return out.toString();
+        return search.render();
     }
 }

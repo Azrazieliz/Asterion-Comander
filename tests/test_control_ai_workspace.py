@@ -46,3 +46,16 @@ def test_native_context_pack_reserves_output_and_preserves_full_reference_blocks
                    check=True,capture_output=True,text=True)
     result=subprocess.run([str(exe)],check=True,capture_output=True,text=True,timeout=10)
     assert 'Context pack behavior passed' in result.stdout
+
+def test_memory_search_recovers_old_and_late_exact_passages(tmp_path):
+    compiler=shutil.which('javac')
+    runtime=shutil.which('java')
+    if not compiler or not runtime:
+        pytest.skip('JDK required for executable Java memory search tests')
+    subprocess.run([compiler,'-encoding','UTF-8','-d',str(tmp_path),
+                    str(JAVA/'AssistantMemorySearch.java'),
+                    str(ROOT/'tests/java/com/asterion/control/AssistantMemorySearchTest.java')],
+                   check=True,capture_output=True,text=True)
+    result=subprocess.run([runtime,'-cp',str(tmp_path),'com.asterion.control.AssistantMemorySearchTest'],
+                          check=True,capture_output=True,text=True,timeout=30)
+    assert 'Memory search behavior passed' in result.stdout
