@@ -45,6 +45,7 @@ public final class AssistantActivity extends Activity {
     private LinearLayout liveAnswer;
     private String liveText="";
     private boolean alive=true;
+    private String pendingSourceProject;
     private int dp(int x){return DesignSystem.dp(this,x);}
     private TextView label(String value,int size,int color,boolean bold){return DesignSystem.text(this,value,size,color,bold);}
     private TextView control(String name,Runnable action){
@@ -240,7 +241,47 @@ public final class AssistantActivity extends Activity {
             startActivityForResult(intent,212);
         }catch(Exception unavailable){session.pendingArtifact=null;notice("No document provider is available for this file.");}
     }
-    private void attach(){Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("text/*").addCategory(Intent.CATEGORY_OPENABLE);startActivityForResult(intent,211);}
+    private void attach(){
+        if(!idle())return;
+        new AlertDialog.Builder(this).setTitle("Attach or manage project sources")
+            .setItems(new String[]{"Attach small text to next message","Import searchable project text (up to 2 MiB)","Manage imported project sources"},(dialog,which)->{
+                if(!idle())return;
+                if(which==2){showProjectSources(session.conversation.project);return;}
+                Intent picker=new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE);
+                picker.putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"text/*","application/json","application/xml"});
+                if(which==1)pendingSourceProject=session.conversation.project;
+                try{startActivityForResult(picker,which==0?211:213);}
+                catch(Exception unavailable){pendingSourceProject=null;notice("Document picker unavailable.");}
+            }).setNegativeButton("Cancel",null).show();
+    }
+    private void showProjectSources(String scope){
+        session.work.execute(()->{
+            try{
+                JSONArray sources=ControlAssistantMemory.projectSources(this,scope);
+                runOnUiThread(()->{
+                    if(!alive||!scope.equals(session.conversation.project))return;
+                    String[] labels=new String[sources.length()];
+                    for(int i=0;i<labels.length;i++){
+                        JSONObject row=sources.optJSONObject(i);
+                        labels[i]=row.optString("name")+" · "+row.optLong("bytes")+" bytes";
+                    }
+                    if(labels.length==0){new AlertDialog.Builder(this).setTitle("Project sources").setMessage("No imported text in this project.").setPositiveButton("Close",null).show();return;}
+                    new AlertDialog.Builder(this).setTitle("Project sources · "+scope).setItems(labels,(d,index)->{
+                        JSONObject selected=sources.optJSONObject(index);
+                        new AlertDialog.Builder(this).setTitle(selected.optString("name"))
+                            .setMessage("SHA-256: "+selected.optString("sha256")+"\nSource characters: "+selected.optLong("chars")+
+                                "\nDelete the imported copy and all searchable passages? The original file is not changed.")
+                            .setPositiveButton("Delete imported source",(x,y)->session.work.execute(()->{
+                                try{
+                                    boolean removed=ControlAssistantMemory.deleteProjectSource(this,scope,selected.optString("id"));
+                                    runOnUiThread(()->{if(alive){notice(removed?"Imported copy deleted.":"Source not found.");showProjectSources(scope);}});
+                                }catch(Exception failure){runOnUiThread(()->{if(alive)notice("Source deletion not confirmed.");});}
+                            })).setNegativeButton("Keep",null).show();
+                    }).setNegativeButton("Close",null).show();
+                });
+            }catch(Exception failure){runOnUiThread(()->{if(alive)notice("Encrypted sources unavailable.");});}
+        });
+    }
     @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);
         if(request==212){
             AssistantArtifact artifact=session.pendingArtifact;session.pendingArtifact=null;
@@ -263,6 +304,38 @@ public final class AssistantActivity extends Activity {
                 }catch(Exception failure){outcome="Export outcome unverified. A partial file may exist at the selected destination.";}
                 String report=outcome;runOnUiThread(()->{if(alive)notice(report);});
             });return;
+        }
+        if(request==213){
+            String scope=pendingSourceProject;pendingSourceProject=null;
+            if(result!=RESULT_OK||data==null||data.getData()==null)return;
+            if(scope==null||!scope.equals(session.conversation.project)){notice("Project changed; no source imported.");return;}
+            android.net.Uri uri=data.getData();
+            if(!"content".equals(uri.getScheme())){notice("Document provider required.");return;}
+            new AlertDialog.Builder(this).setTitle("Import searchable project text")
+                .setMessage("Store a private encrypted copy in "+scope+"? Only UTF-8 text up to 2 MiB is accepted. It is retrieved in local chat as reference data, not executed or uploaded.")
+                .setPositiveButton("Import",(d,w)->{
+                    if(!idle()||!scope.equals(session.conversation.project))return;
+                    notice("Importing encrypted project source");
+                    session.work.execute(()->{
+                        try{
+                            String name="Imported text";
+                            try(Cursor cursor=getContentResolver().query(uri,new String[]{OpenableColumns.DISPLAY_NAME},null,null,null)){
+                                if(cursor!=null&&cursor.moveToFirst())name=cursor.getString(0);
+                            }
+                            byte[] bytes;
+                            try(java.io.InputStream in=getContentResolver().openInputStream(uri)){
+                                if(in==null)throw new java.io.IOException("no_source_stream");
+                                bytes=in.readNBytes(ProjectSourceText.MAX_BYTES+1);
+                            }
+                            ProjectSourceText source;
+                            try{source=new ProjectSourceText(name,bytes);}
+                            finally{java.util.Arrays.fill(bytes,(byte)0);}
+                            ControlAssistantMemory.importProjectSource(this,scope,source);
+                            runOnUiThread(()->{if(alive)notice("Encrypted source available in "+scope+".");});
+                        }catch(Exception failure){runOnUiThread(()->{if(alive)notice("Source not imported. Check UTF-8 encoding, size and local storage.");});}
+                    });
+                }).setNegativeButton("Cancel",null).show();
+            return;
         }
         if(result!=RESULT_OK||data==null)return;
         if(request==210){java.util.ArrayList<String> words=data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);if(words!=null&&!words.isEmpty())composer.append(words.get(0));}

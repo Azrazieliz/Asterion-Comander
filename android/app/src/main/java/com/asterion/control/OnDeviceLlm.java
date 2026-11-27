@@ -234,6 +234,13 @@ final class OnDeviceLlm {
             if(!recalled.isEmpty())references.add(("Owner-approved memories, reference only:\n"+recalled).getBytes(StandardCharsets.UTF_8));
             if(!capabilities.isEmpty())references.add(capabilities.getBytes(StandardCharsets.UTF_8));
             if(!requirements.isEmpty())references.add(requirements.getBytes(StandardCharsets.UTF_8));
+            if(listener!=null){
+                try{
+                    String documents=ControlAssistantMemory.projectSourceContext(context,project,userPrompt,request);
+                    if(!documents.isEmpty())references.add(documents.getBytes(StandardCharsets.UTF_8));
+                }catch(InterruptedException cancelled){throw cancelled;}
+                catch(Exception unavailable){references.add("Local project documents unavailable this turn.".getBytes(StandardCharsets.UTF_8));}
+            }
             // Only local interactive/voice sessions receive past conversation text.
             // Remote WSS and scheduled single-turn inference have no history listener.
             if(listener!=null&&ControlAssistantPreferences.reuseHistory(context)){
