@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import base64
 import os
+import stat
 import threading
 import time
 import uuid
@@ -242,7 +243,37 @@ def _send_verified_chunk(client,base,headers,transfer_id,checksum,size,offset,pa
     raise RuntimeError("Transfer offset outcome uncertain: retry limit") from last
 
 
-def _copy(key: str, path: Path, name: str, paired: dict, cancel: threading.Event):
+def _source_signature(info):
+    if not stat.S_ISREG(info.st_mode):
+        raise ValueError("Source is not a regular file")
+    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+
+def _require_source_unchanged(file, expected):
+    actual=_source_signature(os.fstat(file.fileno()))
+    if actual!=expected:
+        raise RuntimeError("Source changed during transfer")
+    return actual
+
+def _admit_source(path):
+    # Verify read permission before allocating a durable job or dispatching a
+    # network operation. Never elevate, change ACLs, or retry a denied source.
+    try:
+        signature=_source_signature(path.stat(follow_symlinks=False))
+        if signature[2]>TRANSFER_LIMIT:
+            raise HTTPException(422,"File exceeds 2 GiB transfer limit")
+        with path.open("rb") as file:
+            _require_source_unchanged(file,signature)
+        return signature
+    except PermissionError as exc:
+        raise HTTPException(403,"Source read access denied") from exc
+    except (FileNotFoundError,NotADirectoryError,ValueError) as exc:
+        raise HTTPException(404,"Source is not an authorized regular file") from exc
+    except RuntimeError as exc:
+        raise HTTPException(409,"Source changed during transfer admission") from exc
+    except OSError as exc:
+        raise HTTPException(503,"Source file unavailable") from exc
+
+def _copy(key: str, path: Path, name: str, paired: dict, cancel: threading.Event, signature=None):
     transfer_id=None
     headers={"Authorization":"Bearer "+paired["token"]}
     base=paired["base_url"]
@@ -251,38 +282,43 @@ def _copy(key: str, path: Path, name: str, paired: dict, cancel: threading.Event
         expected=hashlib.sha256()
         size=0
         with path.open("rb") as file:
+            admitted=signature if signature is not None else _source_signature(path.stat(follow_symlinks=False))
+            _require_source_unchanged(file,admitted)
             while data:=file.read(1024*1024):
                 if cancel.is_set():raise InterruptedError("Cancelled by user")
                 expected.update(data);size+=len(data)
                 if size>TRANSFER_LIMIT:raise ValueError("File exceeds Android transfer limit")
-        checksum=expected.hexdigest()
-        with httpx.Client(timeout=httpx.Timeout(30.0,connect=5.0),
-                          trust_env=False,follow_redirects=False) as http:
-            client=_TransferTransport(http,base,paired["token"])
-            # Select a working authenticated route with a read before any write.
-            client.get(base+"/health",headers=headers).raise_for_status()
-            _update(key,state="starting",size=size,sha256=checksum)
-            init=_post(client,base,paired["token"],"/transfer/start",
-                {"name":name,"size":size,"sha256":checksum})
-            transfer_id=init["id"]
-            if not isinstance(transfer_id,str) or not transfer_id or len(transfer_id)>64 or not all(
-                character.isalnum() or character in "_-" for character in transfer_id):
-                raise RuntimeError("Phone returned invalid transfer identifier")
-            chunk_size=min(CHUNK,int(init.get("chunk_max",CHUNK)))
-            if not (4096 <= chunk_size <= CHUNK):
-                raise RuntimeError("Phone refused safe transfer chunk size")
-            if init.get("sha256") != checksum or int(init.get("size",-1))!=size:
-                raise RuntimeError("Phone resumed a different file; refusing transmission")
-            offset=int(init.get("received",0))
-            if not 0<=offset<=size:
-                raise RuntimeError("Phone returned invalid transfer offset")
-            _update(key,state="transferring",size=size,bytes_sent=offset,
-                    recovered_bytes=offset,transport=client.route,phone_transfer_id=transfer_id)
-            if init.get("phase","receiving")!="receiving" and offset!=size:
-                raise RuntimeError("Android transfer no longer accepts incomplete file")
-            with path.open("rb") as file:
+            _require_source_unchanged(file,admitted)
+            if size!=admitted[2]:raise RuntimeError("Source changed during transfer")
+            checksum=expected.hexdigest()
+            with httpx.Client(timeout=httpx.Timeout(30.0,connect=5.0),
+                              trust_env=False,follow_redirects=False) as http:
+                client=_TransferTransport(http,base,paired["token"])
+                # Select a working authenticated route with a read before any write.
+                client.get(base+"/health",headers=headers).raise_for_status()
+                _require_source_unchanged(file,admitted)
+                _update(key,state="starting",size=size,sha256=checksum)
+                init=_post(client,base,paired["token"],"/transfer/start",
+                    {"name":name,"size":size,"sha256":checksum})
+                transfer_id=init["id"]
+                if not isinstance(transfer_id,str) or not transfer_id or len(transfer_id)>64 or not all(
+                    character.isalnum() or character in "_-" for character in transfer_id):
+                    raise RuntimeError("Phone returned invalid transfer identifier")
+                chunk_size=min(CHUNK,int(init.get("chunk_max",CHUNK)))
+                if not (4096 <= chunk_size <= CHUNK):
+                    raise RuntimeError("Phone refused safe transfer chunk size")
+                if init.get("sha256") != checksum or int(init.get("size",-1))!=size:
+                    raise RuntimeError("Phone resumed a different file; refusing transmission")
+                offset=int(init.get("received",0))
+                if not 0<=offset<=size:
+                    raise RuntimeError("Phone returned invalid transfer offset")
+                _update(key,state="transferring",size=size,bytes_sent=offset,
+                        recovered_bytes=offset,transport=client.route,phone_transfer_id=transfer_id)
+                if init.get("phase","receiving")!="receiving" and offset!=size:
+                    raise RuntimeError("Android transfer no longer accepts incomplete file")
                 while offset<size:
                     if cancel.is_set():raise InterruptedError("Cancelled by user")
+                    _require_source_unchanged(file,admitted)
                     file.seek(offset)
                     payload=file.read(min(chunk_size,size-offset))
                     if not payload:
@@ -290,17 +326,18 @@ def _copy(key: str, path: Path, name: str, paired: dict, cancel: threading.Event
                     offset=_send_verified_chunk(client,base,headers,transfer_id,
                         checksum,size,offset,payload,cancel)
                     _update(key,bytes_sent=offset,transport=client.route)
-            _update(key,state="verifying")
-            done=finalize_verified_android_transfer(
-                client=client,base=base,token=paired["token"],
-                transfer_id=transfer_id,checksum=checksum,size=size,
-                publish_state=lambda phase: _update(key,state=phase),
-                cancel=cancel,initial_phase=init.get("phase","receiving"),
-            )
-            _update(key,state="completed",result={
-                "name":done["name"],"size":done["size"],"sha256":done["sha256"],
-                "location":done["location"],"android_uri":done["uri"],
-                "transport":client.route,"verified":True})
+                _require_source_unchanged(file,admitted)
+                _update(key,state="verifying")
+                done=finalize_verified_android_transfer(
+                    client=client,base=base,token=paired["token"],
+                    transfer_id=transfer_id,checksum=checksum,size=size,
+                    publish_state=lambda phase: _update(key,state=phase),
+                    cancel=cancel,initial_phase=init.get("phase","receiving"),
+                )
+                _update(key,state="completed",result={
+                    "name":done["name"],"size":done["size"],"sha256":done["sha256"],
+                    "location":done["location"],"android_uri":done["uri"],
+                    "transport":client.route,"verified":True})
     except Exception as e:
         aborted=isinstance(e,InterruptedError)
         # A disconnected sender cannot assume the phone did not accept data.
@@ -320,11 +357,13 @@ def _copy(key: str, path: Path, name: str, paired: dict, cancel: threading.Event
                     reply.raise_for_status()
                     if reply.json().get("cancelled") is True:label="cancelled"
             except Exception:pass
-        _update(key,state=label,error=type(e).__name__+": "+str(e)[:160])
+        detail=("Source read access denied" if isinstance(e,PermissionError) else
+                "Source file unavailable" if isinstance(e,OSError) and not aborted else str(e)[:160])
+        _update(key,state=label,error=type(e).__name__+": "+detail)
 
-def _run_copy(key,path,name,paired,cancel):
+def _run_copy(key,path,name,paired,cancel,signature=None):
     try:
-        _copy(key,path,name,paired,cancel)
+        _copy(key,path,name,paired,cancel,signature)
     finally:
         # outcome_unknown is an honest retained result, not a live worker.
         # It must not permanently consume one of the three active slots.
@@ -334,11 +373,11 @@ def _run_copy(key,path,name,paired,cancel):
 
 
 def start_transfer(data: TransferRequest,safe_path):
-    source=safe_path(data.pc_path)
-    if not source.is_file() or source.is_symlink():
-        raise HTTPException(404,"Source is not an authorized regular file")
-    if source.stat().st_size>TRANSFER_LIMIT:
-        raise HTTPException(422,"File exceeds 2 GiB transfer limit")
+    try:
+        source=safe_path(data.pc_path)
+    except PermissionError as exc:
+        raise HTTPException(403,"Source path access denied") from exc
+    signature=_admit_source(source)
     paired=phone_pairing()
     if not paired:raise HTTPException(503,"Phone not paired")
     name=_name(data.name or source.name)
@@ -354,7 +393,7 @@ def start_transfer(data: TransferRequest,safe_path):
             raise HTTPException(429,"Asterion Control transfer queue full",headers={"Retry-After":"10"})
         key=uuid.uuid4().hex
         record={"id":key,"state":"queued","pc_name":source.name,"android_name":name,
-                    "bytes_sent":0,"size":source.stat().st_size,
+                    "bytes_sent":0,"size":signature[2],
                     "created_at":time.time(),"updated_at":time.time(),"result":None,"error":None}
         try:
             session_journal.save_transfer_receipt(record)
@@ -364,7 +403,7 @@ def start_transfer(data: TransferRequest,safe_path):
         cancel=threading.Event();_cancels[key]=cancel
         _active_sources[key]=identity
     try:
-        _workers.submit(_run_copy,key,source,name,paired,cancel)
+        _workers.submit(_run_copy,key,source,name,paired,cancel,signature)
     except Exception:
         with _guard:
             _cancels.pop(key,None);_active_sources.pop(key,None)
