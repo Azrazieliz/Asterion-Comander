@@ -350,3 +350,49 @@ def test_stale_offset_cannot_regress_receipt(tmp_path,monkeypatch):
     row={"id":"d"*32,"state":"outcome_unknown","size":4,"bytes_sent":4}
     j.save_transfer_receipt(row)
     assert j.save_transfer_receipt(dict(row,bytes_sent=2))["bytes_sent"]==4
+
+
+def test_denied_source_read_refuses_job_before_pairing(tmp_path,monkeypatch):
+    from pathlib import Path
+    from asterion_remote import native_transfer as t
+    from fastapi import HTTPException
+    import pytest
+    src=tmp_path/"private.txt";src.write_text("test")
+    original=Path.open
+    def denied(path,*args,**kwargs):
+        if path==src:raise PermissionError("private full path")
+        return original(path,*args,**kwargs)
+    monkeypatch.setattr(Path,"open",denied)
+    monkeypatch.setattr(t,"phone_pairing",lambda:pytest.fail("must not dispatch"))
+    with pytest.raises(HTTPException) as e:
+        t.start_transfer(t.TransferRequest(pc_path=str(src)),lambda _:src)
+    assert e.value.status_code==403
+    assert e.value.detail=="Source read access denied"
+
+def test_source_changed_after_admission_never_starts_remote_transfer(tmp_path,monkeypatch):
+    from asterion_remote import native_transfer as t
+    import pytest
+    src=tmp_path/"source.txt";src.write_bytes(b"old")
+    signature=t._admit_source(src)
+    src.write_bytes(b"modified")
+    observations=[]
+    monkeypatch.setattr(t,"_update",lambda key,**values:observations.append(values))
+    monkeypatch.setattr(t.httpx,"Client",lambda **kw:pytest.fail("must not connect"))
+    t._copy("key",src,"source.txt",{"base_url":"http://127.0.0.1:8973","token":"test"},
+            threading.Event(),signature)
+    assert observations[-1]["state"]=="failed"
+    assert "Source changed" in observations[-1]["error"]
+    assert str(src) not in observations[-1]["error"]
+
+def test_admission_rejects_directory_and_oversized_source(tmp_path,monkeypatch):
+    from asterion_remote import native_transfer as t
+    from fastapi import HTTPException
+    import pytest
+    with pytest.raises(HTTPException) as e:
+        t._admit_source(tmp_path)
+    assert e.value.status_code==404
+    src=tmp_path/"large.txt";src.write_bytes(b"1234")
+    monkeypatch.setattr(t,"TRANSFER_LIMIT",3)
+    with pytest.raises(HTTPException) as e:
+        t._admit_source(src)
+    assert e.value.status_code==422
