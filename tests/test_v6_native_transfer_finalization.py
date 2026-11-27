@@ -278,3 +278,58 @@ def test_recovery_poll_stops_on_durable_unknown_publication():
                 token="redacted",transfer_id="valid-id-123",checksum=EXPECTED,size=SIZE,
                 publish_state=lambda phase:None,cancel=threading.Event())
     assert client.posts==1 and client.gets==1
+
+def test_worker_restart_retains_receipt_without_replay(tmp_path,monkeypatch):
+    from asterion_remote import native_transfer as t, session_journal as j
+    monkeypatch.setenv("ASTERION_DIAGNOSTIC_ROOT",str(tmp_path))
+    monkeypatch.setattr(t,"_jobs",{})
+    monkeypatch.setattr(t,"_cancels",{})
+    monkeypatch.setattr(t,"phone_pairing",lambda:None)
+    ident="a"*32
+    j.save_transfer_receipt({"id":ident,"state":"transferring","size":4,
+        "bytes_sent":2,"android_name":"test.txt","pc_name":"test.txt",
+        "sha256":EXPECTED,"phone_transfer_id":"phone-identifier","source_path":"private",
+        "token":"private","error":None})
+    monkeypatch.setattr(j,"_EPOCH","new-worker")
+    result=t.transfer_status(ident)
+    assert result["state"]=="outcome_unknown"
+    assert result["bytes_sent"]==2
+    assert result["worker_active"] is False
+    assert "token" not in result and "source_path" not in result
+    assert t.cancel_transfer(ident)=={"ok":False,"state":"outcome_unknown"}
+
+def test_restarted_transfer_can_read_verified_android_completion(tmp_path,monkeypatch):
+    from asterion_remote import native_transfer as t, session_journal as j
+    monkeypatch.setenv("ASTERION_DIAGNOSTIC_ROOT",str(tmp_path))
+    monkeypatch.setattr(t,"_jobs",{})
+    monkeypatch.setattr(t,"_cancels",{})
+    monkeypatch.setattr(t,"phone_pairing",lambda:{"base_url":"http://127.0.0.1:8973","token":"test"})
+    ident="b"*32
+    j.save_transfer_receipt({"id":ident,"state":"verifying","size":SIZE,
+        "bytes_sent":SIZE,"android_name":LEGACY["name"],"sha256":EXPECTED,
+        "phone_transfer_id":"phone-identifier","error":None})
+    calls=[]
+    def handler(req):
+        calls.append(req.method)
+        return httpx.Response(200,json={"id":"phone-identifier","sha256":EXPECTED,
+            "size":SIZE,"name":LEGACY["name"],"received":SIZE,"phase":"completed","result":LEGACY})
+    factory=httpx.Client
+    monkeypatch.setattr(t.httpx,"Client",lambda **kw:factory(transport=httpx.MockTransport(handler),**kw))
+    assert t.transfer_status(ident)["result"]["verified"] is True
+    assert t.transfer_status(ident)["state"]=="completed"
+    assert calls==["GET"]
+
+def test_receipt_failure_refuses_submission(tmp_path,monkeypatch):
+    from asterion_remote import native_transfer as t, session_journal as j
+    from fastapi import HTTPException
+    import pytest
+    src=tmp_path/"test.txt";src.write_text("test")
+    monkeypatch.setattr(t,"_jobs",{})
+    monkeypatch.setattr(t,"_cancels",{})
+    monkeypatch.setattr(t,"_active_sources",{})
+    monkeypatch.setattr(t,"phone_pairing",lambda:{"base_url":"http://127.0.0.1:8973","token":"test"})
+    def fail(_):raise OSError("disk full")
+    monkeypatch.setattr(j,"save_transfer_receipt",fail)
+    with pytest.raises(HTTPException) as e:
+        t.start_transfer(t.TransferRequest(pc_path=str(src)),lambda _:src)
+    assert e.value.status_code==503 and not t._jobs and not t._cancels

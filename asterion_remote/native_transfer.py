@@ -20,6 +20,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
 from .phone_bridge import load as phone_pairing
+from . import session_journal
 
 TRANSFER_LIMIT = 2 * 1024 * 1024 * 1024
 CHUNK = 512 * 1024
@@ -42,8 +43,13 @@ def _name(value: str) -> str:
 def _update(key: str, **values):
     with _guard:
         row=_jobs[key]
-        row.update(values)
-        row["updated_at"]=time.time()
+        candidate=dict(row,**values,updated_at=time.time())
+        try:
+            session_journal.save_transfer_receipt(candidate)
+        except Exception:
+            row.update(state="outcome_unknown",error="Transfer receipt persistence failed")
+            raise RuntimeError("Transfer outcome uncertain: receipt persistence failed")
+        row.update(candidate)
 
 class _TransferTransport:
     """Use the existing paired LAN and authenticated native WSS, never GitHub bytes.
@@ -255,6 +261,7 @@ def _copy(key: str, path: Path, name: str, paired: dict, cancel: threading.Event
             client=_TransferTransport(http,base,paired["token"])
             # Select a working authenticated route with a read before any write.
             client.get(base+"/health",headers=headers).raise_for_status()
+            _update(key,state="starting",size=size,sha256=checksum)
             init=_post(client,base,paired["token"],"/transfer/start",
                 {"name":name,"size":size,"sha256":checksum})
             transfer_id=init["id"]
@@ -270,7 +277,7 @@ def _copy(key: str, path: Path, name: str, paired: dict, cancel: threading.Event
             if not 0<=offset<=size:
                 raise RuntimeError("Phone returned invalid transfer offset")
             _update(key,state="transferring",size=size,bytes_sent=offset,
-                    recovered_bytes=offset,transport=client.route)
+                    recovered_bytes=offset,transport=client.route,phone_transfer_id=transfer_id)
             if init.get("phase","receiving")!="receiving" and offset!=size:
                 raise RuntimeError("Android transfer no longer accepts incomplete file")
             with path.open("rb") as file:
@@ -346,9 +353,14 @@ def start_transfer(data: TransferRequest,safe_path):
         if len(_cancels)>=3:
             raise HTTPException(429,"Asterion Control transfer queue full",headers={"Retry-After":"10"})
         key=uuid.uuid4().hex
-        _jobs[key]={"id":key,"state":"queued","pc_name":source.name,"android_name":name,
+        record={"id":key,"state":"queued","pc_name":source.name,"android_name":name,
                     "bytes_sent":0,"size":source.stat().st_size,
                     "created_at":time.time(),"updated_at":time.time(),"result":None,"error":None}
+        try:
+            session_journal.save_transfer_receipt(record)
+        except Exception as exc:
+            raise HTTPException(503,"Transfer receipt storage unavailable; nothing submitted") from exc
+        _jobs[key]=record
         cancel=threading.Event();_cancels[key]=cancel
         _active_sources[key]=identity
     try:
@@ -356,20 +368,77 @@ def start_transfer(data: TransferRequest,safe_path):
     except Exception:
         with _guard:
             _cancels.pop(key,None);_active_sources.pop(key,None)
-            _jobs[key].update(state='failed',error='Transfer worker unavailable')
+            _update(key,state='failed',error='Transfer worker unavailable')
         raise HTTPException(503,'Transfer worker unavailable')
     return {"id":key,"status":"queued","transport":"PC-to-Android paired LAN / native WSS"}
+
+def _reconcile_receipt(job: dict) -> dict:
+    """Read only: an interrupted transfer must never dispatch a new start/finish."""
+    identity=job.get("phone_transfer_id")
+    checksum=job.get("sha256")
+    if job.get("state")!="outcome_unknown" or not identity or not checksum:
+        return job
+    paired=phone_pairing()
+    if not paired:return job
+    try:
+        base=paired["base_url"]
+        headers={"Authorization":"Bearer "+paired["token"]}
+        with httpx.Client(timeout=httpx.Timeout(5.0,connect=2.0),trust_env=False,follow_redirects=False) as http:
+            route=_TransferTransport(http,base,paired["token"])
+            probe=route.get(base+"/transfer/status/"+identity,headers=headers)
+            probe.raise_for_status()
+            state=probe.json()
+        if (state.get("id")!=identity or state.get("sha256")!=checksum or
+                int(state.get("size",-1))!=job["size"] or state.get("name")!=job["android_name"]):
+            return job
+        offset=int(state.get("received",-1))
+        if not 0<=offset<=job["size"]:return job
+        observed=dict(job,bytes_sent=offset,updated_at=time.time())
+        phase=state.get("phase")
+        if phase=="completed":
+            done=state.get("result")
+            if (not isinstance(done,dict) or done.get("ok") is not True or
+                done.get("sha256")!=checksum or int(done.get("size",-1))!=job["size"] or
+                offset!=job["size"] or not isinstance(done.get("name"),str) or
+                done.get("location")!="Downloads/Asterion Control/"+done["name"] or
+                not isinstance(done.get("uri"),str) or not done["uri"].startswith("content://")):
+                return job
+            _name(done["name"])
+            observed.update(state="completed",error=None,result={
+                "name":done["name"],"size":done["size"],"sha256":checksum,
+                "location":done["location"],"android_uri":done["uri"],
+                "transport":route.route,"verified":True})
+        elif phase=="failed":
+            observed.update(state="failed",error="Android reported publication failure")
+        else:
+            observed["error"]="Android phase: "+phase if phase in ("receiving","verifying","publishing","outcome_unknown") else "Android outcome unverified"
+        session_journal.save_transfer_receipt(observed)
+        return observed
+    except Exception:
+        return job
 
 def transfer_status(key: str):
     with _guard:
         job=_jobs.get(key)
-        if job is None:raise HTTPException(404,"Unknown transfer")
-        return dict(job,worker_active=key in _cancels)
+        if job is not None:
+            snapshot=dict(job,worker_active=key in _cancels)
+        else:
+            snapshot=session_journal.get_transfer_receipt(key)
+    if snapshot is None:raise HTTPException(404,"Unknown transfer")
+    if snapshot["worker_active"]:return snapshot
+    # Never hold the worker lock during network reads.
+    observed=_reconcile_receipt(snapshot)
+    with _guard:
+        if key in _jobs and key not in _cancels:
+            _jobs[key].update(observed)
+    return observed
 
 def cancel_transfer(key: str):
     with _guard:
         job=_jobs.get(key)
-        if job is None:raise HTTPException(404,"Unknown transfer")
+        if job is None:
+            job=session_journal.get_transfer_receipt(key)
+            if job is None:raise HTTPException(404,"Unknown transfer")
         if key not in _cancels or job["state"] in ("completed","failed","cancelled"):
             return {"ok":False,"state":job["state"]}
         _cancels[key].set()

@@ -174,3 +174,47 @@ def reserve_if_new(request_id: str | None) -> dict | None:
             return _row(db,"client_request_id=?",request_id)
         finally:
             db.close()
+
+
+# Transfer receipts share the existing private diagnostics database, not a new
+# relay or source-file cache. Only transfer metadata is stored, never absolute
+# source paths, payload bytes, tokens, pairing information or exception details.
+def _transfer_table(db):
+    db.execute("""CREATE TABLE IF NOT EXISTS transfer_receipts(
+        id TEXT PRIMARY KEY, worker_epoch TEXT NOT NULL, receipt TEXT NOT NULL)""")
+
+def save_transfer_receipt(row: dict) -> None:
+    ident=row.get("id","")
+    if not _SAFE.fullmatch(ident):
+        raise ValueError("Invalid transfer receipt identity")
+    fields=("id","state","pc_name","android_name","bytes_sent","size",
+            "created_at","updated_at","result","error","transport","recovered_bytes",
+            "phone_transfer_id","sha256")
+    record={k:row[k] for k in fields if k in row}
+    if record.get("error"):
+        record["error"]="Transfer requires status review"
+    encoded=json.dumps(record,ensure_ascii=False,separators=(",",":"))
+    if len(encoded)>16384:
+        raise ValueError("Transfer receipt exceeds metadata budget")
+    with _GUARD:
+        db=_connection()
+        try:
+            _transfer_table(db)
+            db.execute("INSERT INTO transfer_receipts VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET worker_epoch=excluded.worker_epoch,receipt=excluded.receipt",
+                       (ident,_EPOCH,encoded))
+        finally:db.close()
+
+def get_transfer_receipt(ident: str) -> dict | None:
+    if not isinstance(ident,str) or not _SAFE.fullmatch(ident):
+        return None
+    with _GUARD:
+        db=_connection()
+        try:
+            _transfer_table(db)
+            row=db.execute("SELECT worker_epoch,receipt FROM transfer_receipts WHERE id=?",(ident,)).fetchone()
+        finally:db.close()
+    if not row:return None
+    receipt=json.loads(row[1])
+    if receipt["state"] not in _TERMINAL:
+        receipt.update(state="outcome_unknown",error="Worker outcome not retained; recheck Android receipt")
+    return dict(receipt,worker_active=False,source="durable_transfer_receipt")
