@@ -1,0 +1,100 @@
+name: Control integrated Android package acceptance (no release)
+on:
+  push:
+    branches: [work/control-native-ai-reconstruction-20261126]
+    paths:
+      - '.github/workflows/control-integrated-build-acceptance.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: control-integrated-build
+  cancel-in-progress: false
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+      - name: Provision exact SDK and NDK for isolated build
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          MGR="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$MGR"
+          if [ ! -f "$SDK/platforms/android-37.0/android.jar" ]; then
+            yes | "$MGR" --sdk_root="$SDK" --channel=3 'platforms;android-37.0' || true
+          fi
+          test -s "$SDK/platforms/android-37.0/android.jar"
+          if [ ! -f "$SDK/ndk/27.2.12479018/build/cmake/android.toolchain.cmake" ]; then
+            "$MGR" --sdk_root="$SDK" 'ndk;27.2.12479018'
+          fi
+          test -s "$SDK/ndk/27.2.12479018/build/cmake/android.toolchain.cmake"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          ref: 4b77dee0524c64b8471869232e2958bd9589607d
+          path: _pinned_llama_cpp
+          persist-credentials: false
+      - name: Link actual arm64 JNI shared library
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S android/app/src/main/cpp -B "$RUNNER_TEMP/llm" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            "-DCMAKE_TOOLCHAIN_FILE=$ANDROID_HOME/ndk/27.2.12479018/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 -DANDROID_STL=c++_static \
+            "-DLLAMA_SOURCE_DIR=$GITHUB_WORKSPACE/_pinned_llama_cpp"
+          cmake --build "$RUNNER_TEMP/llm" --target asterion_llm --parallel 3
+          LIB=$(find "$RUNNER_TEMP/llm" -name libasterion_llm.so -type f -print -quit)
+          test -s "$LIB"
+          file "$LIB"
+          mkdir -p android/app/src/main/jniLibs/arm64-v8a
+          cp "$LIB" android/app/src/main/jniLibs/arm64-v8a/libasterion_llm.so
+      - name: Build temporary debug package and optimized release dex only
+        working-directory: android
+        run: gradle --no-daemon --console=plain :app:assembleDebug :app:minifyReleaseWithR8
+      - name: Inspect integrated package and record non-release evidence
+        run: |
+          python - <<'PY'
+          import hashlib, json, pathlib, zipfile
+          p=pathlib.Path("android/app/build/outputs/apk/debug/app-debug.apk")
+          assert p.is_file()
+          with zipfile.ZipFile(p) as z:
+              files=z.namelist()
+              assert "AndroidManifest.xml" in files
+              assert any(x.startswith("classes") and x.endswith(".dex") for x in files)
+              arm64=[x for x in files if x.startswith("lib/arm64-v8a/") and x.endswith(".so")]
+              assert "lib/arm64-v8a/libasterion_llm.so" in arm64
+              assert any("tor" in x.lower() for x in arm64),arm64
+              assert any("wg-go" in x.lower() or "wireguard" in x.lower() for x in arm64),arm64
+              for x in arm64:
+                  with z.open(x) as f:
+                      assert f.read(4)==b'\x7fELF',x
+              report={"commit":__import__("os").environ["GITHUB_SHA"],
+                      "native_linked":True,"tor_packaged":True,"wireguard_packaged":True,
+                      "release_r8_executed":True,"apk_sha256":hashlib.file_digest(p.open("rb"),"sha256").hexdigest(),
+                      "apk_bytes":p.stat().st_size,"arm64_libraries":arm64,
+                      "weights_bundled":any(x.endswith(".gguf") for x in files),
+                      "owner_signed":False,"published":False,"device_verified":False}
+          pathlib.Path("integrated-build-evidence.json").write_text(json.dumps(report,indent=2)+"\n")
+          print(json.dumps(report))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: integrated-build-evidence-only
+          path: integrated-build-evidence.json
+          retention-days: 7
+          if-no-files-found: error
