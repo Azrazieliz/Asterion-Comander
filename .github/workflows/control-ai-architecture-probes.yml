@@ -1,0 +1,68 @@
+name: Control Model Lab native architecture comparison
+on:
+  push:
+    branches: [work/control-native-ai-reconstruction-20261126]
+    paths: ['.github/workflows/control-ai-architecture-probes.yml', 'scripts/control_ai_gguf_comparison.py']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  tools:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          ref: 4b77dee0524c64b8471869232e2958bd9589607d
+          persist-credentials: false
+      - run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DGGML_NATIVE=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_SERVER=OFF -DLLAMA_CURL=OFF -DLLAMA_OPENSSL=OFF
+          cmake --build build --target llama-bench llama-perplexity llama-quantize -j 4
+          tar -C build/bin -czf cpu-tools.tar.gz llama-bench llama-perplexity llama-quantize
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pinned-cpu-tools
+          path: cpu-tools.tar.gz
+          retention-days: 3
+  compare:
+    needs: tools
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        candidate: [olmo7, granite8, nemo12, phi14, olmo32, granite-h, rwkv7]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: pinned-cpu-tools
+      - uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          ref: 4b77dee0524c64b8471869232e2958bd9589607d
+          path: runtime
+          sparse-checkout: gguf-py
+          persist-credentials: false
+      - name: Measure admitted public profiles
+        env:
+          CANDIDATE: ${{ matrix.candidate }}
+          HF_HUB_DISABLE_IMPLICIT_TOKEN: '1'
+        run: |
+          mkdir native-tools
+          tar -xzf cpu-tools.tar.gz -C native-tools
+          python -m pip install huggingface-hub==0.34.4 psutil ./runtime/gguf-py
+          python -m scripts.control_ai_gguf_comparison "$CANDIDATE" --bin native-tools --output measured
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: architecture-${{ matrix.candidate }}
+          path: measured/
+          if-no-files-found: warn
