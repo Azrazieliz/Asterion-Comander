@@ -2664,7 +2664,7 @@ public final class MainActivity extends Activity {
                  &&!pkg.toLowerCase(Locale.ROOT).contains(query))continue;
               shown.add(pkg);
               String state=bridged.containsKey(pkg)?
-                (bridged.get(pkg)?" · Connected":" · Approve bridge"):
+                (bridged.get(pkg)?" · Authorized":" · Approve bridge"):
                 (favorites.contains(pkg)?" · Saved (not integrated)":" · Add");
               adapter.add(name+state);
               if(shown.size()>=120)break;
@@ -2715,7 +2715,8 @@ public final class MainActivity extends Activity {
       "Check installed Writer models",
       "Open app · generic Accessibility control",
       "Open its Android app settings",
-      "Choose another app"
+      "Choose another app",
+      "Live capabilities & knowledge"
     }:new String[]{
       tracked?"Remove from my Control apps":"Add to my Control apps",
       bridge?(approved?"Revoke native bridge":"Authorize native bridge"):
@@ -2723,12 +2724,13 @@ public final class MainActivity extends Activity {
       "Read live process and crash evidence",
       "Open app · generic Accessibility control",
       "Open its Android app settings",
-      "Choose another app"
+      "Choose another app",
+      "Live capabilities & knowledge"
     };
     // AlertDialog message and setItems are mutually exclusive in the native
     // ListAlertController. A message hid ALL action rows on Android 17.
     new AlertDialog.Builder(this)
-      .setTitle(label+" · "+(bridge?(approved?"Connected":"Approval needed"):
+      .setTitle(label+" · "+(bridge?(approved?"Authorized":"Approval needed"):
         "App shortcut"))
       .setItems(actions,(dlg,which)->{
         if(which==0){
@@ -2801,7 +2803,54 @@ public final class MainActivity extends Activity {
               Uri.parse("package:"+pkg)));
           }catch(Exception e){toast("Android app settings unavailable");}
         }else if(which==(writer?6:5))showAppBridgeApprovals();
+        else if(which==(writer?7:6))showPartnerKnowledge(pkg,label,bridge,approved);
       }).setNegativeButton("Close",null).show();
+  }
+
+  private void showPartnerKnowledge(String pkg,String label,boolean bridge,boolean approved){
+    if(!bridge||!approved){
+      new AlertDialog.Builder(this).setTitle(label+" · Knowledge pack unavailable")
+        .setMessage("The installed partner must publish a signed capability pack and receive local approval. A shortcut or authorization alone does not establish a working integration.")
+        .setPositiveButton("Configure",(d,w)->showAppIntegrationActions(pkg,label,bridge,approved))
+        .setNegativeButton("Close",null).show();return;
+    }
+    io.execute(()->{
+      JSONObject observed=null;
+      try{observed=AppBridge.capabilities(this,pkg);}catch(Exception unavailable){}
+      final JSONObject data=observed;
+      runOnUiThread(()->{
+        if(destroyed)return;
+        if(data==null||!data.optBoolean("ok")){
+          new AlertDialog.Builder(this).setTitle(label+" · Live pack unavailable")
+            .setMessage(data==null?"No signed capability response.":data.optString("reason","No supported pack."))
+            .setPositiveButton("Close",null).show();return;
+        }
+        LinearLayout panel=v();pad(panel,16,10);
+        wide(panel,t("Installed "+data.optString("installed_version","unknown")+" · Pack v"+data.optInt("pack_version"),17,DesignSystem.TEXT,true));
+        wide(panel,t("Observed from the locally authorized signed provider. Published metadata is not proof of executed workflows.",12,DesignSystem.MUTED,false));gap(panel,12);
+        JSONArray actions=data.optJSONArray("actions");
+        wide(panel,t("Advertised actions · "+(actions==null?0:actions.length()),15,DesignSystem.TEXT,true));
+        if(actions!=null)for(int i=0;i<actions.length();i++){
+          JSONObject row=actions.optJSONObject(i);
+          if(row!=null)wide(panel,t(row.optString("name")+" · "+row.optString("intent"),13,DesignSystem.TEXT,false));
+        }
+        JSONArray knowledge=data.optJSONArray("knowledge");
+        for(String category:new String[]{"mode","model","limit","known_issue","data_format","owner_change"}){
+          gap(panel,10);wide(panel,t(category.replace('_',' '),15,DesignSystem.TEXT,true));
+          boolean has=false;
+          if(knowledge!=null)for(int i=0;i<knowledge.length();i++){
+            JSONObject row=knowledge.optJSONObject(i);
+            if(row!=null&&category.equals(row.optString("category"))){
+              has=true;wide(panel,t(row.optString("id")+" · "+row.optString("description"),13,DesignSystem.TEXT,false));
+            }
+          }
+          if(!has)wide(panel,t("Not published by this installed partner version.",12,DesignSystem.MUTED,false));
+        }
+        ScrollView scroll=new ScrollView(this);scroll.addView(panel);
+        new AlertDialog.Builder(this).setTitle(label+" · Capability registry").setView(scroll)
+          .setPositiveButton("Close",null).setNeutralButton("Refresh",(d,w)->showPartnerKnowledge(pkg,label,bridge,approved)).show();
+      });
+    });
   }
 
   private void showPartnerEvidence(String pkg,String label,String action){

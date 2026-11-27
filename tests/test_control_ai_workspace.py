@@ -166,3 +166,16 @@ def test_browser_research_uses_shared_encrypted_sources_and_exact_comparison(tmp
     assert 'ControlAssistantMemory.readProjectSource' in research
     assert 'source_digest_mismatch' in memory and 'source_overlap_invalid' in memory
     assert 'research_draft' in research
+
+
+def test_capability_registry_keeps_knowledge_declarative_and_marks_missing_categories():
+    bridge=(JAVA/"AppBridge.java").read_text(encoding="utf-8")
+    main=(JAVA/"MainActivity.java").read_text(encoding="utf-8")
+    assert 'published.length()<=40' in bridge
+    assert 'entry.length()!=3' in bridge
+    assert 'description.length()>300' in bridge
+    assert 'unpublished_knowledge_categories' in bridge
+    assert 'installed_version_code' in bridge
+    assert 'showPartnerKnowledge(pkg,label,bridge,approved)' in main
+    assert 'Not published by this installed partner version.' in main
+    assert 'Approval alone' not in main or 'authorization alone' in main

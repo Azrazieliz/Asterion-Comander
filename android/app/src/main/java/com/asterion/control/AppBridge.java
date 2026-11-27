@@ -137,11 +137,48 @@ final class AppBridge {
       if(!ACTION.matcher(action).matches()||!ACTION.matcher(intent).matches())continue;
       vetted.put(new JSONObject().put("name",action).put("intent",intent));
     }
+    // Optional partner-authored declarative knowledge. Legacy providers remain
+    // valid and explicitly incomplete. Only bounded non-executable metadata is
+    // retained; no arbitrary schema, URI, shell operation or private app file.
+    JSONArray published=pack.optJSONArray("knowledge"),knowledge=new JSONArray();
+    java.util.HashSet<String> seen=new java.util.HashSet<>();
+    java.util.Set<String> categories=java.util.Set.of("mode","model","limit","known_issue","data_format","owner_change");
+    if(published!=null&&published.length()<=40){
+      for(int i=0;i<published.length();i++){
+        JSONObject entry=published.optJSONObject(i);
+        if(entry==null||entry.length()!=3)continue;
+        if(!(entry.opt("category") instanceof String)||!(entry.opt("id") instanceof String)||
+           !(entry.opt("description") instanceof String))continue;
+        String category=entry.getString("category"),id=entry.getString("id"),description=entry.getString("description");
+        if(!categories.contains(category)||!ACTION.matcher(id).matches()||
+           description.isBlank()||description.length()>300||
+           description.codePoints().anyMatch(x->Character.isISOControl(x)&&x!=10&&x!=9)||
+           !seen.add(category+":"+id))continue;
+        knowledge.put(new JSONObject().put("category",category).put("id",id).put("description",description));
+      }
+    }
+    String installedVersion="unknown";long installedCode=0;
+    try{
+      PackageInfo installed=ctx.getPackageManager().getPackageInfo(pkg,0);
+      installedVersion=installed.versionName==null?"unknown":installed.versionName;
+      installedCode=installed.getLongVersionCode();
+    }catch(Exception ignored){}
+    JSONArray missing=new JSONArray();
+    for(String category:new String[]{"mode","model","limit","known_issue","data_format","owner_change"}){
+      boolean found=false;
+      for(int i=0;i<knowledge.length();i++)if(category.equals(knowledge.getJSONObject(i).getString("category"))){found=true;break;}
+      if(!found)missing.put(category);
+    }
     return new JSONObject().put("ok",true).put("package",pkg)
         .put("protocol","asterion.v1")
         .put("capabilities_available",true)
         .put("owner_approved",true)
         .put("pack_version",version)
+        .put("installed_version",installedVersion)
+        .put("installed_version_code",installedCode)
+        .put("observed_at_ms",System.currentTimeMillis())
+        .put("knowledge",knowledge)
+        .put("unpublished_knowledge_categories",missing)
         .put("actions",vetted)
         .put("actions_count",vetted.length());
   }
