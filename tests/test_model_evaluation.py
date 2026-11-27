@@ -115,6 +115,44 @@ class ModelEvaluationTests(unittest.TestCase):
         self.assertEqual(second["failed"],1)
         self.assertEqual(ev.summary(self.data,"revision-a")["passed"],1)
 
+    def test_interrupted_batch_keeps_completed_case_and_skips_it_on_resume(self):
+        self.write([self.case("case-00001","Actual local response"),
+                    self.case("case-00002","Actual local response"),
+                    self.case("case-00003","Actual local response")])
+        calls=[]
+        def interrupted(prompt,ident):
+            calls.append(ident)
+            if len(calls)==2:
+                raise KeyboardInterrupt()
+            return {"content":"Actual local response"}
+        with self.assertRaises(KeyboardInterrupt):
+            ev.run_batch(self.data,"resume-revision",interrupted)
+        partial=ev.summary(self.data,"resume-revision")
+        self.assertEqual(partial["passed"],1)
+        self.assertEqual(partial["remaining"],2)
+        resumed=[]
+        def complete(prompt,ident):
+            resumed.append(ident)
+            return {"content":"Actual local response"}
+        final=ev.run_batch(self.data,"resume-revision",complete)
+        self.assertEqual(final["passed"],3)
+        self.assertEqual(len(resumed),2)
+        self.assertNotIn(calls[0],resumed)
+        self.assertIn(calls[1],resumed)
+
+    def test_changed_suite_during_generation_does_not_claim_new_suite(self):
+        row=self.case("case-00001","Actual local response")
+        self.write([row])
+        original=self.data.read_bytes()
+        def changed(prompt,ident):
+            self.write([self.case("case-00002","Different")])
+            return {"content":"Actual local response"}
+        with self.assertRaisesRegex(RuntimeError,"changed_during_run"):
+            ev.run_batch(self.data,"revision-change",changed)
+        self.assertEqual(ev.summary(self.data,"revision-change")["assessed"],0)
+        self.data.write_bytes(original)
+        self.assertEqual(ev.summary(self.data,"revision-change")["passed"],1)
+
     def test_large_streamed_evaluation_runs_in_bounded_batches(self):
         self.write([self.case("case-%05d"%i,"Actual local response")
                     for i in range(500)])
