@@ -1,6 +1,11 @@
 package com.asterion.control;
 
 import android.content.Context;
+import android.content.BroadcastReceiver;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.os.Build;
+import android.os.PowerManager;
 import android.app.KeyguardManager;
 import android.os.SystemClock;
 import android.content.SharedPreferences;
@@ -51,6 +56,26 @@ final class ControlPasswordVault {
     private static final Object LOCK=new Object();
     private static final String AUTH_TIMEOUT="device_auth_timeout_minutes";
     private static long unlockedUntilElapsed=0L;
+    private static boolean screenReceiverRegistered=false;
+    // Keep the receiver only for this process. A screen-off event invalidates
+    // the lease even if the device is unlocked again before the next vault read.
+    private static final BroadcastReceiver SCREEN_LOCK=new BroadcastReceiver(){
+        @Override public void onReceive(Context context,Intent intent){
+            if(Intent.ACTION_SCREEN_OFF.equals(intent.getAction()))lock();
+        }
+    };
+    private static void watchScreen(Context c){
+        if(screenReceiverRegistered)return;
+        Context app=c.getApplicationContext();
+        IntentFilter filter=new IntentFilter(Intent.ACTION_SCREEN_OFF);
+        if(Build.VERSION.SDK_INT>=33)app.registerReceiver(SCREEN_LOCK,filter,Context.RECEIVER_NOT_EXPORTED);
+        else app.registerReceiver(SCREEN_LOCK,filter);
+        screenReceiverRegistered=true;
+    }
+    private static boolean deviceInteractive(Context c){
+        PowerManager manager=c.getSystemService(PowerManager.class);
+        return manager!=null&&manager.isInteractive();
+    }
     // Application-level gate over the existing Keystore-encrypted vault.
     // No password or reusable authentication token is written to preferences.
     static int authTimeout(Context c){
@@ -60,7 +85,7 @@ final class ControlPasswordVault {
         synchronized(LOCK){
             if(authTimeout(c)==0)return true;
             KeyguardManager manager=c.getSystemService(KeyguardManager.class);
-            if(manager==null||!manager.isDeviceSecure()||manager.isDeviceLocked()){
+            if(manager==null||!manager.isDeviceSecure()||manager.isDeviceLocked()||!deviceInteractive(c)){
                 unlockedUntilElapsed=0L;return false;
             }
             return unlockedUntilElapsed>SystemClock.elapsedRealtime();
@@ -74,7 +99,7 @@ final class ControlPasswordVault {
     static void confirmDeviceAuth(Context c,int newTimeout){
         synchronized(LOCK){
             KeyguardManager manager=c.getSystemService(KeyguardManager.class);
-            if(manager==null||!manager.isDeviceSecure()||manager.isDeviceLocked())
+            if(manager==null||!manager.isDeviceSecure()||manager.isDeviceLocked()||!deviceInteractive(c))
                 throw new SecurityException("Device authentication unavailable");
             if(newTimeout!=-1){
                 if(newTimeout!=0&&newTimeout!=1&&newTimeout!=5&&newTimeout!=15)
@@ -82,7 +107,11 @@ final class ControlPasswordVault {
                 if(!preferences(c).edit().putInt(AUTH_TIMEOUT,newTimeout).commit())
                     throw new IllegalStateException("Vault policy write failed");
             }
-            unlockedUntilElapsed=SystemClock.elapsedRealtime()+authTimeout(c)*60_000L;
+            unlockedUntilElapsed=0L;
+            if(authTimeout(c)>0){
+                watchScreen(c);
+                unlockedUntilElapsed=SystemClock.elapsedRealtime()+authTimeout(c)*60_000L;
+            }
         }
     }
     static void lock(){synchronized(LOCK){unlockedUntilElapsed=0L;}}

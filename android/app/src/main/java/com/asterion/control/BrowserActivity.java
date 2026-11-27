@@ -1127,13 +1127,14 @@ public final class BrowserActivity extends Activity {
         try{
             List<ControlPasswordVault.Entry> accounts=
                 ControlPasswordVault.accounts(this,origin);
-            String[] actions=new String[accounts.size()+4];
+            String[] actions=new String[accounts.size()+5];
             for(int i=0;i<accounts.size();i++)
                 actions[i]="Saved account • "+accounts.get(i).username;
             actions[accounts.size()]="Add HTTPS login";
             actions[accounts.size()+1]="Enable Android Autofill";
             actions[accounts.size()+2]="Device authentication and timeout";
             actions[accounts.size()+3]="Lock vault now";
+            actions[accounts.size()+4]="Android passkeys and credential providers";
             new AlertDialog.Builder(this).setTitle("Encrypted Vault • "+origin)
                 .setMessage("One Android Keystore-encrypted vault. Existing authorized website cookies are kept. Passwords are never sent to AI, Windows or logs.")
                 .setItems(actions,(d,choice)->{
@@ -1152,6 +1153,7 @@ public final class BrowserActivity extends Activity {
                     }else if(choice==accounts.size())addVaultAccount(origin);
                     else if(choice==accounts.size()+1)enableSystemAutofill();
                     else if(choice==accounts.size()+2)showVaultProtection(origin);
+                    else if(choice==accounts.size()+4)openCredentialProviderSettings();
                     else if(ControlPasswordVault.authTimeout(this)>0){
                         ControlPasswordVault.lock();notice("Vault locked");
                     }else notice("Enable device authentication first");
@@ -1200,6 +1202,15 @@ public final class BrowserActivity extends Activity {
             }).setNegativeButton("Cancel",(d,which)->{
                 password.setText("");
             }).show();
+    }
+    private void openCredentialProviderSettings(){
+        new AlertDialog.Builder(this).setTitle("Android passkeys")
+            .setMessage("Manage passkeys through the Android credential provider. In-app third-party website passkeys require provider approval and have not been verified for Asterion Control. No passkeys are copied into the Control vault.")
+            .setPositiveButton("Open Android settings",(d,w)->{
+                try{
+                    startActivity(new Intent("android.settings.CREDENTIAL_PROVIDER"));
+                }catch(Exception unsupported){notice("Credential provider settings unavailable on this device.");}
+            }).setNegativeButton("Cancel",null).show();
     }
     private void enableSystemAutofill(){
         try{

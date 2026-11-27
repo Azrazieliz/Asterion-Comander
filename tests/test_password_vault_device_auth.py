@@ -32,3 +32,13 @@ def test_autofill_still_requires_exact_origin_and_vault_gate():
     assert 'origin.equals(real)' in source
     assert 'ControlPasswordVault.accounts(this,form.origin)' in source
     assert 'ControlPasswordVault.save(this,form.origin,' in source
+
+def test_device_screen_off_invalidates_lease_and_provider_settings_are_honest():
+    source=(SRC/"ControlPasswordVault.java").read_text(encoding="utf-8")
+    browser=(SRC/"BrowserActivity.java").read_text(encoding="utf-8")
+    assert 'Intent.ACTION_SCREEN_OFF.equals(intent.getAction()))lock()' in source
+    assert 'manager.isInteractive()' in source
+    assert 'Context.RECEIVER_NOT_EXPORTED' in source
+    assert 'watchScreen(c)' in source
+    assert 'android.settings.CREDENTIAL_PROVIDER' in browser
+    assert 'third-party website passkeys require provider approval' in browser
