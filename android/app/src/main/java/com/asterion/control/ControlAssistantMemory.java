@@ -60,7 +60,7 @@ final class ControlAssistantMemory {
             JSONArray messages=new JSONArray();
             for(AssistantConversation.Message m:conversation.messages)messages.put(new JSONObject()
                 .put("id",m.id).put("role",m.role).put("text",m.text).put("state",m.state)
-                .put("omitted_context_messages",m.omittedContextMessages));
+                .put("omitted_context_messages",m.omittedContextMessages).put("omitted_reference_blocks",m.omittedReferenceBlocks));
             byte[] plain=new JSONObject().put("title",conversation.title).put("project",conversation.project)
                 .put("messages",messages).toString().getBytes(StandardCharsets.UTF_8);
             if(plain.length>1_000_000)throw new IllegalStateException("conversation_storage_budget_exceeded");
@@ -95,6 +95,7 @@ final class ControlAssistantMemory {
                     out.messages.add(new AssistantConversation.Message(m.getString("id"),m.getString("role"),
                         m.getString("text"),m.getString("state")));
                     out.messages.get(out.messages.size()-1).omittedContextMessages=m.optInt("omitted_context_messages",0);
+                    out.messages.get(out.messages.size()-1).omittedReferenceBlocks=m.optInt("omitted_reference_blocks",0);
                 }
                 out.recover();return out;
             }finally{helper.close();}

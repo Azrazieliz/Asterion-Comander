@@ -36,10 +36,11 @@ final class AssistantSession {
             String[] finalText={""};
             try{
                 String answer=OnDeviceLlm.generate(app,project,messages,new OnDeviceLlm.Stream(){
-                    public void context(int tokens,int omitted){main.post(()->{
+                    public void context(int tokens,int omitted,int dropped){main.post(()->{
                         if(activeRequest!=request || !target.running() || target.revision!=generation)return;
                         target.messages.get(target.messages.size()-1).omittedContextMessages=omitted;
-                        status=omitted==0?"Generating on this phone":"Generating · "+omitted+" earlier messages outside active context";changed();});}
+                        target.messages.get(target.messages.size()-1).omittedReferenceBlocks=dropped;
+                        status="Generating on this phone"+(omitted==0?"":" · "+omitted+" earlier messages outside active context")+(dropped==0?"":" · "+dropped+" reference blocks omitted");changed();});}
                     public void text(String text){
                         finalText[0]=text;
                         long now=android.os.SystemClock.elapsedRealtime();

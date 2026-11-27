@@ -149,6 +149,7 @@ public final class AssistantActivity extends Activity {
                     }
                     turn.addView(tools);
                     if(m.omittedContextMessages>0)turn.addView(label(m.omittedContextMessages+" earlier messages remain in history outside this response's context",12,muted,false));
+                    if(m.omittedReferenceBlocks>0)turn.addView(label(m.omittedReferenceBlocks+" retrieved reference blocks did not fit this response",12,muted,false));
                     if(!m.state.equals("completed"))turn.addView(label(m.state.equals("cancelled")?"Stopped":m.state.equals("interrupted")?"Interrupted · response incomplete":"Response incomplete",12,muted,false));
                 }
                 LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.topMargin=dp(14);body.addView(turn,p);

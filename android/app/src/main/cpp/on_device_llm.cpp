@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 #include "llama.h"
+#include "context_pack.h"
 #include "ggml-backend.h"
 
 static std::mutex guard;
@@ -94,8 +95,8 @@ static void batch_tokens(llama_batch_ext *batch,const llama_token *token,int n,l
 }
 extern "C" JNIEXPORT jbyteArray JNICALL Java_com_asterion_control_OnDeviceLlm_nativeGenerate(
     JNIEnv *env,jclass,jbyteArray jsystem,jobjectArray jroles,jobjectArray jcontent,
-    jint limit,jint context_limit,jobject stream){
-    if(!jsystem||!jroles||!jcontent||!stream||limit<1||limit>2048||context_limit<512||context_limit>16384||limit+256>context_limit)return nullptr;
+    jint limit,jint context_limit,jobject stream,jobjectArray jreferences){
+    if(!jsystem||!jroles||!jcontent||!stream||!jreferences||limit<1||limit>2048||context_limit<512||context_limit>16384||limit+256>context_limit)return nullptr;
     std::lock_guard<std::mutex> lock(guard);
     if(!model||cancel_generation.load())return nullptr;
     int count=env->GetArrayLength(jroles);
@@ -117,45 +118,55 @@ extern "C" JNIEXPORT jbyteArray JNICALL Java_com_asterion_control_OnDeviceLlm_na
     if(!chatTemplate)return nullptr;
     const llama_vocab *vocab=llama_model_get_vocab(model);
     std::string prompt;std::vector<llama_token> tokens;
-    int omitted=0;
-    // Retain exact full history in encrypted storage. Pack complete exchanges by
-    // actual native token count; never cut a user message or pretend it all fits.
-    for(;;){
-        if(cancel_generation.load())return nullptr;
-        std::vector<llama_chat_message> messages={{"system",systemText.c_str()}};
-        size_t bytes=systemText.size();
+    std::vector<std::string> references;
+    int referenceCount=env->GetArrayLength(jreferences);
+    if(referenceCount>8)return nullptr;
+    for(int i=0;i<referenceCount;i++){
+        auto item=static_cast<jbyteArray>(env->GetObjectArrayElement(jreferences,i));
+        std::string value;
+        bool valid=item&&read_utf8(env,item,value)&&value.size()<=32768;
+        if(item)env->DeleteLocalRef(item);
+        if(!valid)return nullptr;
+        references.push_back(std::move(value));
+    }
+    auto fits=[&](const std::string &system,int omitted){
+        if(cancel_generation.load())return false;
+        std::vector<llama_chat_message> messages={{"system",system.c_str()}};
+        size_t bytes=system.size();
         for(int i=omitted;i<count;i++){
             bytes+=texts[i].size();
             messages.push_back({i%2==0?"user":"assistant",texts[i].c_str()});
         }
-        if(bytes>262144){if(omitted+2<count){omitted+=2;continue;}return nullptr;}
+        if(bytes>262144)return false;
         std::vector<char> formatted(std::min<size_t>(524288,bytes*2+4096));
         int written=llama_chat_apply_template(chatTemplate,messages.data(),messages.size(),true,formatted.data(),formatted.size());
-        if(written<=0||written>524287)return nullptr;
+        if(written<=0||written>524287)return false;
         if(static_cast<size_t>(written)>=formatted.size()){
             formatted.resize(written+1);
             written=llama_chat_apply_template(chatTemplate,messages.data(),messages.size(),true,formatted.data(),formatted.size());
-            if(written<=0||static_cast<size_t>(written)>=formatted.size())return nullptr;
+            if(written<=0||static_cast<size_t>(written)>=formatted.size())return false;
         }
         prompt.assign(formatted.data(),written);
         int n=llama_tokenize(vocab,prompt.data(),prompt.size(),nullptr,0,true,true);
-        if(n>=0||n < -524288)return nullptr;
-        if(static_cast<size_t>(-n)+static_cast<size_t>(limit)+32u>static_cast<size_t>(context_limit)){
-            if(omitted+2<count){omitted+=2;continue;}return nullptr;
-        }
+        if(n>=0||n < -524288)return false;
+        if(static_cast<size_t>(-n)+static_cast<size_t>(limit)+32u>static_cast<size_t>(context_limit))return false;
         tokens.resize(-n);
-        if(llama_tokenize(vocab,prompt.data(),prompt.size(),tokens.data(),tokens.size(),true,true)!=-n)return nullptr;
-        break;
-    }
+        return llama_tokenize(vocab,prompt.data(),prompt.size(),tokens.data(),tokens.size(),true,true)==-n;
+    };
+    ContextPack packed;
+    // Keep current user and system intact. Admit whole reference blocks, then
+    // newest complete exchanges; report every omitted block and exchange.
+    if(!pack_context(systemText,references,count,fits,packed)||!fits(packed.system,packed.first_message))return nullptr;
+    int omitted=packed.first_message;
     jclass cls=env->GetObjectClass(stream);
-    jmethodID started=env->GetMethodID(cls,"onStart","(ZII)V"),token=env->GetMethodID(cls,"onToken","([B)V");
+    jmethodID started=env->GetMethodID(cls,"onStart","(ZIII)V"),token=env->GetMethodID(cls,"onToken","([B)V");
     env->DeleteLocalRef(cls);
     if(!started||!token||env->ExceptionCheck())return nullptr;
     size_t end=prompt.find_last_not_of(" \n\r\t");
     // Only a template-opened assistant suffix implies an initial reasoning
     // channel. A literal marker in a user's earlier message is not that suffix.
     bool thinking=end!=std::string::npos&&end>=6&&prompt.compare(end-6,7,"<think>")==0;
-    env->CallVoidMethod(stream,started,static_cast<jboolean>(thinking),static_cast<jint>(tokens.size()),omitted);
+    env->CallVoidMethod(stream,started,static_cast<jboolean>(thinking),static_cast<jint>(tokens.size()),omitted,packed.omitted_blocks);
     if(env->ExceptionCheck())return nullptr;
     llama_context_params cp=llama_context_default_params();
     cp.n_ctx=context_limit;cp.n_batch=512;cp.n_ubatch=256;cp.n_threads=context_threads;cp.n_threads_batch=context_threads;

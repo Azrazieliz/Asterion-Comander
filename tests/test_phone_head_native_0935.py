@@ -24,7 +24,7 @@ class PhoneHeadTests(unittest.TestCase):
         self.assertIn('OnDeviceLlm.generate(ctx,prompt,job.request)',JOBS)
         self.assertIn("System.loadLibrary(\"asterion_llm\")",LOCAL)
         self.assertIn('byte[] output=nativeGenerate(systemText.getBytes(StandardCharsets.UTF_8),roles,content,',LOCAL)
-        self.assertIn('outputBudget,contextBudget,stream)',LOCAL)
+        self.assertIn('outputBudget,contextBudget,stream,references.toArray(new byte[0][]))',LOCAL)
         self.assertGreater(PROFILE["max_new_tokens"],192)
         self.assertIn("llama_model_load_from_file",NATIVE)
         self.assertIn("llama_process",NATIVE)

@@ -9,7 +9,7 @@ final class AssistantConversation {
     static final class Message {
         final String id,role;
         String text,state;
-        int omittedContextMessages=0;
+        int omittedContextMessages=0,omittedReferenceBlocks=0;
         Message(String id,String role,String text,String state){
             if(!role.equals("user")&&!role.equals("assistant"))throw new IllegalArgumentException("invalid_role");
             this.id=id;this.role=role;this.text=text;this.state=state;
@@ -33,7 +33,7 @@ final class AssistantConversation {
         AssistantConversation copy=new AssistantConversation();
         copy.title=title+" · revision";copy.project=project;
         for(Message m:messages){Message cloned=new Message(m.id,m.role,m.text,m.state);
-            cloned.omittedContextMessages=m.omittedContextMessages;copy.messages.add(cloned);}
+            cloned.omittedContextMessages=m.omittedContextMessages;cloned.omittedReferenceBlocks=m.omittedReferenceBlocks;copy.messages.add(cloned);}
         return copy;
     }
     boolean running(){return !messages.isEmpty()&&messages.get(messages.size()-1).state.equals("running");}

@@ -35,3 +35,14 @@ def test_native_structured_response_data(tmp_path):
     result=subprocess.run([runtime,'-cp',str(tmp_path),'com.asterion.control.AssistantStructuredTest'],
                           check=True,capture_output=True,text=True,timeout=30)
     assert re.fullmatch(r"\d+ structured response assertions passed",result.stdout.strip())
+
+def test_native_context_pack_reserves_output_and_preserves_full_reference_blocks(tmp_path):
+    compiler=shutil.which('g++') or shutil.which('clang++')
+    if not compiler:
+        pytest.skip('C++ compiler required for executable context packing tests')
+    exe=tmp_path/('context-pack.exe' if __import__('os').name=='nt' else 'context-pack')
+    subprocess.run([compiler,'-std=c++17','-I',str(ROOT/'android/app/src/main/cpp'),
+                    str(ROOT/'tests/native/context_pack_test.cpp'),'-o',str(exe)],
+                   check=True,capture_output=True,text=True)
+    result=subprocess.run([str(exe)],check=True,capture_output=True,text=True,timeout=10)
+    assert 'Context pack behavior passed' in result.stdout

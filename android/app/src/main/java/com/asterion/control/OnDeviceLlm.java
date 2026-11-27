@@ -39,23 +39,24 @@ final class OnDeviceLlm {
     private static native void nativeConfigureContext(int threads,int kvBits);
     private static native boolean nativeReady();
     private static native byte[] nativeGenerate(byte[] systemText,String[] roles,byte[][] content,
-        int maxTokens,int contextTokens,NativeStream stream);
+        int maxTokens,int contextTokens,NativeStream stream,byte[][] references);
     interface Stream {
         void text(String text);
         default void context(int tokens,int omittedMessages){}
+        default void context(int tokens,int omittedMessages,int omittedReferences){context(tokens,omittedMessages);}
     }
     // Methods are invoked by JNI and explicitly retained by the release shrinker.
     static final class NativeStream {
         final AssistantOutput output=new AssistantOutput();
         final Stream listener;
-        int promptTokens,omittedMessages,pieces;
+        int promptTokens,omittedMessages,omittedReferences,pieces;
         long firstPieceNanos,lastPieceNanos,firstVisibleNanos;
         NativeStream(Stream listener){this.listener=listener;}
-        public void onStart(boolean thinking,int tokens,int omitted){
+        public void onStart(boolean thinking,int tokens,int omitted,int dropped){
             promptTokens=tokens;
-            omittedMessages=omitted;
+            omittedMessages=omitted;omittedReferences=dropped;
             output.initialThinking(thinking);
-            if(listener!=null)listener.context(tokens,omitted);
+            if(listener!=null)listener.context(tokens,omitted,dropped);
         }
         public void onToken(byte[] bytes){
             lastPieceNanos=System.nanoTime();
@@ -204,17 +205,23 @@ final class OnDeviceLlm {
             new OnDeviceModelResources(context).contextTokens(profile,outputBudget,modelReady);
             if(!ensureLoaded(context,request))throw new IllegalStateException(lastFailure);
             if(request.isCancelled())throw new InterruptedException("user_cancelled");
-            String recalled=ControlAssistantMemory.relevant(context,userPrompt,project);
+            String recalled;
+            try{recalled=ControlAssistantMemory.relevant(context,userPrompt,project);}
+            catch(Exception unavailable){recalled="Local persistent memory unavailable for this turn.";}
             String guidance=ControlAssistantPreferences.promptGuidance(context);
             guidance+="\nRuntime identity: You are the assistant embedded in the native Asterion Control Android application. "
                 +"This turn runs on this phone. Available operations are limited to the verified capability context. "
                 +"An operation requires a typed request and a separate execution receipt; answer text never executes code. "
                 +"Do not claim you are outside the app or that unverified tools are available. "
                 +"Return the final answer in the user-visible channel; do not print internal reasoning delimiters.";
-            guidance+="\nActive project: "+project+". This label scopes local memory; project source access requires verified retrieval evidence.\n"+AssistantCapabilities.context(context);
-            guidance+="\n"+AssistantRequirements.context(context,userPrompt,project);
-            guidance+="\n"+AssistantStructured.GUIDANCE;
-            if(!recalled.isEmpty())guidance+="\nOwner-approved memories, reference only:\n"+recalled;
+            guidance+="\nActive project: "+project+". This label scopes local memory; project source access requires verified retrieval evidence. "+
+                "Reference blocks may be omitted to fit the active context. Do not assume complete retrieval.\n"+AssistantStructured.GUIDANCE;
+            java.util.ArrayList<byte[]> references=new java.util.ArrayList<>();
+            String capabilities=AssistantCapabilities.context(context,userPrompt,project);
+            String requirements=AssistantRequirements.context(context,userPrompt,project);
+            if(!recalled.isEmpty())references.add(("Owner-approved memories, reference only:\n"+recalled).getBytes(StandardCharsets.UTF_8));
+            if(!capabilities.isEmpty())references.add(capabilities.getBytes(StandardCharsets.UTF_8));
+            if(!requirements.isEmpty())references.add(requirements.getBytes(StandardCharsets.UTF_8));
             String systemText=profile.systemInstructions(guidance);
             OnDeviceModelResources resources=new OnDeviceModelResources(context);
             int contextBudget=resources.contextTokens(profile,outputBudget,true);
@@ -230,7 +237,7 @@ final class OnDeviceLlm {
             NativeStream stream=new NativeStream(listener);
             long inferenceStarted=System.nanoTime();
             byte[] output=nativeGenerate(systemText.getBytes(StandardCharsets.UTF_8),roles,content,
-                outputBudget,contextBudget,stream);
+                outputBudget,contextBudget,stream,references.toArray(new byte[0][]));
             if(request.isCancelled())throw new InterruptedException("user_cancelled");
             if(output==null||output.length==0)throw new IllegalStateException("native_context_or_generation_failed");
             String result=stream.output.finish(output);
@@ -248,6 +255,7 @@ final class OnDeviceLlm {
                 .put("context_tokens",contextBudget)
                 .put("prompt_tokens",stream.promptTokens)
                 .put("omitted_messages",stream.omittedMessages)
+                .put("omitted_reference_blocks",stream.omittedReferences)
                 .put("generated_token_pieces",stream.pieces)
                 .put("request_to_first_visible_ms",(stream.firstVisibleNanos-requestStarted)/1_000_000)
                 .put("request_total_ms",(answerReady-requestStarted)/1_000_000)
