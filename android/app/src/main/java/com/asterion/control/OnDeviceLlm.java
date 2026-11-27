@@ -225,7 +225,7 @@ final class OnDeviceLlm {
                     if(input==null)throw new java.io.IOException("document_unavailable");
                     copyArtifact(folder,file,input,length,sha,request,progress);
                 }
-                if(modelReady&&LIBRARY_LOADED){nativeUnload();modelReady=false;}
+                if(modelReady&&LIBRARY_LOADED){modelReady=false;nativeUnload();}
                 lastFailure="";
             }
         }finally{GATE.end(request);}
