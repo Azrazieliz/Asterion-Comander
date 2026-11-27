@@ -1,0 +1,69 @@
+name: Control Model Lab public reference experiment
+on:
+  push:
+    branches: [work/control-native-ai-reconstruction-20261126]
+    paths:
+      - '.github/workflows/control-ai-public-reference.yml'
+      - 'scripts/control_ai_reference_experiment.py'
+      - 'scripts/control_ai_evidence_corpus.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  fit-and-score:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      HF_HUB_DISABLE_IMPLICIT_TOKEN: '1'
+      HF_HUB_DISABLE_TELEMETRY: '1'
+      TOKENIZERS_PARALLELISM: 'false'
+      OMP_NUM_THREADS: '4'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install CPU training stack
+        run: |
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.7.1
+          python -m pip install transformers==4.55.4 peft==0.17.1 accelerate==1.10.1 huggingface-hub==0.34.4 psutil httpx
+      - name: Verify public model and create deterministic fixtures
+        run: |
+          python -m scripts.control_ai_reference_experiment stage experiment
+          cp /usr/share/common-licenses/Apache-2.0 experiment/evidence/LICENSE-Apache-2.0
+      - name: Fit attention LoRA then optimize verified preference pairs
+        env:
+          HF_HUB_OFFLINE: '1'
+          TRANSFORMERS_OFFLINE: '1'
+        run: |
+          python -m scripts.control_ai_adaptation train --base experiment/base --revision 48d788eca847d4d7548f375ad03d3c9312f6139e \
+            --train experiment/fixtures/train.jsonl --holdout experiment/fixtures/validation.jsonl \
+            --preferences experiment/fixtures/preferences.jsonl --preference-steps 6 --preference-learning-rate 0.00002 \
+            --output experiment/candidate --device cpu --threads 4 --context 256 --rank 8 --accumulate 1 \
+            --target-modules q_proj,v_proj --max-steps 48 --learning-rate 0.00015 --memory-budget-mib 8500
+      - name: Preserve actual training artifacts before scoring
+        uses: actions/upload-artifact@v4
+        with:
+          name: control-evidence-adapter
+          if-no-files-found: error
+          path: |
+            experiment/candidate/adapter/adapter_*.*
+            experiment/candidate/sft-adapter/adapter_*.*
+            experiment/candidate/candidate.json
+            experiment/evidence/foundation.json
+            experiment/fixtures/
+            experiment/base/README.md
+            experiment/evidence/LICENSE-Apache-2.0
+      - name: Compare held-out free generation through the Model Laboratory
+        env:
+          HF_HUB_OFFLINE: '1'
+          TRANSFORMERS_OFFLINE: '1'
+        run: python -m scripts.control_ai_reference_experiment evaluate experiment
+      - uses: actions/upload-artifact@v4
+        with:
+          name: control-evidence-evaluation
+          if-no-files-found: error
+          path: experiment/evidence/
