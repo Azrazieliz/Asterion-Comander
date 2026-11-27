@@ -45,6 +45,10 @@ final class ContinuationCycle {
   synchronized JSONObject status()throws Exception {
     JSONObject result=new JSONObject(state.toString());
     result.remove("instruction");
+    result.remove("queue_body");
+    result.remove("voice_answer");
+    result.remove("voice_question");
+    result.remove("observed_voice_question");
     return result.put("continuation_enabled",ledger.status().optBoolean("enabled",false))
       .put("overnight_unbounded",state.optInt("max_cycles",0)==0)
       .put("target_turn_minutes",30)
@@ -79,7 +83,7 @@ final class ContinuationCycle {
        instruction.length()<1||instruction.length()>3000||
        !(tier.equals("5*")||tier.equals("6*")||tier.equals("7*"))||
        !("same".equals(conversation)||"new".equals(conversation))||
-       !voiceLocale.matches("[a-z]{2}(-[A-Z]{2})?")||
+       !VoiceReplyPolicy.englishLocale(voiceLocale)||
        maximum<0||maximum>1000000)
       throw new IllegalArgumentException("Invalid canonical Control cycle parameters");
     if(id.equals(state.optString("cycle_id","")))
@@ -159,7 +163,8 @@ final class ContinuationCycle {
       JSONObject uncertain=ledger.status();
       String checkpointId=state.optString("checkpoint","");
       if(!checkpointId.equals(uncertain.optString("last_checkpoint",""))||
-         !"requires_manual_review".equals(uncertain.optString("state","")))
+         !("requires_manual_review".equals(uncertain.optString("state",""))||
+           "dispatching".equals(uncertain.optString("state",""))))
         return status();
       ControlAccessibilityService view=ControlAccessibilityService.active;
       if(view==null)return status();
@@ -203,6 +208,7 @@ final class ContinuationCycle {
       return tick();
     }
     String phase=state.optString("state","ready");
+    if("queueing".equals(phase))return reconcileQueue();
     int index=state.optInt("index",1);
     int maximum=state.optInt("max_cycles",0);
     if(maximum>0&&index>maximum) {
@@ -357,7 +363,14 @@ final class ContinuationCycle {
                 .put("response_completed_work",evidence.optBoolean("finished",false))
                 .put("observed_voice_question",spokenQuestion);
               save();
-            }else if(now-began>=12000L) {
+            }else if(!spokenQuestion.equals(state.optString("observed_voice_question",""))||
+                evidence.optBoolean("finished",false)!=state.optBoolean("response_completed_work",false)){
+              // The marker kind or question changed: start a new stability interval.
+              state.put("marker_first_seen_ms",now)
+                .put("response_completed_work",evidence.optBoolean("finished",false))
+                .put("observed_voice_question",spokenQuestion);
+              save();
+            }else if(now-began>=12000L){
               if(!spokenQuestion.isEmpty() &&
                  spokenQuestion.equals(state.optString("observed_voice_question",""))) {
                 VoiceDialogueService voice=VoiceDialogueService.active;
@@ -506,19 +519,48 @@ final class ContinuationCycle {
       .put("message",instructions);
     // Store the deterministic ID BEFORE queue: if killed, the next tick can
     // reconcile the ledger history rather than creating a second message.
-    state.put("state","queueing").put("checkpoint",checkpointId);
+    JSONObject prior=ledger.status();
+    state.put("state","queueing").put("checkpoint",checkpointId)
+      .put("queue_body",body)
+      .put("queue_prior_checkpoint",prior.optString("last_checkpoint",""))
+      .put("queue_prior_sequence",prior.optInt("sequence",0))
+      .put("queue_prior_state",prior.optString("state","idle"));
     save();
-    try {
-      ledger.queue(body);
-      state.put("state","queued").put("new_conversation_handoff",false);
-      // Only clear an acknowledged voice answer after its next prompt was
-      // durably queued. A failed queue operation preserves the user's answer.
-      state.remove("voice_answer");state.remove("voice_question");
-      state.remove("observed_voice_question");
+    return reconcileQueue();
+  }
+  private JSONObject reconcileQueue()throws Exception{
+    if(!ledger.status().optBoolean("enabled",false))return status();
+    String checkpoint=state.optString("checkpoint","");
+    JSONObject other=ledger.status();
+    try{
+      if(!checkpoint.equals(other.optString("last_checkpoint",""))){
+        JSONObject body=state.optJSONObject("queue_body");
+        // Only retry a durable local queue transaction when the exact ledger
+        // snapshot still proves it never happened. No Send or new checkpoint.
+        if(body==null||!checkpoint.equals(body.optString("checkpoint_id"))||
+           !CycleRecoveryPolicy.unchangedBeforeQueue(
+             state.optString("queue_prior_checkpoint",""),
+             state.optInt("queue_prior_sequence",-1),
+             state.optString("queue_prior_state",""),
+             other.optString("last_checkpoint",""),other.optInt("sequence",0),
+             other.optString("state","idle")))
+          throw new IllegalStateException("Queue identity or prior ledger changed");
+        ledger.queueCycle(body);
+        other=ledger.status();
+      }
+      if(!checkpoint.equals(other.optString("last_checkpoint","")))
+        throw new IllegalStateException("Checkpoint queue not confirmed");
+      String next=CycleRecoveryPolicy.phaseAfterQueue(other.optString("state",""));
+      state.put("state",next).put("new_conversation_handoff",false);
+      if(!"needs_review".equals(next)){
+        state.remove("voice_answer");state.remove("voice_question");
+        state.remove("observed_voice_question");
+      }else state.put("last_error","Original checkpoint outcome needs review; no replay");
+      state.remove("queue_body");
       save();
     }catch(Exception e){
       state.put("state","needs_review").put("last_error",
-        "Could not queue a unique cycle checkpoint: "+e.getClass().getSimpleName());
+        "Could not reconcile unique cycle checkpoint: "+e.getClass().getSimpleName());
       save();
     }
     return status();
@@ -570,19 +612,7 @@ final class ContinuationCycle {
         "Voice request interrupted on app restart; do not repeat it");
       save();
     }
-    if("queueing".equals(state.optString("state"))) {
-      String checkpoint=state.optString("checkpoint");
-      JSONObject other=ledger.status();
-      if(checkpoint.equals(other.optString("last_checkpoint")) &&
-         ("queued".equals(other.optString("state"))||
-          "submitted_unverified".equals(other.optString("state")))) {
-        state.put("state","queued");
-      }else{
-        state.put("state","needs_review")
-          .put("last_error","Cycle stopped during checkpoint creation; no automatic replay");
-      }
-      save();
-    }
+    if("queueing".equals(state.optString("state")))return reconcileQueue();
     return status();
   }
 }
