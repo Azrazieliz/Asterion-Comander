@@ -1,14 +1,21 @@
 """Owner-only authenticated phone operations must bypass stale Windows proxy routes."""
 import pytest
+import httpx
 from asterion_remote import github_bridge, phone_bridge
 
 
 def test_voice_and_cycle_commands_call_existing_phone_token(monkeypatch):
     calls=[]
     monkeypatch.setattr(phone_bridge,'load',lambda:{'base_url':'http://192.168.1.22:8973','token':'x'*36})
-    def capture(url,token,method='GET',body=None,**kwargs):
-        calls.append((url,token,method,body,kwargs));return {'ok':True}
-    monkeypatch.setattr(github_bridge,'http',capture)
+    class PairedTransport:
+        def post(self,url,json,headers,timeout):
+            assert url=='http://127.0.0.1:8995/phone/rpc'
+            assert headers['Authorization']=='Bearer '+'x'*36
+            return httpx.Response(503,json={'detail':{'state':'no_session','dispatched':False}})
+        def request(self,method,url,json,headers,timeout):
+            calls.append((url,headers['Authorization'],method,json,timeout))
+            return httpx.Response(200,json={'ok':True})
+    monkeypatch.setattr(phone_bridge,'_phone_http',PairedTransport())
     for op,params,path in [
         ('phone_voice_status',{},'/voice/status'),
         ('phone_voice_ack',{'question_id':'voice-example-001'},'/voice/ack'),
@@ -18,9 +25,9 @@ def test_voice_and_cycle_commands_call_existing_phone_token(monkeypatch):
         ('phone_cycle_cancel',{},'/continuation/cancel'),
         ('phone_performance_status',{},'/performance/status')]:
         assert github_bridge.run({'op':op,'params':params},'windows-token')=={'ok':True}
-        url,token,method,body,kwargs=calls[-1]
+        url,token,method,body,timeout=calls[-1]
         assert url=='http://192.168.1.22:8973'+path
-        assert token=='x'*36 and kwargs['control'] is True
+        assert token=='Bearer '+'x'*36 and timeout==10.0
         if method=='POST':assert body==params
         else:assert body is None
 

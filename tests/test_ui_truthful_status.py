@@ -28,9 +28,15 @@ def test_private_relay_recent_receipts_not_historical_connected_claim():
 def test_pairing_and_transfer_do_not_promise_unverified_delivery():
     assert '"Windows paired; checking device registration"' in MAIN
     assert '"Phone registration accepted by Windows · testing live reachability"' in MAIN
-    assert '"Transfer request accepted · awaiting first progress · "' in MAIN
-    assert 'Reported SHA-256: ' in MAIN
-    assert '"Windows reported transfer completion without an independently checkable phone receipt"' in MAIN
+    assert '"Transfer accepted · awaiting first progress"' in MAIN
+    assert 'receipt.optBoolean("verified",false)' in MAIN
+    assert 'sent==total&&receipt.optLong("size",-1)==total' in MAIN
+    assert 'receipt.optString("sha256").matches("[a-fA-F0-9]{64}")' in MAIN
+    assert '"Completion receipt incomplete: file publication not verified."' in MAIN
+    assert '"Submission outcome unknown. No automatic resend.' in MAIN
+    assert '"active_transfer_id"' in MAIN
+    assert 'generation!=transferPollGeneration' in MAIN
+    assert 'if(verified)offerVerifiedControlUpdate(receipt)' in MAIN
     assert '"Saved to "+receipt.optString("location")' not in MAIN
 
 def test_checkpoint_open_preserves_existing_chat():

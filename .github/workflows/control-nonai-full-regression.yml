@@ -5,6 +5,9 @@ on:
       - work/control-native-ai-reconstruction-20261126
     paths:
       - '.github/workflows/control-nonai-full-regression.yml'
+      - 'asterion_remote/**'
+      - 'android/app/src/main/java/com/asterion/control/**'
+      - 'tests/**'
   workflow_dispatch:
 permissions:
   contents: read

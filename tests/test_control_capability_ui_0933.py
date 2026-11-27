@@ -59,7 +59,7 @@ class CapabilitySurfaceTests(unittest.TestCase):
         connect=source.split('private View scrollDevices()',1)[1].split(
             'private View scrollTools()',1)[0]
         for item in ("Asterion voice","Connected applications",
-                     "Direct Wi-Fi file transfer","Asterion Control updates"):
+                     "Private file transfer","Asterion Control updates"):
             self.assertIn(item,tools)
             self.assertNotIn(item,connect)
         for item in ("Asterion intelligence","Incident investigation","Network & privacy"):

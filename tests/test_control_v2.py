@@ -13,7 +13,7 @@ from unittest.mock import patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from asterion_remote import security_scanner,model_lab,skill_studio
+from asterion_remote import security_scanner,model_lab,skill_studio,app as native_app
 from asterion_remote.control_v2_routes import router
 
 
@@ -32,8 +32,9 @@ class ControlV2Tests(unittest.TestCase):
         self.env.start()
         self.auth={"Authorization":"Bearer "+"T"*40}
         self.owner={**self.auth,"X-Owner-Approval":"O"*40}
-        self.patcher=patch("asterion_remote.control_v2_routes._authorized_path",
-             side_effect=lambda value:(self.root/value).resolve(strict=True))
+        # Exercise the actual allowed-root validator. Restoration targets
+        # deliberately do not exist; a strict=True fixture wrongly rejected them.
+        self.patcher=patch.multiple(native_app,ROOT=self.root.resolve(),EXTRA_ROOTS=[])
         self.patcher.start()
         app=FastAPI()
         app.include_router(router)
@@ -94,6 +95,11 @@ class ControlV2Tests(unittest.TestCase):
             headers=self.owner,json=data)
         self.assertEqual(moved.status_code,200)
         self.assertFalse(f.exists())
+        with patch.object(native_app,"ROOT",self.root/"different-scope"):
+            denied=self.client.post("/api/v1/v2/security/quarantine/restore",
+                headers=self.owner,json={"quarantine_id":moved.json()["id"]})
+            self.assertEqual(denied.status_code,403)
+            self.assertFalse(f.exists())
         restore=self.client.post("/api/v1/v2/security/quarantine/restore",
             headers=self.owner,json={"quarantine_id":moved.json()["id"]})
         self.assertEqual(restore.status_code,200)

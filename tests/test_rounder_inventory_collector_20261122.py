@@ -17,11 +17,15 @@ fake_pkg = types.ModuleType("asterion_remote")
 fake_pkg.__path__ = []
 fake_phone = types.ModuleType("asterion_remote.phone_bridge")
 fake_phone.request = lambda *args, **kwargs: None
-sys.modules.setdefault("asterion_remote", fake_pkg)
-sys.modules["asterion_remote.phone_bridge"] = fake_phone
-spec = importlib.util.spec_from_file_location("rounder_inventory", SCRIPT)
-inventory = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(inventory)
+# The collector captures its import-time request binding. A scoped module stub
+# keeps standalone stdlib-only tests independent without contaminating the
+# real phone_bridge module for every other test in the full pytest run.
+existing_pkg=sys.modules.get("asterion_remote",fake_pkg)
+with patch.dict(sys.modules,{"asterion_remote":existing_pkg,
+                             "asterion_remote.phone_bridge":fake_phone}):
+    spec = importlib.util.spec_from_file_location("rounder_inventory", SCRIPT)
+    inventory = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(inventory)
 
 
 class Reply:
@@ -38,6 +42,9 @@ def envelope(body):
 
 
 class InventoryExportTest(unittest.TestCase):
+    def test_collector_does_not_replace_other_tests_native_transport(self):
+        self.assertIsNot(sys.modules.get('asterion_remote.phone_bridge'),fake_phone)
+
     def setUp(self):
         self.root = "/Apps/Koikatsu"
         self.meta = {
