@@ -1,0 +1,130 @@
+name: Control retained 7B neural continuation and native export
+on:
+  push:
+    branches: [ai-candidate/continuation-native-export-20261128]
+    paths:
+      - '.github/workflows/control-ai-retained-continuation.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: control-retained-7b-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  HF_HUB_DISABLE_IMPLICIT_TOKEN: '1'
+  HF_HUB_DISABLE_TELEMETRY: '1'
+  TOKENIZERS_PARALLELISM: 'false'
+  OMP_NUM_THREADS: '4'
+jobs:
+  native-adapter:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          ref: 4b77dee0524c64b8471869232e2958bd9589607d
+          path: runtime
+          persist-credentials: false
+      - name: Fetch exact completed public training archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl --fail --silent --show-error --location --retry 2 -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "${{ github.api_url }}/repos/${{ github.repository }}/actions/artifacts/15230982528/zip" --output retained.zip
+          echo '964e0da062daf5b74458b4366732d9ee233a25973920d34634d5f17756e91b42  retained.zip' | sha256sum -c -
+      - name: Restore exact verified parent and stage only converter metadata
+        run: |
+          python -m pip install huggingface-hub==0.34.4
+          python -m scripts.control_ai_retained_candidate retained.zip retained
+      - name: Convert the actual learned adapter to native F16 GGUF
+        run: |
+          python -m pip install -r runtime/requirements/requirements-convert_lora_to_gguf.txt
+          python -m pip install ./runtime/gguf-py
+          python -m scripts.control_ai_native_adapter_export --candidate retained/candidate --base retained/base --runtime runtime --output native-parent
+      - name: Preserve exact learned weights and native conversion
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: retained-7b-native-conversion
+          retention-days: 30
+          if-no-files-found: warn
+          path: |
+            retained/candidate/adapter/
+            retained/candidate/candidate.json
+            retained/retained-lineage.json
+            retained/report.json
+            retained/train.jsonl
+            retained/holdout.jsonl
+            retained/generation-evaluation.jsonl
+            native-parent/
+  continue-sft:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Fetch exact completed public training archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl --fail --silent --show-error --location --retry 2 -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "${{ github.api_url }}/repos/${{ github.repository }}/actions/artifacts/15230982528/zip" --output retained.zip
+          echo '964e0da062daf5b74458b4366732d9ee233a25973920d34634d5f17756e91b42  retained.zip' | sha256sum -c -
+      - name: Install measured CPU NF4 training stack
+        run: |
+          python -m pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install transformers==4.57.1 peft==0.17.1 accelerate==1.10.1 bitsandbytes==0.48.2 huggingface-hub==0.34.4 psutil
+      - name: Restore completed parent and build new applied curriculum
+        run: |
+          python -m scripts.control_ai_retained_candidate retained.zip retained --weights
+          python -m scripts.control_ai_applied_curriculum applied
+      - name: Continue real 7B LoRA weights through all 24 original applied examples
+        timeout-minutes: 90
+        run: |
+          BUDGET="$(python -c 'import psutil;print((psutil.virtual_memory().available-(1024<<20))//(1<<20))')"
+          python -m scripts.control_ai_adaptation train --base retained/base --revision 5d19c438a3f72bd74a2b1e1f7aa90e24d359c690 --train applied/train.jsonl --holdout applied/holdout.jsonl --output continued --start-candidate retained/candidate --device cpu --precision nf4 --memory-budget-mib "$BUDGET" --context 384 --rank 8 --accumulate 1 --max-steps 24 --target-modules q_proj,v_proj --threads 4 --save-steps 4 --learning-rate 0.00007
+      - name: Preserve SFT candidate before preference work
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: continued-7b-sft
+          retention-days: 30
+          if-no-files-found: warn
+          path: |
+            continued/adapter/
+            continued/candidate.json
+            continued/training-plan.json
+            continued/checkpoints/
+            applied/
+            retained/retained-lineage.json
+      - name: Apply bounded preference optimization to completed SFT weights
+        if: success()
+        timeout-minutes: 25
+        run: |
+          BUDGET="$(python -c 'import psutil;print((psutil.virtual_memory().available-(1024<<20))//(1<<20))')"
+          python -m scripts.control_ai_adaptation train --base retained/base --revision 5d19c438a3f72bd74a2b1e1f7aa90e24d359c690 --train applied/train.jsonl --holdout applied/holdout.jsonl --output preferred --start-candidate continued --device cpu --precision nf4 --memory-budget-mib "$BUDGET" --context 384 --rank 8 --accumulate 1 --target-modules q_proj,v_proj --threads 4 --max-steps 1 --preference-only --preferences applied/preferences.jsonl --preference-steps 2 --preference-learning-rate 0.00002
+      - name: Preserve preference-trained weights independently
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: continued-7b-preference
+          retention-days: 30
+          if-no-files-found: warn
+          path: |
+            preferred/adapter/
+            preferred/candidate.json
+            preferred/training-plan.json
+            preferred/sft-adapter/
+            applied/
