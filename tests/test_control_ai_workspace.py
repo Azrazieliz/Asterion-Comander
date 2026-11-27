@@ -29,7 +29,7 @@ def test_native_structured_response_data(tmp_path):
     if not compiler or not runtime:
         pytest.skip('JDK required for executable Java behavior tests')
     subprocess.run([compiler,'-encoding','UTF-8','-d',str(tmp_path),
-                    str(JAVA/'AssistantStructured.java'),
+                    str(JAVA/'AssistantStructured.java'),str(JAVA/'AssistantArtifact.java'),
                     str(ROOT/'tests/java/com/asterion/control/AssistantStructuredTest.java')],
                    check=True,capture_output=True,text=True)
     result=subprocess.run([runtime,'-cp',str(tmp_path),'com.asterion.control.AssistantStructuredTest'],

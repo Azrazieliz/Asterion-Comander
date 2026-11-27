@@ -29,6 +29,15 @@ public final class AssistantStructuredTest {
         check(AssistantStructured.singleBlock("````text\n"+action+"\n````","asterion_action")==null);
         check(AssistantStructured.singleBlock(action.substring(0,action.length()-3),"asterion_action")==null);
         check(AssistantStructured.singleBlock("quoted "+action,"asterion_action")==null);
+        AssistantArtifact artifact=AssistantArtifact.create("csv","a,b\n1,é\n");
+        check(artifact.filename.equals("asterion.csv"));check(artifact.mime.equals("text/csv"));
+        check(artifact.verified("a,b\n1,é\n".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        byte[] mutable=artifact.data();mutable[0]=0;check(!artifact.verified(mutable));
+        check(AssistantArtifact.create("asterion_action","{}")==null);
+        check(AssistantArtifact.create("pdf","fake pdf")==null);
+        check(AssistantArtifact.create("../../bad","x")==null);
+        check(AssistantArtifact.create("text","")==null);
+        check(AssistantArtifact.create("text","x".repeat(262145))==null);
         System.out.println(checks+" structured response assertions passed");
     }
 }

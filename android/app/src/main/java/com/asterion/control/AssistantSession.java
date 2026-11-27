@@ -19,6 +19,7 @@ final class AssistantSession {
     String status="",persistenceIssue="";
     private InferenceGate.Request activeRequest;
     private boolean actionBusy;
+    AssistantArtifact pendingArtifact;
     boolean busy(){return actionBusy||conversation.running();}
     private long lastNotification;
     void changed(){for(Runnable listener:listeners)listener.run();}

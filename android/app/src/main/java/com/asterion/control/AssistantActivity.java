@@ -134,7 +134,7 @@ public final class AssistantActivity extends Activity {
                 LinearLayout answer=DesignSystem.vertical(this);turn.addView(answer);
                 if(m.state.equals("running")){liveAnswer=answer;liveText=m.text;}
                 if(m.role.equals("assistant")&&m.state.equals("completed"))
-                    AssistantMarkdown.render(this,answer,m.text,text,muted,panel,selection->submitSelection(c,m,selection));
+                    AssistantMarkdown.render(this,answer,m.text,text,muted,panel,selection->submitSelection(c,m,selection),this::exportArtifact);
                 else AssistantMarkdown.render(this,answer,m.text,text,muted,panel);
                 if(!m.state.equals("running")){
                     LinearLayout tools=DesignSystem.horizontal(this);
@@ -208,8 +208,41 @@ public final class AssistantActivity extends Activity {
         }).setNegativeButton("Close",null).show();
     }
     private void voice(){try{Intent intent=new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE,"en-US");startActivityForResult(intent,210);}catch(Exception unavailable){notice("Speech recognition is unavailable. Check Android speech services.");}}
+    private void exportArtifact(AssistantArtifact artifact){
+        if(!idle())return;
+        if(session.pendingArtifact!=null){notice("Finish the current file picker first.");return;}
+        session.pendingArtifact=artifact;
+        try{
+            Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT).setType(artifact.mime).addCategory(Intent.CATEGORY_OPENABLE);
+            intent.putExtra(Intent.EXTRA_TITLE,artifact.filename);
+            startActivityForResult(intent,212);
+        }catch(Exception unavailable){session.pendingArtifact=null;notice("No document provider is available for this file.");}
+    }
     private void attach(){Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("text/*").addCategory(Intent.CATEGORY_OPENABLE);startActivityForResult(intent,211);}
-    @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(result!=RESULT_OK||data==null)return;
+    @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);
+        if(request==212){
+            AssistantArtifact artifact=session.pendingArtifact;session.pendingArtifact=null;
+            if(result!=RESULT_OK||data==null||data.getData()==null)return;
+            if(artifact==null){notice("Export context was lost before writing. No file write was attempted.");return;}
+            android.net.Uri uri=data.getData();
+            android.content.Context app=getApplicationContext();
+            notice("Writing and verifying selected file");
+            session.work.execute(()->{
+                String outcome;
+                try{
+                    try(java.io.OutputStream out=app.getContentResolver().openOutputStream(uri,"w")){
+                        if(out==null)throw new java.io.IOException("no_output_stream");
+                        out.write(artifact.data());out.flush();
+                    }
+                    try(java.io.InputStream in=app.getContentResolver().openInputStream(uri)){
+                        if(in==null||!artifact.verified(in.readNBytes(artifact.size()+1)))throw new java.io.IOException("readback_mismatch");
+                    }
+                    outcome="File saved and read-back verified ("+artifact.size()+" bytes).";
+                }catch(Exception failure){outcome="Export outcome unverified. A partial file may exist at the selected destination.";}
+                String report=outcome;runOnUiThread(()->{if(alive)notice(report);});
+            });return;
+        }
+        if(result!=RESULT_OK||data==null)return;
         if(request==210){java.util.ArrayList<String> words=data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);if(words!=null&&!words.isEmpty())composer.append(words.get(0));}
         else if(request==211&&data.getData()!=null){android.net.Uri uri=data.getData();session.work.execute(()->{
             try(java.io.InputStream in=getContentResolver().openInputStream(uri)){

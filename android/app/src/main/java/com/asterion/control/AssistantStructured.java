@@ -11,7 +11,8 @@ final class AssistantStructured {
     static final String GUIDANCE="For a useful visual use a fenced asterion_chart block: first line title|Chart title, then 1-12 lines bar|Label|nonnegative number. "+
         "For an interactive questionnaire use a fenced asterion_form block: first line title|Form title, then 1-8 lines question|Question|Option A|Option B (up to 6 options). "+
         "Use literal pipe separators, no pipes or newlines in labels. The owner selects answers and explicitly sends them as a new message. "+
-        "Do not invent data, use these only when useful, and do not claim forms execute actions.";
+        "For an editable text, JSON, CSV, Markdown or code file, provide a complete fenced code block with its language; the owner can save it. "+
+        "Do not invent data, use components only when useful, and do not claim forms execute actions.";
     static final class Row {
         final String label,display;
         final double value;

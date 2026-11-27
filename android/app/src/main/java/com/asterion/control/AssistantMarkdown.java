@@ -22,18 +22,23 @@ import java.util.regex.Pattern;
 final class AssistantMarkdown {
     private AssistantMarkdown(){}
     static void render(Context c,LinearLayout parent,String source,int text,int muted,int panel){
-        render(c,parent,source,text,muted,panel,null);
+        render(c,parent,source,text,muted,panel,null,null);
     }
-    static void render(Context c,LinearLayout parent,String source,int text,int muted,int panel,java.util.function.Consumer<String> send){
+    static void render(Context c,LinearLayout parent,String source,int text,int muted,int panel,java.util.function.Consumer<String> send,java.util.function.Consumer<AssistantArtifact> export){
         String[] lines=source.split("\n",-1);
         for(int at=0;at<lines.length;){
             String line=lines[at];
             if(line.startsWith("```")){
-                String language=line.substring(3).trim();StringBuilder code=new StringBuilder();at++;
-                while(at<lines.length&&!lines[at].startsWith("```")){if(code.length()>0)code.append('\n');code.append(lines[at++]);}
-                boolean closed=at<lines.length&&lines[at].equals("```");
-                if(at<lines.length)at++;
-                if(send!=null&&closed&&(language.equals(AssistantStructured.CHART)||language.equals(AssistantStructured.FORM))){
+                int width=0;while(width<line.length()&&line.charAt(width)=='`')width++;
+                String fence=line.substring(0,width),language=line.substring(width).trim();
+                StringBuilder code=new StringBuilder();at++;
+                while(at<lines.length&&!lines[at].equals(fence)){
+                    code.append(lines[at++]);
+                    if(at<lines.length&&!lines[at].equals(fence))code.append('\n');
+                }
+                boolean closed=at<lines.length;
+                if(closed)at++;
+                if(send!=null&&closed&&width==3&&(language.equals(AssistantStructured.CHART)||language.equals(AssistantStructured.FORM))){
                     try{add(parent,AssistantStructuredView.render(c,AssistantStructured.parse(language,code.toString()),text,muted,panel,send),8);continue;}
                     catch(IllegalArgumentException invalid){
                         add(parent,DesignSystem.text(c,"Interactive response unavailable: invalid component data.",12,muted,false),5);
@@ -45,7 +50,16 @@ final class AssistantMarkdown {
                 copy.setMinHeight(dp(c,48));copy.setGravity(android.view.Gravity.CENTER_VERTICAL);
                 String value=code.toString();copy.setOnClickListener(v->{
                     ((ClipboardManager)c.getSystemService(Context.CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("Code",value));});
-                box.addView(copy);HorizontalScrollView scroll=new HorizontalScrollView(c);
+                LinearLayout actions=DesignSystem.horizontal(c);
+                actions.addView(copy,new LinearLayout.LayoutParams(0,-2,1));
+                AssistantArtifact artifact=export!=null&&closed?AssistantArtifact.create(language,value):null;
+                if(artifact!=null){
+                    TextView save=DesignSystem.text(c,"Save file",14,text,true);save.setMinHeight(dp(c,48));
+                    save.setGravity(android.view.Gravity.CENTER);save.setPadding(dp(c,12),0,dp(c,12),0);
+                    DesignSystem.clickable(save,c,panel,muted,10);
+                    save.setOnClickListener(v->export.accept(artifact));actions.addView(save);
+                }
+                box.addView(actions);HorizontalScrollView scroll=new HorizontalScrollView(c);
                 TextView body=DesignSystem.text(c,value,14,text,false);body.setTypeface(Typeface.MONOSPACE);body.setTextIsSelectable(true);
                 scroll.addView(body);box.addView(scroll);add(parent,box,8);continue;
             }
