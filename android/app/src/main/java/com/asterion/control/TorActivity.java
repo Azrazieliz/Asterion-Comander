@@ -142,20 +142,27 @@ public final class TorActivity extends Activity {
                         return new WebResourceResponse("text/plain","UTF-8",403,"Blocked",java.util.Collections.emptyMap(),new ByteArrayInputStream(new byte[0]));
                     return null;
                 }
-                @Override public void onReceivedSslError(WebView v,SslErrorHandler h,android.net.http.SslError e){h.cancel();status.setText("Tor · Website certificate rejected");}
+                @Override public void onReceivedSslError(WebView v,SslErrorHandler h,android.net.http.SslError e){h.cancel();if(checkingWebView){fail("Tor proof certificate rejected");return;}status.setText("Tor · Website certificate rejected");}
                 @Override public void onReceivedError(WebView v,WebResourceRequest request,WebResourceError error){
                     if(request.isForMainFrame()){
                         if(checkingWebView){fail("Tor WebView exit check failed");return;}
                         status.setText("Tor · Page could not load; no direct fallback");
                     }
                 }
+                @Override public void onReceivedHttpError(WebView v,WebResourceRequest request,WebResourceResponse response){
+                    if(checkingWebView&&request.isForMainFrame())fail("Tor proof HTTP error");
+                }
                 @Override public void onPageFinished(WebView v,String url){
                     if(checkingWebView){
-                        if(!CHECK_API.equals(url))return;
+                        if(!CHECK_API.equals(url)){fail("Tor proof navigated away from its expected URL");return;}
                         final int generation=epoch;
                         // Read only the fixed official proof document, never run scripts on arbitrary sites.
+                        // Enable script evaluation only after the fixed proof document loaded.
+                        // Network interception still permits only the proof URL.
+                        v.getSettings().setJavaScriptEnabled(true);
                         v.evaluateJavascript("document.body ? document.body.innerText : ''",value->{
                             if(closed||generation!=epoch||!checkingWebView)return;
+                            v.getSettings().setJavaScriptEnabled(false);
                             try{
                                 Object decoded=new org.json.JSONTokener(value).nextValue();
                                 if(!(decoded instanceof String)||((String)decoded).length()>4096||
@@ -191,6 +198,8 @@ public final class TorActivity extends Activity {
         v.setContentDescription(title);v.setFocusable(true);v.setOnClickListener(w->action.run());return v;
     }
     private void suspendNavigation(){
+        String current=web.getUrl();
+        if(current!=null&&!CHECK_API.equals(current)&&TorAddressPolicy.resolve(current)!=null)pending=current;
         ready=false;go.setEnabled(false);web.stopLoading();web.getSettings().setBlockNetworkLoads(true);
     }
     private void poll(){
@@ -265,7 +274,7 @@ public final class TorActivity extends Activity {
     }
     private void fail(String reason){
         ready=false;checkingWebView=false;closed=true;epoch++;ui.removeCallbacksAndMessages(null);go.setEnabled(false);status.setText(reason+" · No direct fallback");
-        if(web!=null){web.stopLoading();web.getSettings().setBlockNetworkLoads(true);}
+        if(web!=null){web.stopLoading();web.getSettings().setJavaScriptEnabled(false);web.getSettings().setBlockNetworkLoads(true);}
         releaseService();
     }
     private void releaseService(){
