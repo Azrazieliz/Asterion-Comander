@@ -277,9 +277,45 @@ async function loadIntegrationCoverage(){
  }
 }
 
+function renderDiagnosticResources(resources){
+ const panel=$('#diagnostic-resources');
+ panel.replaceChildren();
+ if(!resources||resources.observed!==true){
+  diagnosticRecord(panel,'Windows resource measurements unavailable',
+    'No current memory or storage pressure is inferred.');
+  return;
+ }
+ const gib=1024**3;
+ const show=(label,m)=>{
+  if(!m||m.available!==true||!Number.isSafeInteger(m.available_bytes)||
+     !Number.isSafeInteger(m.total_bytes)||m.total_bytes<=0||
+     m.available_bytes<0||m.available_bytes>m.total_bytes){
+   diagnosticRecord(panel,label,'Measurement unavailable.');return;
+  }
+  const band=m.pressure_band;
+  const suffix=band==='critical'?' · Critical pressure':band==='low'?' · Low capacity':
+    band==='above_low_threshold'?' · Above advisory low-capacity threshold':' · Pressure unclassified';
+  diagnosticRecord(panel,label,(m.available_bytes/gib).toFixed(2)+' GiB available of '+
+   (m.total_bytes/gib).toFixed(2)+' GiB'+suffix,band==='critical'||band==='low'?'warning':'neutral');
+ };
+ show('Available Windows memory',resources.memory);
+ for(const volume of (Array.isArray(resources.volumes)?resources.volumes:[]).slice(0,32)){
+  if(volume&&typeof volume==='object')show('Storage '+String(volume.volume||'Volume'),volume);
+ }
+ for(const finding of (Array.isArray(resources.findings)?resources.findings:[]).slice(0,33)){
+  if(finding&&typeof finding.next_step==='string'){
+   diagnosticRecord(panel,'Recommended check'+(finding.volume?' · '+finding.volume:''),finding.next_step,'warning');
+  }
+ }
+ diagnosticRecord(panel,'Evidence scope',
+  'These are fresh capacity measurements, not proof of a fault’s cause or of suitability for a particular workload.');
+}
+let diagnosticGeneration=0;
 async function loadDiagnostics(){
+ const generation=++diagnosticGeneration;
  if(!state.token){
   $('#diagnostic-state').textContent='Connect to Windows to check your Asterion apps.';
+  renderDiagnosticResources(null);
   return;
  }
  const status=$('#diagnostic-state');
@@ -293,7 +329,21 @@ async function loadDiagnostics(){
  try{
   const query={lookback_minutes:minutes,limit:1200,stale_after_seconds:300};
   if(filter)query.app=filter;
-  const data=await request('/diagnostics/triage'+qp(query));
+  let data,resources;
+  try{
+   const snapshotQuery={lookback_minutes:minutes,limit:1200,phone:false};
+   if(filter)snapshotQuery.app=filter;
+   const snapshot=await request('/diagnostics/snapshot'+qp(snapshotQuery));
+   if(!snapshot||snapshot.ok!==true||!snapshot.pc_instrumented_events)
+    throw new Error('Unverified diagnostic snapshot');
+   data=snapshot.pc_instrumented_events;
+   resources=snapshot.pc_resources;
+  }catch(snapshotError){
+   // Older paired workers still provide event triage; never fake resources.
+   data=await request('/diagnostics/triage'+qp(query));
+  }
+  if(generation!==diagnosticGeneration)return;
+  renderDiagnosticResources(resources);
   const count=data.events_examined||0;
   const operations=data.operations||[];
   const needs=data.needs_fresh_state||[];
@@ -367,6 +417,8 @@ async function loadDiagnostics(){
     (data.window_may_be_truncated||data.operations_truncated?
      ' The event limit was reached, so older records may be missing.':'');
  }catch(err){
+  if(generation!==diagnosticGeneration)return;
+  renderDiagnosticResources(null);
   status.textContent='Could not read diagnostic events: '+friendlyError(err);
   status.className='device-status warn';
   guidance.textContent='The connection or diagnostic API needs checking. This is not proof of an app failure or successful operation.';

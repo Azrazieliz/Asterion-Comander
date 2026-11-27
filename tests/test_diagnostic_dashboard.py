@@ -35,13 +35,18 @@ class DiagnosticDashboardTests(unittest.TestCase):
         for element in (
             "diagnostic-refresh", "diagnostic-app", "diagnostic-window",
             "diagnostic-state", "diagnostic-metrics", "diagnostic-findings",
-            "diagnostic-operations", "diagnostic-limits", "diagnostic-phone", "diagnostic-coverage", "diagnostic-guidance", "diagnostic-timeline",
+            "diagnostic-operations", "diagnostic-resources", "diagnostic-limits", "diagnostic-phone", "diagnostic-coverage", "diagnostic-guidance", "diagnostic-timeline",
         ):
             self.assertIn(element, parser.ids)
 
     def test_diagnostics_is_readonly_and_never_pretends_to_monitor_uninstrumented_apps(self):
         js = (ROOT / "app.js").read_text(encoding="utf-8")
         self.assertIn("async function loadDiagnostics()", js)
+        self.assertIn("function renderDiagnosticResources(", js)
+        self.assertIn("'/diagnostics/snapshot'+qp(snapshotQuery)", js)
+        self.assertIn("phone:false", js)
+        self.assertIn("renderDiagnosticResources(null)", js)
+        self.assertIn("generation!==diagnosticGeneration", js)
         self.assertIn("'/diagnostics/triage'+qp(query)", js)
         self.assertIn("Only diagnostic events that an app has actually reported", js)
         self.assertIn("async function loadPhoneDiagnosticEvidence()", js)
