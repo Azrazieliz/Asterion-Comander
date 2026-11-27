@@ -3,6 +3,13 @@ package com.asterion.control;
 /** Bounded spoken preview; full response remains in the canonical conversation. */
 final class VoiceReplyPolicy {
   private VoiceReplyPolicy(){}
+  static boolean englishLocale(String locale){
+    return locale!=null&&locale.matches("en(-[A-Z]{2})?");
+  }
+  static boolean currentExchange(boolean active,String expectedId,String currentId,
+                                 long expectedGeneration,long currentGeneration){
+    return active&&expectedId!=null&&expectedId.equals(currentId)&&expectedGeneration==currentGeneration;
+  }
   static String speech(String answer,boolean review){
     String text=answer==null?"":answer.trim();
     String suffix=review?" Review the proposed action in Asterion Control.":"";
