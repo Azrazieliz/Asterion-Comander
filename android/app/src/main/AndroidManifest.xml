@@ -60,7 +60,10 @@
       <!-- The official WireGuard AAR supplies and secures its own VpnService.
            Do not redeclare it or override its explicit exported=false policy. -->
       <activity android:name=".TorActivity" android:exported="false"
-          android:process=":asterion_tor" android:configChanges="orientation|screenSize|keyboardHidden"/>
+          android:process=":asterion_tor" android:launchMode="singleTask"
+          android:taskAffinity="com.asterion.control.tor"
+          android:excludeFromRecents="true"
+          android:configChanges="orientation|screenSize|keyboardHidden"/>
       <service android:name="org.torproject.jni.TorService" android:exported="false"
           android:process=":asterion_tor" tools:replace="android:exported,android:process"/>
       <receiver android:name=".RestoreReceiver" android:enabled="true" android:exported="false">
