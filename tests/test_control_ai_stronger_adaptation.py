@@ -64,3 +64,61 @@ def test_memory_admission_requires_actual_accelerator_and_host_budget():
         memory_admission(5*GiB,10*GiB,6*GiB,"cuda",9*GiB)
     with pytest.raises(RuntimeError,match="cpu_training_memory"):
         memory_admission(5*GiB,7*GiB,10*GiB,"cpu")
+
+def _retained_evaluation(tmp_path):
+    from scripts.control_ai_stronger_adaptation import MODEL,BASE,dump
+    from scripts.control_ai_adaptation import file_hash
+    revision="5d19c438a3f72bd74a2b1e1f7aa90e24d359c690"
+    candidate=tmp_path/"candidate"
+    adapter=candidate/"adapter";adapter.mkdir(parents=True)
+    (adapter/"adapter_model.safetensors").write_bytes(b"synthetic adapter fixture")
+    (adapter/"adapter_config.json").write_text(json.dumps({"peft_type":"LORA","bias":"none"}))
+    digest=file_hash(adapter/"adapter_model.safetensors")
+    dump(candidate/"candidate.json",{"weights_changed":True,"adapter_only":True,
+        "trainable_sha256_before":"a"*64,"trainable_sha256_after":"b"*64,
+        "base_revision_declared":revision,"base_files_sha256":{"config.json":"c"*64},
+        "artifact_sha256":{str(p.relative_to(candidate)):file_hash(p) for p in adapter.iterdir()}})
+    suite=tmp_path/"generation-evaluation.jsonl";suite.write_text('{"prompt":"test"}\n')
+    dump(tmp_path/"report.json",{"model":MODEL,"base":BASE,"revision":revision,
+        "base_revision":"6e5971d9eba42665f5bd5a0fcf047f299ce1dccc","state":"trained",
+        "adapter_sha256":digest,"suite_sha256":file_hash(suite)})
+    return adapter
+
+def test_retained_evaluation_isolated_attempts_preserve_training_report(tmp_path):
+    import pytest
+    from scripts.control_ai_stronger_adaptation import prepare_evaluation,dump
+    from scripts.control_ai_adaptation import file_hash
+    _retained_evaluation(tmp_path)
+    original=(tmp_path/"report.json").read_bytes()
+    report,attempt=prepare_evaluation(tmp_path,"first")
+    assert report["training_report_sha256"]==file_hash(tmp_path/"report.json")
+    report.update(state="blocked_or_failed")
+    dump(attempt/"report.json",report)
+    second,other=prepare_evaluation(tmp_path,"second")
+    assert other!=attempt and second["state"]=="evaluation_admitted"
+    with pytest.raises(FileExistsError):
+        prepare_evaluation(tmp_path,"first")
+    assert (tmp_path/"report.json").read_bytes()==original
+    assert json.loads((attempt/"report.json").read_text())["state"]=="blocked_or_failed"
+
+def test_retained_evaluation_rejects_tampering_before_attempt(tmp_path):
+    import pytest
+    from scripts.control_ai_stronger_adaptation import prepare_evaluation
+    adapter=_retained_evaluation(tmp_path)
+    original=(tmp_path/"report.json").read_bytes()
+    with pytest.raises(ValueError,match="invalid_evaluation_id"):
+        prepare_evaluation(tmp_path,"../escape")
+    (adapter/"adapter_model.safetensors").write_bytes(b"modified")
+    with pytest.raises(ValueError,match="artifact_digest_mismatch"):
+        prepare_evaluation(tmp_path,"first")
+    assert not (tmp_path/"evaluations").exists()
+    assert (tmp_path/"report.json").read_bytes()==original
+
+def test_retained_evaluation_rejects_modified_suite(tmp_path):
+    import pytest
+    from scripts.control_ai_stronger_adaptation import prepare_evaluation
+    _retained_evaluation(tmp_path)
+    (tmp_path/"generation-evaluation.jsonl").write_text("different")
+    with pytest.raises(ValueError,match="artifact_digest_mismatch"):
+        prepare_evaluation(tmp_path,"first")
+    assert not (tmp_path/"evaluations").exists()
