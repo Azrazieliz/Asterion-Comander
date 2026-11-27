@@ -136,11 +136,23 @@ final class ControlVpnVerification {
 
     /** Must run off UI thread and only after an explicit owner button press. */
     static JSONObject measure(Context context, boolean baseline) throws Exception {
+        if(!MEASURING.compareAndSet(false,true))throw new IllegalStateException("vpn_measurement_already_active");
+        try{return measureShort(context,baseline);}finally{MEASURING.set(false);}
+    }
+    private static JSONObject measureShort(Context context,boolean baseline)throws Exception{
         RouteSnapshot beforeRoute=new RouteSnapshot(context);
         JSONObject vpn=ControlPrivateVpn.status(context);
         boolean active=vpn.optBoolean("active",false);
         if(baseline&&(active||beforeRoute.vpn))throw new IllegalStateException("Disconnect active VPN before baseline");
         if(!baseline&&(!active||!beforeRoute.vpn))throw new IllegalStateException("No active Asterion WireGuard network route");
+        if(!beforeRoute.validated||!VpnEvidencePolicy.knownTransport(beforeRoute.transport))
+            throw new IllegalStateException("validated_known_network_required");
+        if(!baseline&&!VpnEvidencePolicy.fullRoute(beforeRoute.vpn,beforeRoute.validated,
+            beforeRoute.default4,beforeRoute.default6,beforeRoute.dns))
+            throw new IllegalStateException("full_vpn_route_not_observed");
+        SharedPreferences prefs=context.getSharedPreferences(PREFS,Context.MODE_PRIVATE);
+        if(baseline&&!prefs.edit().remove("baseline_timestamp_ms").commit())
+            throw new IllegalStateException("old_baseline_invalidation_failed");
         String ip=fetchPublicIp(beforeRoute.network,false);
         String ipv6="",ipv6State="observed";
         try{ipv6=fetchPublicIp(beforeRoute.network,true);}catch(Exception unavailable){ipv6State="unavailable";}
@@ -153,7 +165,6 @@ final class ControlVpnVerification {
             throw new IllegalStateException("Network changed during measurement; repeat the test");
         long now=System.currentTimeMillis();
         boolean peer=afterVpn.optBoolean("peer_reachability_verified",false);
-        SharedPreferences prefs=context.getSharedPreferences(PREFS,Context.MODE_PRIVATE);
         JSONObject result=new JSONObject()
             .put("ok",true)
             .put("test_scope","owner_requested_bound_network_ipv4_ipv6_route_and_short_https_throughput")
@@ -189,7 +200,8 @@ final class ControlVpnVerification {
         long age=now-prefs.getLong("baseline_timestamp_ms",0);
         boolean valid=!oldIp.isEmpty()&&VpnEvidencePolicy.comparable(
             prefs.getString("baseline_transport","unknown"),beforeRoute.transport,age,BASELINE_MAX_AGE_MS);
-        boolean route=beforeRoute.vpn&&beforeRoute.validated;
+        boolean route=VpnEvidencePolicy.fullRoute(beforeRoute.vpn,beforeRoute.validated,
+            beforeRoute.default4,beforeRoute.default6,beforeRoute.dns);
         boolean different=VpnEvidencePolicy.exitReplaced(valid,route,peer,oldIp,ip);
         result.put("phase","tunnel_check").put("baseline_available",valid)
             .put("ip_replacement_verified",different)
@@ -225,6 +237,9 @@ final class ControlVpnVerification {
                 throw new IllegalStateException("validated_known_network_required");
             if(baseline?(active||initial.vpn):(!active||!initial.vpn))
                 throw new IllegalStateException("incorrect_vpn_measurement_phase");
+            if(!baseline&&!VpnEvidencePolicy.fullRoute(initial.vpn,initial.validated,
+                initial.default4,initial.default6,initial.dns))
+                throw new IllegalStateException("full_vpn_route_not_observed");
             SharedPreferences prefs=context.getSharedPreferences(PREFS,Context.MODE_PRIVATE);
             if(baseline&&!prefs.edit().remove("long_timestamp_ms").commit())
                 throw new IllegalStateException("old_baseline_invalidation_failed");
@@ -290,7 +305,9 @@ final class ControlVpnVerification {
             boolean comparable=VpnEvidencePolicy.comparable(prefs.getString("long_transport","unknown"),
                 initial.transport,now-prefs.getLong("long_timestamp_ms",0),SUSTAINED_BASELINE_AGE)&&
                 !previous.isEmpty()&&Double.isFinite(old)&&old>0;
-            boolean replaced=VpnEvidencePolicy.exitReplaced(comparable,initial.vpn&&initial.validated,peer,previous,ip);
+            boolean replaced=VpnEvidencePolicy.exitReplaced(comparable,
+                VpnEvidencePolicy.fullRoute(initial.vpn,initial.validated,initial.default4,initial.default6,initial.dns),
+                peer,previous,ip);
             double ratio=VpnEvidencePolicy.ratio(old,mbps);
             return result.put("baseline_available",comparable).put("ip_replacement_verified",replaced)
                 .put("speed_ratio",comparable?ratio:JSONObject.NULL)
