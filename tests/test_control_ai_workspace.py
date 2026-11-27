@@ -183,3 +183,15 @@ def test_capability_registry_keeps_knowledge_declarative_and_marks_missing_categ
     extension=(ROOT/'docs/CONTROL_PARTNER_KNOWLEDGE_EXTENSION_20261127.md').read_text(encoding="utf-8")
     assert 'at most 40 entries' in extension
     assert 'does not grant any operation authority' in extension
+
+
+def test_native_calculator_runs_real_bounded_arithmetic(tmp_path):
+    compiler=shutil.which("javac");runtime=shutil.which("java")
+    if not compiler or not runtime:pytest.skip("JDK required")
+    subprocess.run([compiler,"-encoding","UTF-8","-d",str(tmp_path),
+        str(JAVA/"AssistantStructured.java"),str(JAVA/"AssistantCalculator.java"),
+        str(ROOT/"tests/java/com/asterion/control/AssistantCalculatorTest.java")],
+        check=True,capture_output=True,text=True)
+    result=subprocess.run([runtime,"-cp",str(tmp_path),"com.asterion.control.AssistantCalculatorTest"],
+        check=True,capture_output=True,text=True,timeout=10)
+    assert "Native calculator behavior passed" in result.stdout
