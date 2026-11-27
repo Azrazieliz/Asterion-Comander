@@ -210,13 +210,20 @@ def train_adapter(args):
         return {"input_ids":padded("input_ids",tokenizer.pad_token_id),
                 "attention_mask":padded("attention_mask",0),"labels":padded("labels",-100)}
     out.mkdir(parents=True,exist_ok=False)
+    # Retain exact training plan before the first step, and bounded checkpoint
+    # weights during long runs; an interrupted checkpoint is not a certified adapter.
+    plan={**manifest,"base_revision_declared":args.revision,"base_files_sha256":hashes,
+          "training_arguments":vars(args),"trainable_sha256_before":before,
+          "status":"training_started","production_replaced":False,"maturity_certified":False}
+    (out/"training-plan.json").write_text(json.dumps(plan,indent=2),encoding="utf-8")
+    checkpoint_steps=getattr(args,"save_steps",0)
     trainer=Trainer(model=model,train_dataset=encoded,data_collator=collate,
         args=TrainingArguments(output_dir=str(out/"checkpoints"),
             per_device_train_batch_size=1,gradient_accumulation_steps=getattr(args,"accumulate",8),
             gradient_checkpointing=True,num_train_epochs=args.epochs,
             max_steps=getattr(args,"max_steps",-1),use_cpu=device=="cpu",
             learning_rate=getattr(args,"learning_rate",1e-4),bf16=bf16,fp16=device=="cuda" and not bf16,logging_steps=1,
-            save_strategy="epoch",save_total_limit=2,report_to=[],
+            save_strategy="steps" if checkpoint_steps else "epoch",save_steps=checkpoint_steps or 500,save_total_limit=2,report_to=[],
             remove_unused_columns=False,seed=42))
     metrics=trainer.train().metrics
     del trainer
@@ -296,6 +303,7 @@ def main():
             q.add_argument("--threads",type=int,default=4)
             q.add_argument("--memory-budget-mib",type=int,default=0)
             q.add_argument("--max-steps",type=int,default=-1)
+            q.add_argument("--save-steps",type=int,default=0)
             q.add_argument("--rank",type=int,default=16)
             q.add_argument("--accumulate",type=int,default=8)
             q.add_argument("--learning-rate",type=float,default=1e-4)
@@ -313,6 +321,7 @@ def main():
             raise ValueError("invalid training budget")
         if not 1<=a.threads<=8 or not 1<=a.rank<=128 or not 1<=a.accumulate<=32 or not 0<a.learning_rate<=0.01:
             raise ValueError("invalid_training_resource_budget")
+        if not 0<=a.save_steps<=10000:raise ValueError("invalid_checkpoint_interval")
         if not re.fullmatch(r"(?:all-linear|[A-Za-z_][A-Za-z0-9_]*(?:,[A-Za-z_][A-Za-z0-9_]*)*)",a.target_modules):
             raise ValueError("invalid_adapter_modules")
         if bool(a.preferences)!=bool(a.preference_steps) or not 0<=a.preference_steps<=100000:

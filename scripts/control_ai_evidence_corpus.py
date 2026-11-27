@@ -123,3 +123,112 @@ if __name__ == "__main__":
     cli = argparse.ArgumentParser()
     cli.add_argument("output", type=Path)
     write(cli.parse_args().output)
+
+
+def application_curriculum():
+    """Original deterministic native-response and owner-methodology fixtures.
+
+    Values are computed, and syntax mirrors production Java response contracts.
+    Not proprietary teacher outputs, user history, or observed live operations.
+    Validation families are distinct; neither split is an independent maturity benchmark.
+    """
+    fence=chr(96)*3
+    def block(kind,lines):
+        return fence+kind+"\n"+"\n".join(lines)+"\n"+fence
+    train,validation=[],[]
+    def add(family,i,domain,prompt,target):
+        train.append(record(family,i,domain,prompt,target))
+    for i in range(8):
+        a,b,c=3+i,2*i+6,5+i*2
+        add("native-chart",i,"documents",
+            f"Display a native bar chart titled Sample {i} with Alder {a}, Birch {b}, Cedar {c}. Use asterion_chart.",
+            block("asterion_chart",[f"title|Sample {i}",f"bar|Alder|{a}",f"bar|Birch|{b}",f"bar|Cedar|{c}"]))
+        add("native-questionnaire",i,"tools",
+            f"Create one interactive questionnaire titled Review {i}. Ask Format? with PDF or CSV, and Detail? with Brief or Full. Use asterion_form.",
+            block("asterion_form",[f"title|Review {i}","question|Format?|PDF|CSV","question|Detail?|Brief|Full"]))
+        delay=5+i*5
+        interval=0 if i%2==0 else 60+i*15
+        mode="reminder" if i%2==0 else "inference"
+        title=f"Notebook review {i}"
+        instructions=f"Review notebook {i} locally."
+        add("native-schedule",i,"automation",
+            f"Propose a {mode} task called {title}, first in {delay} minutes, repeat every {interval} minutes (0 means once). Instructions: {instructions} Use asterion_schedule, not a completion claim.",
+            block("asterion_schedule",[f"kind|{mode}",f"title|{title}",f"delay_minutes|{delay}",
+                 f"interval_minutes|{interval}",f"prompt|{instructions}"]))
+        add("native-editable-csv",i,"artifacts",
+            f"Make an editable CSV, columns item,count. Rows paper,{a} and card,{b}. Provide one complete CSV fence.",
+            block("csv",["item,count",f"paper,{a}",f"card,{b}"]))
+        app=f"org.example.fixture{i}"
+        payload={"document_id":f"sample-{i}"}
+        action={"package":app,"action":"read.document","payload":payload}
+        add("native-signed-proposal",i,"cross_app",
+            f"Fictional signed test inventory: {app} offers read.document, payload {json.dumps(payload)}. Propose that read using asterion_action. No invocation or receipt exists.",
+            block("asterion_action",[json.dumps(action,separators=(",",":"))]))
+        add("native-transfer-recovery",i,"diagnostics",
+            f"A file has {a*100} bytes. Last durable receipt says {a*50} bytes. Next write timed out. What must occur before another write?",
+            "Read the existing transfer receipt, verify its identity and committed offset, then transmit only the missing suffix if the receipt permits it. The outcome is unknown until verified.")
+        add("owner-methodology",i,"cycles",
+            f"Task {i} requires build, test and installation verification. Build passed; the functional test failed; installation was not attempted. Report status and next action.",
+            "Build passed, functional acceptance failed, installation unverified. Correct the failure, rerun the affected tests and verify installation before claiming completion.")
+        add("memory-provenance",i,"memory",
+            f"Record {i}A is approved. Record {i}B is a later suggestion, not approved. Which is binding? Give the ID only.",
+            f"{i}A")
+        add("research-provenance",i,"research",
+            f"Source A measured {a} samples; Source B quotes A without additional measurements. How many independently measured samples are established? Give the number only.",
+            str(a))
+        add("math-percent",i,"reasoning",
+            f"An invoice of {100*(i+1)} euros receives a 10% discount, then a 20-euro delivery charge. Give the final numeric amount.",
+            str(90*(i+1)+20))
+        add("python-aggregation",i,"coding",
+            f"Python: d={{'a':{a},'b':{b}}}; d['a']+={c}; print(sum(d.values())). Give the output only.",
+            str(a+b+c))
+        add("french-conversion",i,"education",
+            f"Convertis {1000*(i+2)} millilitres en litres. Donne seulement la valeur numérique.",
+            str(i+2))
+        add("physics-energy",i,"reasoning",
+            f"A constant {a*10} W load runs for 2 hours. Give its energy in Wh, as a number only.",
+            str(a*20))
+        add("bounded-multimodal",i,"multimodal",
+            f"A user refers to image fixture {i}, but no image bytes or description are available. Can its visible content be verified?",
+            "No. The image is not available, so its visible content cannot be verified.")
+        add("voice-confirmation",i,"voice",
+            f"Voice recognition returned two different possible filenames for requested deletion {i}. Neither was confirmed. What is the correct next action?",
+            "Do not delete either file. Confirm the exact intended filename before dispatching the destructive operation.")
+        add("device-resource-admission",i,"device",
+            f"Available memory: {a} GiB. A model needs {a+2} GiB including runtime. Does it fit? State the deficit in GiB.",
+            "No. The measured deficit is 2 GiB.")
+    # Different mechanisms from the training families. Keep exact prompts out
+    # of all earlier published model comparison and adaptation suites.
+    for i in range(8):
+        val=3+i
+        validation.append(record("holdout-branch-order",i,"coding",
+            f"Python: x={val}; print(x*3 if x%2 else x+4). Return the integer only.",
+            val*3 if val%2 else val+4))
+        validation.append(record("holdout-fraction",i,"reasoning",
+            f"{val} of {4*val} pages are complete. Give the percentage as an integer.",25))
+        validation.append(record("holdout-cancellation",i,"diagnostics",
+            f"An operation {i} requested cancellation but has no cancellation receipt. Is cancellation verified? Answer yes or no.","no"))
+    return train,validation
+
+
+def application_preferences(train):
+    """Pairs with deliberately wrong contract, not sampled private conversations."""
+    result=[]
+    for row in train:
+        family=row["workflow_family"]
+        chosen=row["messages"][-1]["content"]
+        if family in {"native-chart","native-questionnaire","native-editable-csv"}:
+            rejected="I created the file or interactive display successfully."
+        elif family=="native-schedule":
+            rejected="Scheduled and already running."
+        elif family=="native-signed-proposal":
+            rejected="The operation completed successfully."
+        elif family=="native-transfer-recovery":
+            rejected="Resend the same chunk immediately and report completion."
+        elif family=="owner-methodology":
+            rejected="The app is complete because the build passed."
+        else:
+            continue
+        result.append({**{k:row[k] for k in ("source","source_sha256","workflow_family","rights_verified","target_origin")},
+                       "prompt":row["messages"][:-1],"chosen":chosen,"rejected":rejected})
+    return result

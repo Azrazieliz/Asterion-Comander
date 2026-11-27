@@ -27,7 +27,7 @@ def corpus():
         ("documents","Produce a Markdown heading and two bullet points for a project handover.",
          "# Handover\n- Confirm the current revision.\n- Record outstanding verification."),
         ("artifacts","Create an editable CSV of three samples: amber 3, green 7, blue 2.",
-         "~~~csv\nsample,count\namber,3\ngreen,7\nblue,2\n~~~"),
+         (chr(96)*3)+"csv\nsample,count\namber,3\ngreen,7\nblue,2\n"+(chr(96)*3)),
         ("coding","Explain why a parser should reject unexpected fields in a privileged action request.",
          "Unexpected fields can change the interpretation of a request. Validate the entire schema before authorization and dispatch."),
         ("automation","A scheduled job is disabled. A user asks whether it executed today, but there is no execution log.",
@@ -69,7 +69,7 @@ def corpus():
 def dump(path, value):
     path.write_text(json.dumps(value,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
 
-def run(root):
+def run(root,expanded=False):
     import psutil
     from huggingface_hub import HfApi,snapshot_download
     root=root.resolve();root.mkdir(parents=True,exist_ok=False)
@@ -105,18 +105,31 @@ def run(root):
         if quant.get("quant_method")!="bitsandbytes" or quant.get("bnb_4bit_quant_type")!="nf4":
             raise ValueError("expected_prequantized_nf4")
         train,hold=corpus()
+        preference_path=None
+        if expanded:
+            from scripts.control_ai_evidence_corpus import application_curriculum,application_preferences
+            more,validation=application_curriculum()
+            # Preserve the earlier diagnostic examples; the new contract-based
+            # fixtures add practical behavior without touching public evaluations.
+            for row in train:row["workflow_family"]="original-diagnostic-training"
+            for row in hold:row["workflow_family"]="original-diagnostic-validation"
+            train+=more;hold+=validation
+            preference_path=root/"preferences.jsonl"
+            preference_path.write_text("".join(json.dumps(x,ensure_ascii=False)+"\n" for x in application_preferences(more)),encoding="utf-8")
         for name,rows in (("train",train),("holdout",hold)):
             (root/(name+".jsonl")).write_text("".join(json.dumps(x,ensure_ascii=False)+"\n" for x in rows),encoding="utf-8")
         validate(root/"train.jsonl",root/"holdout.jsonl")
         # Freeze independent generation cases before fitting.
         suite=root/"generation-evaluation.jsonl"
         suite.write_text("".join(json.dumps(x,sort_keys=True,ensure_ascii=False)+"\n" for x in cases()),encoding="utf-8")
-        report.update(state="training",suite_sha256=file_hash(suite),train_rows=len(train),holdout_rows=len(hold));save()
+        report.update(state="training",curriculum="native_application_v1" if expanded else "diagnostic",suite_sha256=file_hash(suite),train_rows=len(train),holdout_rows=len(hold),step_budget=48 if expanded else 12,private_owner_data=False);save()
         args=[sys.executable,"-m","scripts.control_ai_adaptation","train","--base",str(snapshot),
               "--revision",model.sha,"--train",str(root/"train.jsonl"),"--holdout",str(root/"holdout.jsonl"),
               "--output",str(root/"candidate"),"--device","cpu","--precision","nf4",
               "--memory-budget-mib",str(budget),"--context","256","--rank","8","--accumulate","1",
-              "--max-steps","12","--target-modules","q_proj,v_proj","--threads","4"]
+              "--max-steps","48" if expanded else "12","--target-modules","q_proj,v_proj","--threads","4","--save-steps","4"]
+        # SFT is the priority. Preference pairs are preserved for a subsequent
+        # reviewed optimization pass rather than doubling this CPU run budget.
         subprocess.run(args,check=True)
         manifest=json.loads((root/"candidate/candidate.json").read_text())
         if not manifest["weights_changed"] or file_hash(suite)!=report["suite_sha256"]:
@@ -158,4 +171,4 @@ def run(root):
         report.update(state="blocked_or_failed",error=str(e)[:1000]);save();raise
 
 if __name__=="__main__":
-    run(Path(sys.argv[1]))
+    run(Path(sys.argv[1]),expanded="--curriculum" in sys.argv[2:])
