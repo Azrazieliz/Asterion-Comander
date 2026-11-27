@@ -36,7 +36,8 @@ import javax.crypto.spec.GCMParameterSpec;
  * The ONE Control password vault. All username, password and site information
  * is encrypted at rest with a private AndroidKeyStore AES-256-GCM key.
  * No AI tool, Windows RPC, browser JavaScript bridge, HTTP request, log or
- * backup/export route is allowed to read these secrets.
+ * remote backup/export route is allowed to read these secrets.
+ * Owner-local portable archives are separately encrypted with a passphrase.
  *
  * Deliberately local: OS Autofill is separate, opt-in through system Settings.
  * Android CredentialManager/passkey-provider behavior must be accepted on
@@ -246,6 +247,68 @@ final class ControlPasswordVault {
                 throw new IllegalStateException("Vault delete not committed");
             return true;
         }
+    }
+    /** Local UI only, after a fresh Android credential confirmation. No plaintext file. */
+    static byte[] exportEncrypted(Context c,char[] passphrase)throws Exception{
+        byte[] plain;
+        synchronized(LOCK){
+            requireAccess(c);
+            org.json.JSONArray items=new org.json.JSONArray();
+            for(Map.Entry<String,?> entry:preferences(c).getAll().entrySet()){
+                if(!entry.getKey().startsWith(PREFIX))continue;
+                if(!(entry.getValue() instanceof String)||items.length()>=256)
+                    throw new IllegalStateException("Vault archive entry budget exceeded");
+                JSONObject data=new JSONObject(decrypt((String)entry.getValue()));
+                if(!entry.getKey().equals(itemKey(exactOrigin(data.getString("origin")),data.getString("username"))))
+                    throw new IllegalStateException("Vault entry identity mismatch");
+                items.put(data);
+            }
+            plain=new JSONObject().put("schema","asterion.control.vault-portable/1").put("entries",items)
+                .toString().getBytes(StandardCharsets.UTF_8);
+        }
+        try{return VaultArchive.seal(plain,passphrase);}
+        finally{java.util.Arrays.fill(plain,(byte)0);}
+    }
+    /** Verify/decrypt entire archive and prepare every new sealed entry before
+     * committing one merge. Never replace existing credentials or cookie state. */
+    static int[] importEncrypted(Context c,byte[] archive,char[] passphrase)throws Exception{
+        byte[] plain=VaultArchive.open(archive,passphrase);
+        try{
+            JSONObject data=new JSONObject(new String(plain,StandardCharsets.UTF_8));
+            if(data.length()!=2||!"asterion.control.vault-portable/1".equals(data.getString("schema")))
+                throw new IllegalArgumentException("Unsupported archive schema");
+            org.json.JSONArray items=data.getJSONArray("entries");
+            if(items.length()>256)throw new IllegalArgumentException("Archive entry budget exceeded");
+            synchronized(LOCK){
+                requireAccess(c);
+                SharedPreferences prefs=preferences(c);
+                java.util.LinkedHashMap<String,String> additions=new java.util.LinkedHashMap<>();
+                java.util.HashSet<String> seen=new java.util.HashSet<>();
+                int skipped=0;
+                for(int i=0;i<items.length();i++){
+                    JSONObject item=items.getJSONObject(i);
+                    if(!(item.opt("origin") instanceof String)||!(item.opt("username") instanceof String)||
+                       !(item.opt("password") instanceof String)||item.length()!=4||
+                       !(item.opt("updated_ms") instanceof Number))
+                        throw new IllegalArgumentException("Invalid archive entry");
+                    String origin=exactOrigin(item.getString("origin")),user=item.getString("username"),
+                        password=item.getString("password");
+                    if(!origin.equals(item.getString("origin"))||user.isBlank()||user.length()>256||
+                        password.isBlank()||password.length()>4096)
+                        throw new IllegalArgumentException("Invalid archived credential");
+                    String id=itemKey(origin,user);
+                    if(!seen.add(id))throw new IllegalArgumentException("Duplicate archive credential");
+                    if(prefs.contains(id)){skipped++;continue;}
+                    additions.put(id,encrypt(item.toString()));
+                }
+                // Refuse to start a write if device auth expired while validating.
+                requireAccess(c);
+                SharedPreferences.Editor editor=prefs.edit();
+                for(Map.Entry<String,String> item:additions.entrySet())editor.putString(item.getKey(),item.getValue());
+                if(!editor.commit())throw new IllegalStateException("Vault merge could not be confirmed");
+                return new int[]{additions.size(),skipped};
+            }
+        }finally{java.util.Arrays.fill(plain,(byte)0);}
     }
     static int count(Context context)throws Exception{
         synchronized(LOCK){

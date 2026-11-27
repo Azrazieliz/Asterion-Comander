@@ -58,7 +58,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  *
  * Runs in a dedicated Android process with its own WebView data-directory
  * suffix, isolated from Control's authenticated Windows dashboard WebView.
- * No JavaScript bridge, shell integration, silent downloads or credential export.
+ * No JavaScript bridge, shell integration, silent downloads or remote credential export.
  * Signed cross-app browser automation, richer profiles and PC crawler are separate
  * future capabilities; this Activity does not claim those are already delivered.
  */
@@ -99,6 +99,10 @@ public final class BrowserActivity extends Activity {
     private TextView status, counter, site;
     private static final int SITE_PERMISSION_CODE=4107;
     private static final int VAULT_AUTH_CODE=4108;
+    private static final int VAULT_EXPORT_FILE=4110,VAULT_IMPORT_FILE=4111,VAULT_ARCHIVE_AUTH=4112;
+    private Uri pendingArchive;
+    private boolean archiveExport,archiveBusy;
+    private final java.util.concurrent.ExecutorService vaultArchiveIo=java.util.concurrent.Executors.newSingleThreadExecutor();
     private Integer pendingVaultPolicy;
     private String pendingVaultOrigin;
     private SiteRequest pendingSiteRequest, androidPermissionInFlight;
@@ -1086,6 +1090,29 @@ public final class BrowserActivity extends Activity {
     }
     @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){
         super.onActivityResult(requestCode,resultCode,data);
+        if(requestCode==VAULT_EXPORT_FILE||requestCode==VAULT_IMPORT_FILE){
+            pendingArchive=null;
+            if(resultCode!=RESULT_OK||data==null||data.getData()==null)return;
+            Uri selected=data.getData();
+            if(!"content".equals(selected.getScheme())){notice("Document provider required");return;}
+            KeyguardManager manager=getSystemService(KeyguardManager.class);
+            if(manager==null||!manager.isDeviceSecure()){notice("Set an Android device lock first");return;}
+            Intent confirm=manager.createConfirmDeviceCredentialIntent("Asterion Vault","Confirm access to the encrypted portable archive.");
+            if(confirm==null){notice("Android device confirmation unavailable");return;}
+            pendingArchive=selected;archiveExport=requestCode==VAULT_EXPORT_FILE;
+            try{startActivityForResult(confirm,VAULT_ARCHIVE_AUTH);}
+            catch(Exception unavailable){pendingArchive=null;notice("Could not open credential confirmation");}
+            return;
+        }
+        if(requestCode==VAULT_ARCHIVE_AUTH){
+            Uri selected=pendingArchive;pendingArchive=null;
+            if(selected==null||resultCode!=RESULT_OK||isFinishing())return;
+            try{
+                ControlPasswordVault.confirmDeviceAuth(this,-1);
+                archivePassphrase(selected,archiveExport);
+            }catch(Exception failure){notice("Archive authorization unavailable");}
+            return;
+        }
         if(requestCode!=VAULT_AUTH_CODE)return;
         Integer policy=pendingVaultPolicy;String origin=pendingVaultOrigin;
         pendingVaultPolicy=null;pendingVaultOrigin=null;
@@ -1127,7 +1154,7 @@ public final class BrowserActivity extends Activity {
         try{
             List<ControlPasswordVault.Entry> accounts=
                 ControlPasswordVault.accounts(this,origin);
-            String[] actions=new String[accounts.size()+5];
+            String[] actions=new String[accounts.size()+6];
             for(int i=0;i<accounts.size();i++)
                 actions[i]="Saved account • "+accounts.get(i).username;
             actions[accounts.size()]="Add HTTPS login";
@@ -1135,6 +1162,7 @@ public final class BrowserActivity extends Activity {
             actions[accounts.size()+2]="Device authentication and timeout";
             actions[accounts.size()+3]="Lock vault now";
             actions[accounts.size()+4]="Android passkeys and credential providers";
+            actions[accounts.size()+5]="Encrypted vault import / export";
             new AlertDialog.Builder(this).setTitle("Encrypted Vault • "+origin)
                 .setMessage("One Android Keystore-encrypted vault. Existing authorized website cookies are kept. Passwords are never sent to AI, Windows or logs.")
                 .setItems(actions,(d,choice)->{
@@ -1154,6 +1182,7 @@ public final class BrowserActivity extends Activity {
                     else if(choice==accounts.size()+1)enableSystemAutofill();
                     else if(choice==accounts.size()+2)showVaultProtection(origin);
                     else if(choice==accounts.size()+4)openCredentialProviderSettings();
+                    else if(choice==accounts.size()+5)showVaultArchive();
                     else if(ControlPasswordVault.authTimeout(this)>0){
                         ControlPasswordVault.lock();notice("Vault locked");
                     }else notice("Enable device authentication first");
@@ -1203,6 +1232,83 @@ public final class BrowserActivity extends Activity {
                 password.setText("");
             }).show();
     }
+    private void showVaultArchive(){
+        if(archiveBusy||pendingArchive!=null){notice("Archive operation already active");return;}
+        new AlertDialog.Builder(this).setTitle("Encrypted portable vault")
+            .setItems(new String[]{"Export encrypted archive","Import without overwriting existing logins"},(d,index)->{
+                try{
+                    Intent picker;
+                    if(index==0){
+                        picker=new Intent(Intent.ACTION_CREATE_DOCUMENT).setType("application/octet-stream");
+                        picker.putExtra(Intent.EXTRA_TITLE,"asterion-vault.astvault");
+                    }else picker=new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*");
+                    picker.addCategory(Intent.CATEGORY_OPENABLE);
+                    startActivityForResult(picker,index==0?VAULT_EXPORT_FILE:VAULT_IMPORT_FILE);
+                }catch(Exception failure){notice("Document provider unavailable");}
+            }).setNegativeButton("Cancel",null).show();
+    }
+    private EditText archiveSecret(String hint){
+        EditText field=new EditText(this);field.setHint(hint);field.setSingleLine(true);
+        field.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        field.setSaveEnabled(false);field.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
+        return field;
+    }
+    private void archivePassphrase(Uri uri,boolean export){
+        LinearLayout form=DesignSystem.vertical(this);form.setPadding(dp(24),dp(8),dp(24),dp(8));
+        add(form,label(export?"Use a unique passphrase of at least 12 characters. The selected provider receives only encrypted bytes; a cancelled export may leave an empty file.":"Only authenticated Asterion archive files are accepted. Existing logins will not be overwritten.",13,DesignSystem.MUTED,false));
+        EditText secret=archiveSecret("Archive passphrase");add(form,secret);
+        EditText repeat=archiveSecret("Confirm passphrase");if(export)add(form,repeat);
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle(export?"Encrypt vault archive":"Decrypt and merge vault")
+            .setView(form).setNegativeButton("Cancel",null).setPositiveButton(export?"Export":"Import",null).create();
+        long approvedAt=android.os.SystemClock.elapsedRealtime();
+        dialog.setOnDismissListener(d->{secret.setText("");repeat.setText("");});
+        dialog.show();
+        dialog.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
+            if(android.os.SystemClock.elapsedRealtime()-approvedAt>120000||
+                !ControlPasswordVault.canAccess(this)){dialog.dismiss();notice("Archive authorization expired; select the file again");return;}
+            char[] pass=new char[secret.length()];
+            secret.getText().getChars(0,secret.length(),pass,0);
+            char[] second=new char[repeat.length()];repeat.getText().getChars(0,repeat.length(),second,0);
+            boolean valid=pass.length>=12&&pass.length<=256&&(!export||java.util.Arrays.equals(pass,second));
+            java.util.Arrays.fill(second,'\0');
+            if(!valid){java.util.Arrays.fill(pass,'\0');secret.setError("Use 12–256 characters"+(export?" and matching confirmation":""));return;}
+            if(archiveBusy){java.util.Arrays.fill(pass,'\0');return;}
+            archiveBusy=true;dialog.dismiss();
+            vaultArchiveIo.execute(()->{
+                String outcome;
+                try{
+                    if(export){
+                        byte[] sealed=ControlPasswordVault.exportEncrypted(this,pass);
+                        try(java.io.OutputStream out=getContentResolver().openOutputStream(uri,"wt")){
+                            if(out==null)throw new java.io.IOException("no_output_stream");
+                            out.write(sealed);out.flush();
+                        }
+                        try(java.io.InputStream in=getContentResolver().openInputStream(uri)){
+                            if(in==null||!MessageDigest.isEqual(sealed,in.readNBytes(sealed.length+1)))
+                                throw new java.io.IOException("archive_readback_mismatch");
+                        }
+                        outcome="Encrypted archive saved and byte-verified. Keep its passphrase separately.";
+                    }else{
+                        byte[] sealed;
+                        try(java.io.InputStream in=getContentResolver().openInputStream(uri)){
+                            if(in==null)throw new java.io.IOException("no_input_stream");
+                            sealed=in.readNBytes(VaultArchive.MAX_BYTES+1);
+                        }
+                        int[] counts=ControlPasswordVault.importEncrypted(this,sealed,pass);
+                        outcome="Imported "+counts[0]+" new logins; "+counts[1]+" existing logins preserved.";
+                    }
+                }catch(Exception failure){
+                    outcome=export?"Archive export not verified; selected file may be incomplete.":"Archive could not be authenticated or merge could not be confirmed.";
+                }finally{java.util.Arrays.fill(pass,'\0');}
+                String report=outcome;runOnUiThread(()->{
+                    archiveBusy=false;if(!isFinishing()&&!isDestroyed())
+                        new AlertDialog.Builder(this).setTitle("Encrypted vault archive").setMessage(report).setPositiveButton("Close",null).show();
+                });
+            });
+        });
+    }
+
     private void openCredentialProviderSettings(){
         new AlertDialog.Builder(this).setTitle("Android passkeys")
             .setMessage("Manage passkeys through the Android credential provider. In-app third-party website passkeys require provider approval and have not been verified for Asterion Control. No passkeys are copied into the Control vault.")
@@ -1257,7 +1363,8 @@ public final class BrowserActivity extends Activity {
             tab.web.stopLoading();
             tab.web.destroy();releasePrivate(tab);
         }
-        tabs.clear();
+        tabs.clear();pendingArchive=null;
+        vaultArchiveIo.shutdown();
         super.onDestroy();
     }
     private void releasePrivate(BrowserTab tab){

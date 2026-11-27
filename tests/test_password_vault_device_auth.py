@@ -42,3 +42,25 @@ def test_device_screen_off_invalidates_lease_and_provider_settings_are_honest():
     assert 'watchScreen(c)' in source
     assert 'android.settings.CREDENTIAL_PROVIDER' in browser
     assert 'third-party website passkeys require provider approval' in browser
+
+
+def test_portable_vault_archive_authenticated_encryption(tmp_path):
+    import shutil,subprocess,pytest
+    javac,java=shutil.which("javac"),shutil.which("java")
+    if not javac or not java:pytest.skip("JDK required")
+    subprocess.run([javac,"-encoding","UTF-8","-d",str(tmp_path),str(SRC/"VaultArchive.java"),
+        str(ROOT/"tests/java/com/asterion/control/VaultArchiveTest.java")],check=True,capture_output=True,text=True)
+    result=subprocess.run([java,"-cp",str(tmp_path),"com.asterion.control.VaultArchiveTest"],
+        check=True,capture_output=True,text=True,timeout=60)
+    assert "Vault archive authenticated encryption passed" in result.stdout
+
+def test_archive_is_local_fresh_confirmed_and_no_overwrite():
+    vault=(SRC/"ControlPasswordVault.java").read_text(encoding="utf-8")
+    browser=(SRC/"BrowserActivity.java").read_text(encoding="utf-8")
+    assert 'if(prefs.contains(id)){skipped++;continue;}' in vault
+    assert 'if(!seen.add(id))throw' in vault
+    assert 'additions.put(id,encrypt(item.toString()))' in vault
+    assert 'VAULT_ARCHIVE_AUTH' in browser and 'createConfirmDeviceCredentialIntent' in browser
+    assert 'Intent.ACTION_CREATE_DOCUMENT' in browser and 'Intent.ACTION_OPEN_DOCUMENT' in browser
+    assert 'MessageDigest.isEqual(sealed,in.readNBytes(sealed.length+1))' in browser
+    assert 'FLAG_SECURE' in browser
