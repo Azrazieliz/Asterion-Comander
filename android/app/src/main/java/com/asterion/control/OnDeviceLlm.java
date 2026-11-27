@@ -205,9 +205,9 @@ final class OnDeviceLlm {
     /** Only the signed APK profile determines the imported filename, length,
      * digest and adapter/base binding. No unsigned profile or arbitrary model
      * path can be supplied. The UI passes one explicit SAF document selection. */
-    static void importOwnerModelArtifact(Context context,android.net.Uri uri,boolean adapter,
+    static void importOwnerModelArtifact(Context context,java.util.List<android.net.Uri> documents,boolean adapter,
                                         InferenceGate.Request request,java.util.function.LongConsumer progress)throws Exception{
-        if(uri==null||!"content".equals(uri.getScheme()))throw new SecurityException("document_provider_required");
+        if(documents==null||documents.isEmpty())throw new SecurityException("document_provider_required");
         OnDeviceModelProfile profile=OnDeviceModelProfile.read(context);
         if(!profile.externalModelPack||(adapter&&profile.adapterFile.isEmpty()))
             throw new SecurityException("signed_profile_does_not_allow_import");
@@ -221,8 +221,7 @@ final class OnDeviceLlm {
                 long length=adapter?profile.adapterBytes:profile.bytes;
                 File file=new File(folder,name);
                 if(verifiedExisting(file,length,sha,request)){if(progress!=null)progress.accept(length);return;}
-                try(InputStream input=context.getContentResolver().openInputStream(uri)){
-                    if(input==null)throw new java.io.IOException("document_unavailable");
+                try(InputStream input=ModelPackDocuments.open(context,documents,name)){
                     copyArtifact(folder,file,input,length,sha,request,progress);
                 }
                 if(modelReady&&LIBRARY_LOADED){modelReady=false;nativeUnload();}
