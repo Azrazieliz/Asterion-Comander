@@ -178,4 +178,8 @@ def test_capability_registry_keeps_knowledge_declarative_and_marks_missing_categ
     assert 'installed_version_code' in bridge
     assert 'showPartnerKnowledge(pkg,label,bridge,approved)' in main
     assert 'Not published by this installed partner version.' in main
-    assert 'Approval alone' not in main or 'authorization alone' in main
+    assert 'authorization alone does not establish a working integration' in main
+    assert ' · Authorized' in main
+    extension=(ROOT/'docs/CONTROL_PARTNER_KNOWLEDGE_EXTENSION_20261127.md').read_text(encoding="utf-8")
+    assert 'at most 40 entries' in extension
+    assert 'does not grant any operation authority' in extension
