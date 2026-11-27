@@ -60,32 +60,35 @@ final class ControlFreeVpnProvisioner {
             feedback.accept("VPN enrollment is already active");
             return;
         }
+        final android.content.Context context=owner.getApplicationContext();
+        final String attempt;
+        try{attempt=ControlPrivateVpn.reserveProviderEnrollment(owner);}
+        catch(Exception e){
+            BUSY.set(false);
+            feedback.accept("Cannot start VPN enrollment: "+e.getClass().getSimpleName());
+            return;
+        }
         feedback.accept("Registering the phone with the free VPN provider…");
         IO.execute(()->{
-            String profile=null;
             String failure=null;
-            try{profile=registerOnPhone();}
-            catch(Exception e){failure=classify(e);}
-            final String completeProfile=profile;
+            try{
+                String profile=registerOnPhone();
+                // Persist the owner-authorized result even if the UI is paused.
+                // A manual import or newer configuration supersedes this attempt.
+                ControlPrivateVpn.completeProviderEnrollment(context,attempt,profile);
+            }catch(Exception e){
+                failure=classify(e);
+                ControlPrivateVpn.failProviderEnrollment(context,attempt);
+            }finally{BUSY.set(false);}
             final String failed=failure;
             UI.post(()->{
-                BUSY.set(false);
-                if(owner.isFinishing()||owner!=MainActivity.foregroundActivity())return;
-                if(completeProfile==null){
-                    feedback.accept("Free VPN enrollment unsuccessful: "+failed+
-                        ". Existing Control connectivity is unchanged.");
+                if(owner.isFinishing()||owner.isDestroyed()||owner!=MainActivity.foregroundActivity())return;
+                if(failed!=null){
+                    feedback.accept("Free VPN enrollment unsuccessful or unconfirmed: "+failed);
                     return;
                 }
-                try{
-                    // This path is owner-authorized, fully internal and already
-                    // Keystore-encrypted by the existing VPN controller.
-                    ControlPrivateVpn.importLocally(owner,completeProfile,true);
-                    feedback.accept("Free VPN profile securely provisioned on this phone.");
-                    connectedReady.run();
-                }catch(Exception e){
-                    feedback.accept("Provider enrolled but secure VPN setup failed: "+
-                        e.getClass().getSimpleName());
-                }
+                feedback.accept("Free VPN profile securely provisioned on this phone.");
+                connectedReady.run();
             });
         });
     }
