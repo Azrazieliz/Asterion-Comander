@@ -148,3 +148,21 @@ def test_embedded_tor_requires_actual_webview_exit_proof(tmp_path):
     assert source.index('v.evaluateJavascript(')<source.index('ready=true;go.setEnabled(true)')
     assert 'tor.getHttpTunnelPort()!=verifiedHttpPort' in source
     assert 'if(probing&&now>probeDeadline)' in source
+
+
+def test_browser_research_uses_shared_encrypted_sources_and_exact_comparison(tmp_path):
+    compiler=shutil.which("javac");runtime=shutil.which("java")
+    if not compiler or not runtime:pytest.skip("JDK required")
+    subprocess.run([compiler,"-encoding","UTF-8","-d",str(tmp_path),str(JAVA/"BrowserResearchText.java"),
+        str(ROOT/"tests/java/com/asterion/control/BrowserResearchTextTest.java")],check=True,capture_output=True,text=True)
+    result=subprocess.run([runtime,"-cp",str(tmp_path),"com.asterion.control.BrowserResearchTextTest"],check=True,capture_output=True,text=True,timeout=30)
+    assert "Browser source capture and comparison passed" in result.stdout
+    browser=(JAVA/"BrowserActivity.java").read_text(encoding="utf-8")
+    research=(JAVA/"BrowserResearchActivity.java").read_text(encoding="utf-8")
+    memory=(JAVA/"ControlAssistantMemory.java").read_text(encoding="utf-8")
+    assert 'pin&&tab.privateProfile!=null' in browser
+    assert 'expected.equals(record.optString("url"))' in browser
+    assert 'ControlAssistantMemory.importProjectSource' in research
+    assert 'ControlAssistantMemory.readProjectSource' in research
+    assert 'source_digest_mismatch' in memory and 'source_overlap_invalid' in memory
+    assert 'research_draft' in research

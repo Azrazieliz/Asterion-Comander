@@ -93,6 +93,8 @@ public final class AssistantActivity extends Activity {
         if(state!=null){draft=state.getString("draft","");composer.setText(draft);}
         speech=new TextToSpeech(this,result->{speechReady=result==TextToSpeech.SUCCESS;});
         session.listeners.add(observer);render();
+        String research=getIntent().getStringExtra("research_draft");getIntent().removeExtra("research_draft");
+        if(state==null&&research!=null){offerResearchDraft(research);return;}
         String previous=getSharedPreferences("control",MODE_PRIVATE).getString("assistant_last_conversation","");
         if(session.conversation.messages.isEmpty()&&!previous.isEmpty()&&ControlAssistantPreferences.saveHistory(this)){
             final String emptyId=session.conversation.id;
@@ -100,6 +102,18 @@ public final class AssistantActivity extends Activity {
                 runOnUiThread(()->{if(alive&&session.conversation.id.equals(emptyId)&&session.conversation.messages.isEmpty()){session.conversation=saved;render();}});
             }catch(Exception ignored){}});
         }
+    }
+    private void offerResearchDraft(String value){
+        if(value.length()>12000||!idle()||composer.length()>0){notice("Research handoff unavailable while a draft or response is active.");return;}
+        new AlertDialog.Builder(this).setTitle("Review browser research in new conversation")
+            .setMessage("Open a new Browser Research conversation and load the comparison draft? The existing conversation is retained if encrypted history is enabled. Nothing is sent automatically.")
+            .setPositiveButton("Prepare draft",(d,w)->{
+                if(!idle()||composer.length()>0)return;
+                session.save(this);
+                if(!session.persistenceIssue.isEmpty()){notice("Existing conversation could not be saved; handoff cancelled.");return;}
+                session.conversation=new AssistantConversation();session.conversation.project=BrowserResearchText.PROJECT;
+                session.status="";composer.setText(value);session.changed();
+            }).setNegativeButton("Cancel",null).show();
     }
     @Override protected void onSaveInstanceState(Bundle state){state.putString("draft",composer.getText().toString());super.onSaveInstanceState(state);}
     @Override protected void onDestroy(){alive=false;session.listeners.remove(observer);if(speech!=null){speech.stop();speech.shutdown();}super.onDestroy();}

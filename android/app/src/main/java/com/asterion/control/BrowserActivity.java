@@ -766,9 +766,14 @@ public final class BrowserActivity extends Activity {
         updater.post(runner[0]);
     }
 
-    private void extractVisiblePage() {
+    private void extractVisiblePage(){captureVisiblePage(false);}
+    private void pinResearchPage(){captureVisiblePage(true);}
+    private void captureVisiblePage(boolean pin) {
         BrowserTab tab=current();
         if(tab==null)return;
+        String expected=tab.committedUrl;
+        if(!BrowserNavigationPolicy.sameDocument(expected,tab.web.getUrl())){notice("Wait for a committed website page.");return;}
+        if(pin&&tab.privateProfile!=null){notice("Private browsing pages cannot be pinned persistently.");return;}
         String js="(function(){return JSON.stringify({url:location.href,title:document.title,"+
             "text:document.body?document.body.innerText.slice(0,32000):''," +
             "captured_utc:new Date().toISOString(),method:'visible_dom_text'});})()";
@@ -776,8 +781,27 @@ public final class BrowserActivity extends Activity {
             try {
                 String json=new JSONArray("["+encoded+"]").getString(0);
                 JSONObject record=new JSONObject(json);
+                if(isFinishing()||isDestroyed()||current()!=tab||!BrowserNavigationPolicy.sameDocument(expected,tab.committedUrl)||!expected.equals(tab.web.getUrl())||!expected.equals(record.optString("url"))){notice("Page changed during capture; retry.");return;}
                 String text=record.optString("text","");
                 if(text.isBlank()){notice("This page has no extractable visible text");return;}
+                if(pin){
+                    String safe=BrowserNavigationPolicy.sessionUrl(expected);
+                    if(BrowserNavigationPolicy.HOME.equals(safe))throw new IllegalArgumentException("Invalid capture URL");
+                    String title=record.optString("title","Page").replaceAll("[\\p{Cntrl}]"," ").strip();
+                    if(title.isEmpty())title="Page";
+                    title=title.substring(0,Math.min(title.length(),120));
+                    String capture=BrowserResearchText.capture(safe,title,text,System.currentTimeMillis());
+                    final String label=title;
+                    new AlertDialog.Builder(this).setTitle("Pin page to research board")
+                        .setMessage(safe+"\n\n"+text.substring(0,Math.min(500,text.length()))+
+                            "\n\nAn encrypted local copy will be retained. Website text may contain private information. Query and fragment are excluded from the recorded URL.")
+                        .setPositiveButton("Pin source",(d,w)->{
+                            if(!isFinishing()&&!isDestroyed()&&current()==tab&&expected.equals(tab.committedUrl)&&expected.equals(tab.web.getUrl()))
+                                startActivity(new Intent(this,BrowserResearchActivity.class).putExtra("capture",capture).putExtra("source_name",label));
+                            else notice("Page changed; capture not pinned.");
+                        }).setNegativeButton("Cancel",null).show();
+                    return;
+                }
                 byte[] digest=MessageDigest.getInstance("SHA-256").digest(
                     text.getBytes(StandardCharsets.UTF_8));
                 StringBuilder hash=new StringBuilder();
@@ -826,7 +850,7 @@ public final class BrowserActivity extends Activity {
             "Home","Search engine • "+providerName(),
             "Shields and trackers","Encrypted vault",
             "Bookmarks and history","Extract page evidence",
-            "Android downloads","Desktop site","Asterion assistant","New private tab","Tor network"};
+            "Android downloads","Desktop site","Asterion assistant","New private tab","Tor network","Pin page to research board","Research board"};
         new AlertDialog.Builder(this).setTitle("Asterion Browser")
             .setItems(actions,(d,choice)->{
                 switch(choice){
@@ -853,6 +877,8 @@ public final class BrowserActivity extends Activity {
                     case 8:startActivity(new Intent(this,AssistantActivity.class));break;
                     case 9:newPrivateTab();break;
                     case 10:showTorOptions();break;
+                    case 11:pinResearchPage();break;
+                    case 12:startActivity(new Intent(this,BrowserResearchActivity.class));break;
                 }
             }).setNegativeButton("Close",null).show();
     }

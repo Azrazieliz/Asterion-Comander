@@ -134,6 +134,38 @@ final class ControlAssistantMemory {
             return out;
         }
     }
+    /** Read one complete encrypted source, with exact span and digest checks. */
+    static String readProjectSource(Context c,String project,String id)throws Exception{
+        synchronized(LOCK){
+            Database helper=new Database(c.getApplicationContext());SecretKey secret=key();
+            try(SQLiteDatabase db=helper.getReadableDatabase()){
+                String digest;int chars,bytes;
+                try(Cursor row=db.rawQuery("SELECT sha256,chars,bytes FROM project_source WHERE id=? AND project=?",new String[]{id,project})){
+                    if(!row.moveToFirst())throw new IllegalArgumentException("source_missing");
+                    digest=row.getString(0);chars=row.getInt(1);bytes=row.getInt(2);
+                }
+                if(chars<1||bytes<1||bytes>ProjectSourceText.MAX_BYTES||chars>ProjectSourceText.MAX_BYTES)
+                    throw new IllegalStateException("source_size_invalid");
+                StringBuilder out=new StringBuilder(chars);int ordinal=0;
+                try(Cursor cursor=db.rawQuery("SELECT ordinal,start_char,end_char,nonce,payload FROM project_source_passage WHERE source_id=? ORDER BY ordinal",new String[]{id})){
+                    while(cursor.moveToNext()){
+                        int number=cursor.getInt(0),start=cursor.getInt(1),end=cursor.getInt(2);
+                        if(number!=ordinal++||start<0||start>out.length()||end<=out.length()||end>chars)
+                            throw new IllegalStateException("source_span_invalid");
+                        String part=openSource(secret,sourceAad(id,project,digest,number+":"+start+":"+end),cursor.getBlob(3),cursor.getBlob(4));
+                        if(part.length()!=end-start||!out.substring(start).equals(part.substring(0,out.length()-start)))
+                            throw new IllegalStateException("source_overlap_invalid");
+                        out.append(part.substring(out.length()-start));
+                    }
+                }
+                String result=out.toString();
+                if(result.length()!=chars||result.getBytes(StandardCharsets.UTF_8).length!=bytes||
+                    !BrowserResearchText.sha(result).equals(digest))
+                    throw new IllegalStateException("source_digest_mismatch");
+                return result;
+            }finally{helper.close();}
+        }
+    }
     static boolean deleteProjectSource(Context c,String project,String id){
         synchronized(LOCK){
             Database helper=new Database(c.getApplicationContext());
