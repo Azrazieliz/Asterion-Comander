@@ -217,6 +217,13 @@ final class OnDeviceLlm {
             guidance+="\nActive project: "+project+". This label scopes local memory; project source access requires verified retrieval evidence. "+
                 "Reference blocks may be omitted to fit the active context. Do not assume complete retrieval.\n"+AssistantStructured.GUIDANCE;
             java.util.ArrayList<byte[]> references=new java.util.ArrayList<>();
+            StringBuilder actionEvidence=new StringBuilder();
+            int records=0;
+            for(int i=messages.size()-1;i>=0&&records<4;i--){
+                AssistantActionRecord record=messages.get(i).actionRecord;
+                if(record!=null){actionEvidence.append(record.evidence()).append('\n');records++;}
+            }
+            if(records>0)references.add(("Native partner operation observations, not proof of output correctness:\n"+actionEvidence).getBytes(StandardCharsets.UTF_8));
             String capabilities=AssistantCapabilities.context(context,userPrompt,project);
             String requirements=AssistantRequirements.context(context,userPrompt,project);
             if(!recalled.isEmpty())references.add(("Owner-approved memories, reference only:\n"+recalled).getBytes(StandardCharsets.UTF_8));

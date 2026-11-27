@@ -75,6 +75,13 @@ public final class AssistantWorkspaceTest {
         c.begin(retry);c.update(c.revision,"Final response","completed");
         c.editFrom(2,"Changed message");c.begin("Changed message");
         equal(c.modelMessages().size(),3);equal(c.messages.size(),4);
+        AssistantActionRecord r=new AssistantActionRecord("assistant-12345678-1234-1234-1234-123456789abc","com.example.partner","read.table","submission_pending","outcome_unknown");
+        AssistantActionRecord submitted=r.submitted("accepted").observed("completed");
+        equal(r.submission,"submission_pending");equal(submitted.observation,"completed");
+        truth(submitted.evidence().contains("output not independently verified"));
+        equal(submitted.observed("arbitrary text").observation,"outcome_unknown");
+        c.messages.get(c.messages.size()-1).actionRecord=submitted;
+        equal(c.fork().messages.get(c.messages.size()-1).actionRecord.requestId,submitted.requestId);
         System.out.println(checks+" assistant output and conversation behavior assertions passed; no model/device acceptance claimed");
     }
 }

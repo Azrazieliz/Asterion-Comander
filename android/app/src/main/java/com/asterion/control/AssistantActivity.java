@@ -103,6 +103,7 @@ public final class AssistantActivity extends Activity {
     @Override protected void onSaveInstanceState(Bundle state){state.putString("draft",composer.getText().toString());super.onSaveInstanceState(state);}
     @Override protected void onDestroy(){alive=false;session.listeners.remove(observer);if(speech!=null){speech.stop();speech.shutdown();}super.onDestroy();}
     private void submit(){
+        if(!idle())return;
         String prompt=composer.getText().toString().trim();if(prompt.isEmpty())return;
         try{if(prompt.length()>OnDeviceModelProfile.read(this).inputChars){notice("This message exceeds the current model input budget. Attach a shorter excerpt.");return;}}
         catch(Exception e){notice("The installed model configuration could not be read.");return;}
@@ -115,6 +116,7 @@ public final class AssistantActivity extends Activity {
         title.setText(c.title);project.setText(c.project);
         model.setText("On device · "+ControlAssistantPreferences.effort(this));
         send.setText(c.running()?"Stop":"Send");
+        send.setEnabled(!session.busy()||c.running());
         status.setText(!session.persistenceIssue.isEmpty()?session.persistenceIssue:session.status);
         boolean atBottom=transcript.getChildCount()==0||body.getHeight()-transcript.getScrollY()-transcript.getHeight()<dp(120);
         boolean rebuild=drawnRevision!=c.revision||drawnCount!=c.messages.size()||drawnRunning!=c.running();
@@ -145,9 +147,12 @@ public final class AssistantActivity extends Activity {
                             tools.addView(control("Retry",this::retry));
                             tools.addView(control("Continue",()->{if(idle())session.send(this,"Continue the previous answer from where it ended, avoiding repetition.");}));
                         }
-                        try{JSONObject proposal=m.state.equals("completed")?AssistantCapabilities.proposal(m.text):null;if(proposal!=null)tools.addView(control("Review action",()->reviewAction(proposal)));}catch(Exception ignored){}
+                        if(m.actionRecord!=null){
+                            tools.addView(control("Check receipt",()->session.recheck(this,c,m)));
+                        }else try{JSONObject proposal=m.state.equals("completed")?AssistantCapabilities.proposal(m.text):null;if(proposal!=null)tools.addView(control("Review action",()->reviewAction(c,m,proposal)));}catch(Exception ignored){}
                     }
                     turn.addView(tools);
+                    if(m.actionRecord!=null)turn.addView(label(m.actionRecord.evidence(),12,muted,false));
                     if(m.omittedContextMessages>0)turn.addView(label(m.omittedContextMessages+" earlier messages remain in history outside this response's context",12,muted,false));
                     if(m.omittedReferenceBlocks>0)turn.addView(label(m.omittedReferenceBlocks+" retrieved reference blocks did not fit this response",12,muted,false));
                     if(!m.state.equals("completed"))turn.addView(label(m.state.equals("cancelled")?"Stopped":m.state.equals("interrupted")?"Interrupted · response incomplete":"Response incomplete",12,muted,false));
@@ -169,7 +174,7 @@ public final class AssistantActivity extends Activity {
         session.send(this,selection);
     }
     private void notice(String value){status.setText(value);}
-    private boolean idle(){if(session.conversation.running()){notice("Stop the active response before changing conversations.");return false;}return true;}
+    private boolean idle(){if(session.busy()){notice("Finish or stop the active response or receipt check first.");return false;}return true;}
     private void newConversation(){if(!idle())return;session.save(this);session.conversation=new AssistantConversation();session.status="";render();}
     private void rename(){if(!idle())return;input("Conversation title",session.conversation.title,value->{session.conversation.title=value;session.save(this);render();});}
     private void changeProject(){if(!idle())return;input("Project context",session.conversation.project,value->{session.conversation.project=value;session.save(this);render();});}
@@ -183,16 +188,17 @@ public final class AssistantActivity extends Activity {
     private void retry(){if(!idle())return;try{session.save(this);session.conversation=session.conversation.fork();session.send(this,session.conversation.retry());}catch(Exception failure){notice("This conversation has no response to regenerate.");}}
     private void history(){
         if(!idle())return;notice("Opening encrypted history");
+        AssistantConversation original=session.conversation;
         session.work.execute(()->{
             try{JSONArray list=ControlAssistantMemory.conversations(this);runOnUiThread(()->{
-                if(!alive)return;String[] titles=new String[list.length()];for(int i=0;i<list.length();i++){JSONObject item=list.optJSONObject(i);titles[i]=item.optString("title")+"\n"+item.optString("project");}
+                if(!alive||session.busy()||session.conversation!=original)return;String[] titles=new String[list.length()];for(int i=0;i<list.length();i++){JSONObject item=list.optJSONObject(i);titles[i]=item.optString("title")+"\n"+item.optString("project");}
                 new AlertDialog.Builder(this).setTitle("Conversations").setItems(titles,(d,index)->{
-                    session.work.execute(()->{try{AssistantConversation selected=ControlAssistantMemory.loadConversation(this,list.getJSONObject(index).getString("id"));runOnUiThread(()->{if(!alive)return;session.conversation=selected;session.status="";render();});}catch(Exception failure){runOnUiThread(()->notice("This encrypted conversation could not be opened."));}});
+                    session.work.execute(()->{try{AssistantConversation selected=ControlAssistantMemory.loadConversation(this,list.getJSONObject(index).getString("id"));runOnUiThread(()->{if(!alive||session.busy()||session.conversation!=original)return;session.conversation=selected;session.status="";render();});}catch(Exception failure){runOnUiThread(()->notice("This encrypted conversation could not be opened."));}});
                 }).setNeutralButton("Delete current",(d,w)->deleteConversation()).setNegativeButton("Close",null).show();notice("");
             });}catch(Exception e){runOnUiThread(()->notice("Encrypted history could not be opened."));}
         });
     }
-    private void deleteConversation(){new AlertDialog.Builder(this).setTitle("Delete this conversation?").setMessage("Saved memories remain under Memory controls.").setNegativeButton("Cancel",null).setPositiveButton("Delete",(d,w)->{ControlAssistantMemory.deleteConversation(this,session.conversation.id);session.conversation=new AssistantConversation();session.status="";render();}).show();}
+    private void deleteConversation(){if(!idle())return;AssistantConversation original=session.conversation;new AlertDialog.Builder(this).setTitle("Delete this conversation?").setMessage("Saved memories remain under Memory controls.").setNegativeButton("Cancel",null).setPositiveButton("Delete",(d,w)->{if(!idle()||session.conversation!=original)return;ControlAssistantMemory.deleteConversation(this,session.conversation.id);session.conversation=new AssistantConversation();session.status="";render();}).show();}
     private void modelSettings(){
         String[] modes={"Fast","Balanced","Deep","Memory and assistant settings","Installed model details"};
         new AlertDialog.Builder(this).setTitle("Model and reasoning").setItems(modes,(d,index)->{
@@ -212,18 +218,12 @@ public final class AssistantActivity extends Activity {
             }catch(Exception failure){runOnUiThread(()->notice("Choose a readable text file up to 16 KB."));}
         });}
     }
-    private void reviewAction(JSONObject proposal){
-        new AlertDialog.Builder(this).setTitle("Review application action").setMessage(proposal.optString("package")+"\n"+proposal.optString("action")+"\n\n"+proposal.optJSONObject("payload").toString()).setNegativeButton("Cancel",null).setPositiveButton("Authorize once",(d,w)->{
-            notice("Checking signed capability");session.work.execute(()->{
-                String outcome;
-                try{AssistantCapabilities.validate(this,proposal);String id="assistant-"+UUID.randomUUID();
-                    JSONObject request=new JSONObject(proposal.toString()).put("request_id",id);
-                    JSONObject receipt=AppBridge.invoke(this,request);
-                    JSONObject observed=AppBridge.operation(this,proposal.getString("package"),id,false);
-                    outcome="Request "+id+"\nSubmission: "+receipt.optString("status")+"\nObserved provider status: "+observed.optString("status")+"\nApplication outputs require their own verification.";
-                }catch(Exception failure){outcome="The signed application did not verify this action. No successful outcome is claimed.";}
-                String report=outcome;runOnUiThread(()->notice(report));
-            });
-        }).show();
+    private void reviewAction(AssistantConversation owner,AssistantConversation.Message message,JSONObject proposal){
+        if(!idle()||session.conversation!=owner||message.actionRecord!=null)return;
+        new AlertDialog.Builder(this).setTitle("Review application action").setMessage(proposal.optString("package")+"\n"+proposal.optString("action")+"\n\n"+proposal.optJSONObject("payload").toString())
+            .setNegativeButton("Cancel",null).setPositiveButton("Authorize once",(d,w)->{
+                try{session.authorize(this,owner,message,proposal);}
+                catch(IllegalArgumentException invalid){notice("Invalid application action proposal; not submitted.");}
+            }).show();
     }
 }

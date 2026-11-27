@@ -14,7 +14,7 @@ def test_executable_split_utf8_reasoning_and_conversation_regressions(tmp_path):
     if not compiler or not runtime:
         pytest.skip('JDK required for executable Java behavior tests')
     subprocess.run([compiler,'-encoding','UTF-8','-d',str(tmp_path),str(JAVA/'AssistantOutput.java'),
-                    str(JAVA/'AssistantConversation.java'),str(JAVA/'InferenceGate.java'),
+                    str(JAVA/'AssistantConversation.java'),str(JAVA/'AssistantActionRecord.java'),str(JAVA/'InferenceGate.java'),
                     str(ROOT/'tests/java/com/asterion/control/AssistantWorkspaceTest.java')],
                    check=True,capture_output=True,text=True)
     result=subprocess.run([runtime,'-cp',str(tmp_path),'com.asterion.control.AssistantWorkspaceTest'],

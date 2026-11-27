@@ -58,9 +58,15 @@ final class ControlAssistantMemory {
         if(!ControlAssistantPreferences.saveHistory(context))return;
         synchronized(LOCK){
             JSONArray messages=new JSONArray();
-            for(AssistantConversation.Message m:conversation.messages)messages.put(new JSONObject()
-                .put("id",m.id).put("role",m.role).put("text",m.text).put("state",m.state)
-                .put("omitted_context_messages",m.omittedContextMessages).put("omitted_reference_blocks",m.omittedReferenceBlocks));
+            for(AssistantConversation.Message m:conversation.messages){
+                JSONObject entry=new JSONObject().put("id",m.id).put("role",m.role).put("text",m.text).put("state",m.state)
+                    .put("omitted_context_messages",m.omittedContextMessages).put("omitted_reference_blocks",m.omittedReferenceBlocks);
+                AssistantActionRecord record=m.actionRecord;
+                if(record!=null)entry.put("action_receipt",new JSONObject().put("id",record.requestId)
+                    .put("package",record.appPackage).put("action",record.action)
+                    .put("submission",record.submission).put("observation",record.observation));
+                messages.put(entry);
+            }
             byte[] plain=new JSONObject().put("title",conversation.title).put("project",conversation.project)
                 .put("messages",messages).toString().getBytes(StandardCharsets.UTF_8);
             if(plain.length>1_000_000)throw new IllegalStateException("conversation_storage_budget_exceeded");
@@ -96,6 +102,10 @@ final class ControlAssistantMemory {
                         m.getString("text"),m.getString("state")));
                     out.messages.get(out.messages.size()-1).omittedContextMessages=m.optInt("omitted_context_messages",0);
                     out.messages.get(out.messages.size()-1).omittedReferenceBlocks=m.optInt("omitted_reference_blocks",0);
+                    JSONObject receipt=m.optJSONObject("action_receipt");
+                    if(receipt!=null)out.messages.get(out.messages.size()-1).actionRecord=new AssistantActionRecord(
+                        receipt.getString("id"),receipt.getString("package"),receipt.getString("action"),
+                        receipt.getString("submission"),receipt.getString("observation"));
                 }
                 out.recover();return out;
             }finally{helper.close();}

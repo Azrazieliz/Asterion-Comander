@@ -18,7 +18,7 @@ final class VoiceNativeAssistant {
     boolean busy(){return callback!=null;}
     boolean submit(Context context,String text,Listener listener){
         if(Looper.myLooper()!=Looper.getMainLooper())throw new IllegalStateException("Main thread required");
-        if(busy()||session.conversation.running())return false;
+        if(busy()||session.busy())return false;
         target=session.conversation;revision=target.revision+1;callback=listener;
         session.listeners.add(observer);
         try{
