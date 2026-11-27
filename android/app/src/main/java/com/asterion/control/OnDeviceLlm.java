@@ -82,6 +82,10 @@ final class OnDeviceLlm {
             .put("native_library_loaded",LIBRARY_LOADED)
             .put("inference_active",GATE.busy())
             .put("model_bundled_in_apk",hasPackagedModel(context,profile))
+            .put("model_distribution",profile.externalModelPack?"owner_import":"bundled")
+            .put("model_private_file_present",file.isFile()&&file.length()==profile.bytes)
+            .put("adapter_private_file_present",profile.adapterFile.isEmpty()||
+                new File(file.getParentFile(),profile.adapterFile).length()==profile.adapterBytes)
             .put("model_name",profile.file)
             .put("model_context_tokens",profile.contextTokens)
             .put("weight_precision",profile.precision)
@@ -121,7 +125,7 @@ final class OnDeviceLlm {
                 if(!folder.isDirectory()&&!folder.mkdirs()){
                     lastFailure="private_model_storage_unavailable";return false;
                 }
-                File file=stageArtifact(context,folder,profile.file,profile.bytes,profile.sha256,request);
+                File file=stageArtifact(context,folder,profile.file,profile.bytes,profile.sha256,request,!profile.externalModelPack);
                 if(request.isCancelled())throw new InterruptedException("user_cancelled");
                 if(profile.adapterFile.isEmpty()&&profile.backendDevice.isEmpty()){
                     modelReady=nativeLoad(file.getAbsolutePath());
@@ -129,7 +133,7 @@ final class OnDeviceLlm {
                     String adapter="";
                     if(!profile.adapterFile.isEmpty())
                         adapter=stageArtifact(context,folder,profile.adapterFile,profile.adapterBytes,
-                            profile.adapterSha256,request).getAbsolutePath();
+                            profile.adapterSha256,request,!profile.externalModelPack).getAbsolutePath();
                     if(request.isCancelled())throw new InterruptedException("user_cancelled");
                     modelReady=nativeLoadProfile(file.getAbsolutePath(),adapter,profile.backendDevice,profile.offloadLayers);
                 }
@@ -138,47 +142,93 @@ final class OnDeviceLlm {
             }catch(Exception|LinkageError exception){
                 modelReady=false;
                 lastFailure=exception instanceof java.io.FileNotFoundException?
-                    "model_missing_in_apk":
+                    ("model_pack_not_imported".equals(exception.getMessage())?"model_pack_not_imported":"model_missing_in_apk"):
                     exception.getClass().getSimpleName();
                 return false;
             }
         }
     }
-    private static File stageArtifact(Context context,File folder,String name,long length,String sha,InferenceGate.Request request)throws Exception {
-        File file=new File(folder,name);
+    private static boolean verifiedExisting(File file,long length,String sha,InferenceGate.Request request)throws Exception{
+        if(!file.isFile()||file.length()!=length)return false;
         MessageDigest digest=MessageDigest.getInstance("SHA-256");
         byte[] buffer=new byte[256*1024];
-        if(file.isFile()&&file.length()==length){
-            try(InputStream in=new FileInputStream(file)){
-                for(int size;(size=in.read(buffer))!=-1;){
-                    if(request.isCancelled())throw new InterruptedException("user_cancelled");
-                    digest.update(buffer,0,size);
-                }
+        try(InputStream in=new FileInputStream(file)){
+            for(int size;(size=in.read(buffer))!=-1;){
+                if(request.isCancelled())throw new InterruptedException("user_cancelled");
+                digest.update(buffer,0,size);
             }
-            if(sha.equals(hex(digest.digest())))return file;
         }
+        return sha.equals(hex(digest.digest()));
+    }
+    private static File stageArtifact(Context context,File folder,String name,long length,String sha,
+                                      InferenceGate.Request request,boolean bundled)throws Exception {
+        File file=new File(folder,name);
+        if(verifiedExisting(file,length,sha,request))return file;
+        if(!bundled)throw new java.io.FileNotFoundException("model_pack_not_imported");
+        try(InputStream input=context.getAssets().open("models/"+name,AssetManager.ACCESS_STREAMING)){
+            return copyArtifact(folder,file,input,length,sha,request,null);
+        }
+    }
+    private static File copyArtifact(File folder,File file,InputStream input,long length,String sha,
+                                     InferenceGate.Request request,java.util.function.LongConsumer progress)throws Exception{
+        if(folder.getUsableSpace()<length+(64L<<20))
+            throw new java.io.IOException("insufficient_private_model_storage");
         File temporary=File.createTempFile("model-", ".partial",folder);
         try{
-            long received=0;
-            digest.reset();
-            try(InputStream input=context.getAssets().open("models/"+name,AssetManager.ACCESS_STREAMING);
-                FileOutputStream output=new FileOutputStream(temporary)){
+            long received=0,lastReport=0;
+            MessageDigest digest=MessageDigest.getInstance("SHA-256");
+            byte[] buffer=new byte[256*1024];
+            try(FileOutputStream output=new FileOutputStream(temporary)){
                 for(int size;(size=input.read(buffer))!=-1;){
                     if(request.isCancelled())throw new InterruptedException("user_cancelled");
                     received+=size;
                     if(received>length)throw new IllegalStateException("invalid_length");
                     output.write(buffer,0,size);
                     digest.update(buffer,0,size);
+                    if(progress!=null&&(received-lastReport>=8L*1024*1024||received==length)){
+                        lastReport=received;progress.accept(received);
+                    }
                 }
                 output.getFD().sync();
             }
+            if(request.isCancelled())throw new InterruptedException("user_cancelled");
             if(received!=length||!sha.equals(hex(digest.digest())))
                 throw new IllegalStateException("model_checksum_mismatch");
+            try(InputStream header=new FileInputStream(temporary)){
+                if(header.read()!='G'||header.read()!='G'||header.read()!='U'||header.read()!='F')
+                    throw new IllegalStateException("invalid_gguf_header");
+            }
             android.system.Os.rename(temporary.getAbsolutePath(),file.getAbsolutePath());
             return file;
-        }finally{
-            temporary.delete();
-        }
+        }finally{temporary.delete();}
+    }
+    /** Only the signed APK profile determines the imported filename, length,
+     * digest and adapter/base binding. No unsigned profile or arbitrary model
+     * path can be supplied. The UI passes one explicit SAF document selection. */
+    static void importOwnerModelArtifact(Context context,android.net.Uri uri,boolean adapter,
+                                        InferenceGate.Request request,java.util.function.LongConsumer progress)throws Exception{
+        if(uri==null||!"content".equals(uri.getScheme()))throw new SecurityException("document_provider_required");
+        OnDeviceModelProfile profile=OnDeviceModelProfile.read(context);
+        if(!profile.externalModelPack||(adapter&&profile.adapterFile.isEmpty()))
+            throw new SecurityException("signed_profile_does_not_allow_import");
+        GATE.begin(request);
+        try{
+            synchronized(LOCK){
+                File folder=new File(context.getFilesDir(),"models");
+                if(!folder.isDirectory()&&!folder.mkdirs())throw new java.io.IOException("private_model_storage_unavailable");
+                String name=adapter?profile.adapterFile:profile.file;
+                String sha=adapter?profile.adapterSha256:profile.sha256;
+                long length=adapter?profile.adapterBytes:profile.bytes;
+                File file=new File(folder,name);
+                if(verifiedExisting(file,length,sha,request)){if(progress!=null)progress.accept(length);return;}
+                try(InputStream input=context.getContentResolver().openInputStream(uri)){
+                    if(input==null)throw new java.io.IOException("document_unavailable");
+                    copyArtifact(folder,file,input,length,sha,request,progress);
+                }
+                if(modelReady&&LIBRARY_LOADED){nativeUnload();modelReady=false;}
+                lastFailure="";
+            }
+        }finally{GATE.end(request);}
     }
     private static String hex(byte[] bytes) {
         StringBuilder result=new StringBuilder(bytes.length*2);
