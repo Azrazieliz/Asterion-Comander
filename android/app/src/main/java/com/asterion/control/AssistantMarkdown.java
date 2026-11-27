@@ -31,7 +31,7 @@ final class AssistantMarkdown {
             if(line.startsWith("```")){
                 String language=line.substring(3).trim();StringBuilder code=new StringBuilder();at++;
                 while(at<lines.length&&!lines[at].startsWith("```")){if(code.length()>0)code.append('\n');code.append(lines[at++]);}
-                boolean closed=at<lines.length&&lines[at].equals("\x60\x60\x60");
+                boolean closed=at<lines.length&&lines[at].equals("```");
                 if(at<lines.length)at++;
                 if(send!=null&&closed&&(language.equals(AssistantStructured.CHART)||language.equals(AssistantStructured.FORM))){
                     try{add(parent,AssistantStructuredView.render(c,AssistantStructured.parse(language,code.toString()),text,muted,panel,send),8);continue;}

@@ -23,10 +23,10 @@ public final class AssistantStructuredTest {
         reject("asterion_form","title|Form\nquestion|Q|A|A");
         reject("asterion_form","title|Form\nquestion|Q|A");
         reject("asterion_form","title|Form\nquestion|Q|A|B|C|D|E|F|G");
-        String action="\x60\x60\x60asterion_action\n{}\n\x60\x60\x60";
+        String action="```asterion_action\n{}\n```";
         check("{}".equals(AssistantStructured.singleBlock(action,"asterion_action").trim()));
         check(AssistantStructured.singleBlock(action+"\n"+action,"asterion_action")==null);
-        check(AssistantStructured.singleBlock("\x60\x60\x60\x60text\n"+action+"\n\x60\x60\x60\x60","asterion_action")==null);
+        check(AssistantStructured.singleBlock("````text\n"+action+"\n````","asterion_action")==null);
         check(AssistantStructured.singleBlock(action.substring(0,action.length()-3),"asterion_action")==null);
         check(AssistantStructured.singleBlock("quoted "+action,"asterion_action")==null);
         System.out.println(checks+" structured response assertions passed");

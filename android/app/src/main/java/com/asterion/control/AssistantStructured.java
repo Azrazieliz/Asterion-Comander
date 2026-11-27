@@ -83,8 +83,8 @@ final class AssistantStructured {
         String fence="";StringBuilder body=null;String found=null;int count=0;
         for(String line:source.split("\\R",-1)){
             if(fence.isEmpty()){
-                if(line.startsWith("\x60\x60\x60")){
-                    int n=0;while(n<line.length()&&line.charAt(n)=='\x60')n++;
+                if(line.startsWith("```")){
+                    int n=0;while(n<line.length()&&line.charAt(n)=='`')n++;
                     fence=line.substring(0,n);
                     if(n==3&&line.equals(fence+type)){body=new StringBuilder();count++;}
                 }

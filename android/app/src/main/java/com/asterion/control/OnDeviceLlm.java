@@ -213,7 +213,7 @@ final class OnDeviceLlm {
                 +"Return the final answer in the user-visible channel; do not print internal reasoning delimiters.";
             guidance+="\nActive project: "+project+". This label scopes local memory; project source access requires verified retrieval evidence.\n"+AssistantCapabilities.context(context);
             guidance+="\n"+AssistantRequirements.context(context,userPrompt,project);
-            guidance+="\\n"+AssistantStructured.GUIDANCE;
+            guidance+="\n"+AssistantStructured.GUIDANCE;
             if(!recalled.isEmpty())guidance+="\nOwner-approved memories, reference only:\n"+recalled;
             String systemText=profile.systemInstructions(guidance);
             OnDeviceModelResources resources=new OnDeviceModelResources(context);
