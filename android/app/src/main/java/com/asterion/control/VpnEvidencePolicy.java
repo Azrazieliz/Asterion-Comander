@@ -20,4 +20,8 @@ final class VpnEvidencePolicy {
     static double ratio(double baseline,double measured){
         return Double.isFinite(baseline)&&Double.isFinite(measured)&&baseline>0&&measured>=0?measured/baseline:0;
     }
+    static boolean completeWindow(long bytes,long elapsed,long target,long cap,int completedPayloads,boolean stable){
+        return stable&&target>0&&elapsed>=target&&elapsed<=target+6_000_000_000L&&
+            bytes>0&&bytes<=cap&&completedPayloads>=1;
+    }
 }

@@ -18,6 +18,10 @@ public final class VpnEvidencePolicyTest {
         expect(0.75,VpnEvidencePolicy.ratio(100,75));
         expect(0.0,VpnEvidencePolicy.ratio(0,75));
         expect(0.0,VpnEvidencePolicy.ratio(Double.NaN,75));
+        if(!VpnEvidencePolicy.completeWindow(8000000,30_000_000_000L,30_000_000_000L,512L<<20,1,true))throw new AssertionError("complete sustained window");
+        if(VpnEvidencePolicy.completeWindow(512L<<20,10_000_000_000L,30_000_000_000L,512L<<20,10,true))throw new AssertionError("cap is not duration");
+        if(VpnEvidencePolicy.completeWindow(8000000,30_000_000_000L,30_000_000_000L,512L<<20,1,false))throw new AssertionError("unstable route");
+        if(VpnEvidencePolicy.completeWindow(8000000,40_000_000_000L,30_000_000_000L,512L<<20,1,true))throw new AssertionError("overshot window");
         System.out.println("VpnEvidencePolicy: "+n+" assertions passed");
     }
 }

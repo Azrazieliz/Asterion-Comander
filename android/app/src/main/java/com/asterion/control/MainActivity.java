@@ -700,11 +700,15 @@ public final class MainActivity extends Activity {
   private void showVpnVerification(){
     String[] actions={
       "1. Measure normal public IP & speed before VPN",
-      "2. Verify public IP change and speed with VPN active"
+      "2. Verify public IP change and speed with VPN active",
+      "3. Record 30-second normal throughput baseline",
+      "4. Compare 30-second VPN throughput"
     };
     new AlertDialog.Builder(this).setTitle("VPN proof · this phone")
       .setItems(actions,(dialog,index)->{
-        final boolean baseline=index==0;
+        final boolean baseline=index==0||index==2;
+        final boolean sustained=index>=2;
+        if(sustained){showVpnSustainedMeasurement(baseline);return;}
         new AlertDialog.Builder(this)
           .setTitle("Owner-approved external network test")
           .setMessage("This check contacts ipify IPv4/IPv6 and Cloudflare over HTTPS. "+
@@ -767,6 +771,36 @@ public final class MainActivity extends Activity {
             });
           }).setNegativeButton("Cancel",null).show();
       }).setNegativeButton("Close",null).show();
+  }
+
+  private void showVpnSustainedMeasurement(boolean baseline){
+    new AlertDialog.Builder(this).setTitle(baseline?"Record longer normal baseline":"Compare longer VPN sample")
+      .setMessage("This deliberate network test contacts ipify and Cloudflare and downloads up to 512 MiB over about 30 seconds. "+
+        "Use the same physical network for both checks and complete the comparison within 15 minutes. "+
+        "A capped, interrupted or changed-network sample is not a valid comparison. "+
+        "No private files, keys or credentials are sent. External DNS/IPv6 leak, provider trust and indefinite throughput are not certified.")
+      .setNegativeButton("Cancel",null).setPositiveButton("Run measurement",(dialog,which)->io.execute(()->{
+        String report;
+        try{
+          JSONObject evidence=ControlVpnVerification.measureSustained(getApplicationContext(),baseline);
+          StringBuilder out=new StringBuilder();
+          out.append("Observed throughput: ").append(String.format(java.util.Locale.ROOT,"%.2f",evidence.optDouble("sample_mbps"))).append(" Mbps")
+            .append("\nDuration: ").append(String.format(java.util.Locale.ROOT,"%.1f",evidence.optDouble("sample_seconds"))).append(" s")
+            .append("\nDownloaded: ").append(evidence.optLong("sample_bytes")/(1024*1024)).append(" MiB")
+            .append("\nComplete stable window: ").append(evidence.optBoolean("complete_window")?"yes":"no");
+          if(baseline)out.append(evidence.optBoolean("baseline_saved")?
+            "\nBaseline saved; activate VPN and compare within 15 minutes.":"\nBaseline not accepted.");
+          else if(evidence.optBoolean("baseline_available")){
+            out.append("\nMeasured ratio: ").append(Math.round(evidence.optDouble("speed_ratio")*100)).append("%")
+              .append("\nPublic IPv4 replacement: ").append(evidence.optBoolean("ip_replacement_verified")?"observed":"not verified")
+              .append("\nMatched sample meets 75% target: ").append(evidence.optBoolean("matched_30_second_sample_threshold_met")?"yes":"not established");
+          }else out.append("\nNo comparable recent baseline.");
+          report=out+"\n\nThis is scoped 30-second evidence, not proof of indefinite performance or leak-free routing.";
+        }catch(Exception failure){report="Longer throughput check did not establish a result. "+failure.getClass().getSimpleName();}
+        String result=report;runOnUiThread(()->{
+          if(!destroyed)new AlertDialog.Builder(this).setTitle("Longer VPN test evidence").setMessage(result).setPositiveButton("Close",null).show();
+        });
+      })).show();
   }
 
   private void showVpnDetails(){

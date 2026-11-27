@@ -205,4 +205,94 @@ final class ControlVpnVerification {
         }
         return result;
     }
+
+    // Owner-selected longer throughput measurement. A bounded data cap is
+    // deliberately not evidence of a complete duration on a very fast network.
+    private static final long SUSTAINED_NS=30_000_000_000L;
+    private static final long SUSTAINED_CAP=512L*1024*1024;
+    private static final int SUSTAINED_CHUNK=8*1024*1024;
+    private static final long SUSTAINED_BASELINE_AGE=15L*60*1000;
+    private static final java.util.concurrent.atomic.AtomicBoolean MEASURING=
+        new java.util.concurrent.atomic.AtomicBoolean(false);
+
+    static JSONObject measureSustained(Context context,boolean baseline)throws Exception{
+        if(!MEASURING.compareAndSet(false,true))throw new IllegalStateException("vpn_measurement_already_active");
+        try{
+            RouteSnapshot initial=new RouteSnapshot(context);
+            JSONObject vpn=ControlPrivateVpn.status(context);
+            boolean active=vpn.optBoolean("active",false);
+            if(!initial.validated||!VpnEvidencePolicy.knownTransport(initial.transport))
+                throw new IllegalStateException("validated_known_network_required");
+            if(baseline?(active||initial.vpn):(!active||!initial.vpn))
+                throw new IllegalStateException("incorrect_vpn_measurement_phase");
+            String ip=fetchPublicIp(initial.network,false);
+            byte[] buffer=new byte[32768];
+            long began=SystemClock.elapsedRealtimeNanos(),bytes=0;
+            int attempts=0,finished=0;
+            while(SystemClock.elapsedRealtimeNanos()-began<SUSTAINED_NS&&bytes<SUSTAINED_CAP){
+                if(!initial.stable(new RouteSnapshot(context)))throw new IllegalStateException("network_changed");
+                int wanted=(int)Math.min(SUSTAINED_CHUNK,SUSTAINED_CAP-bytes);
+                HttpURLConnection conn=(HttpURLConnection)initial.network.openConnection(new URL(
+                    "https://speed.cloudflare.com/__down?bytes="+wanted+"&asterion_trial="+
+                    Long.toUnsignedString(began)+"-"+attempts++));
+                int received=0;
+                try{
+                    conn.setConnectTimeout(5000);conn.setReadTimeout(5000);
+                    conn.setInstanceFollowRedirects(false);conn.setUseCaches(false);
+                    conn.setRequestProperty("Cache-Control","no-store");
+                    conn.setRequestProperty("Accept-Encoding","identity");
+                    if(conn.getResponseCode()!=200)throw new IllegalStateException("throughput_http_"+conn.getResponseCode());
+                    try(InputStream input=conn.getInputStream()){
+                        while(received<wanted&&SystemClock.elapsedRealtimeNanos()-began<SUSTAINED_NS){
+                            int n=input.read(buffer,0,Math.min(buffer.length,wanted-received));
+                            if(n<0)break;
+                            if(n==0)throw new IllegalStateException("empty_throughput_read");
+                            received+=n;bytes+=n;
+                        }
+                    }
+                    if(received==wanted)finished++;
+                    else if(SystemClock.elapsedRealtimeNanos()-began<SUSTAINED_NS)
+                        throw new IllegalStateException("throughput_payload_incomplete");
+                }finally{conn.disconnect();}
+            }
+            long elapsed=SystemClock.elapsedRealtimeNanos()-began;
+            JSONObject after=ControlPrivateVpn.status(context);
+            String endIp=fetchPublicIp(initial.network,false);
+            boolean stable=initial.stable(new RouteSnapshot(context))&&ip.equals(endIp)&&
+                active==after.optBoolean("active",false);
+            boolean peer=after.optBoolean("peer_reachability_verified",false);
+            boolean complete=VpnEvidencePolicy.completeWindow(bytes,elapsed,SUSTAINED_NS,SUSTAINED_CAP,finished,stable);
+            double mbps=elapsed>0?bytes*8.0/(elapsed/1e9)/1e6:0;
+            long now=System.currentTimeMillis();
+            JSONObject result=new JSONObject().put("ok",true)
+                .put("test_scope","owner_requested_30_second_bound_https_throughput")
+                .put("phase",baseline?"untunnelled_sustained_baseline":"tunnel_sustained_check")
+                .put("sample_bytes",bytes).put("sample_seconds",elapsed/1e9)
+                .put("complete_window",complete).put("completed_payloads",finished)
+                .put("public_ipv4",ip).put("route_and_ipv4_stable",stable)
+                .put("physical_transport",initial.transport)
+                .put("peer_reachability_verified",peer).put("sample_mbps",mbps)
+                .put("external_dns_leak_test_verified",false)
+                .put("ipv6_leak_free_verified",false)
+                .put("provider_country_verified",false)
+                .put("sustained_25_percent_loss_verified",false);
+            SharedPreferences prefs=context.getSharedPreferences(PREFS,Context.MODE_PRIVATE);
+            if(baseline){
+                if(complete&&!prefs.edit().putString("long_transport",initial.transport)
+                    .putString("long_ipv4",ip).putString("long_mbps",Double.toString(mbps))
+                    .putLong("long_timestamp_ms",now).commit())throw new IllegalStateException("baseline_persistence_failed");
+                return result.put("baseline_saved",complete);
+            }
+            String previous=prefs.getString("long_ipv4","");
+            double old=Double.parseDouble(prefs.getString("long_mbps","0"));
+            boolean comparable=VpnEvidencePolicy.comparable(prefs.getString("long_transport","unknown"),
+                initial.transport,now-prefs.getLong("long_timestamp_ms",0),SUSTAINED_BASELINE_AGE)&&
+                !previous.isEmpty()&&Double.isFinite(old)&&old>0;
+            boolean replaced=VpnEvidencePolicy.exitReplaced(comparable,initial.vpn&&initial.validated,peer,previous,ip);
+            double ratio=VpnEvidencePolicy.ratio(old,mbps);
+            return result.put("baseline_available",comparable).put("ip_replacement_verified",replaced)
+                .put("speed_ratio",comparable?ratio:JSONObject.NULL)
+                .put("matched_30_second_sample_threshold_met",complete&&comparable&&replaced&&ratio>=0.75);
+        }finally{MEASURING.set(false);}
+    }
 }
