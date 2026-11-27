@@ -28,3 +28,26 @@ jobs:
       - run: python -m pip install -r requirements.txt pytest
       - name: Complete existing test inventory without modifying tests or device state
         run: python -m pytest -q tests --tb=short
+  candidate-android-source:
+    if: startsWith(github.ref, 'refs/heads/work/control-non-ai-transfer-resume-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+      - name: Ensure required Android platform
+        run: |
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          if [ ! -f "$SDK/platforms/android-37.0/android.jar" ]; then
+            yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" --channel=3 'platforms;android-37.0' || true
+          fi
+          test -s "$SDK/platforms/android-37.0/android.jar"
+      - name: Compile integrated Android UI without packaging or installation
+        working-directory: android
+        run: gradle --no-daemon --console=plain :app:compileDebugJavaWithJavac
