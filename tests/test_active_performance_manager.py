@@ -45,7 +45,12 @@ def test_governor_never_force_stops_unrelated_apps_or_disables_cycles():
     assert "setprop" not in manager
     assert "forceStopPackage" not in manager
     assert "PhoneDirectMcp.start(this)" in agent
-    assert "cycles.tick()" not in agent
+    assert "cycles.tick()" not in manager
+    assert "cycles.stop()" not in manager
+    cycle=(ROOT/"android/app/src/main/java/com/asterion/control/ContinuationCycle.java").read_text(encoding="utf-8")
+    assert 'if(!state.optBoolean("active",false)||"paused".equals(state.optString("state")))' in cycle
+    assert 'if(!ledger.status().optBoolean("enabled",false))return status();' in cycle
+    assert 'if("acknowledged".equals(current))' in cycle
     assert '"system_clock_control",false' in manager
     assert '"other_app_process_control",false' in manager
 

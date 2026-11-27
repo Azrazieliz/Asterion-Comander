@@ -21,9 +21,12 @@ def test_android_cycle_runner_is_disabled():
     agent=read("AgentService.java")
     mcp=read("AndroidMcp.java")
     assert 'Run two-turn phone cycle test' not in main
-    assert 'ChatGPT continuation and cycles' in main
+    assert 'Continuous development cycle status' in main
     assert 'ContinuationLedger.get(this).status()' in main
-    assert 'cycles.tick()' not in agent
+    cycle=(ROOT/"android/app/src/main/java/com/asterion/control/ContinuationCycle.java").read_text(encoding="utf-8")
+    assert 'if(!state.optBoolean("active",false)||"paused".equals(state.optString("state")))' in cycle
+    assert 'if(!ledger.status().optBoolean("enabled",false))return status();' in cycle
+    assert 'if("acknowledged".equals(current))' in cycle
     assert 'controller","chatgpt"' in mcp
     assert 'control_phone_continuation_queue' in mcp
 

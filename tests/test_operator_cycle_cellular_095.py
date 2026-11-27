@@ -14,9 +14,12 @@ def test_operator_writes_single_checkpoint_and_receipt():
     assert 'A send may already have happened; inspect before cancelling' in ledger
 
 def test_phone_does_not_run_chatgpt_turns_locally():
-    assert 'cycles.tick()' not in java("AgentService.java")
+    cycle=(ROOT/"android/app/src/main/java/com/asterion/control/ContinuationCycle.java").read_text(encoding="utf-8")
+    assert 'if(!state.optBoolean("active",false)||"paused".equals(state.optString("state")))' in cycle
+    assert 'if(!ledger.status().optBoolean("enabled",false))return status();' in cycle
+    assert 'if("acknowledged".equals(current))' in cycle
     assert 'Run two-turn phone cycle test' not in java("MainActivity.java")
-    assert 'ChatGPT checkpoint continuation' in java("MainActivity.java")
+    assert 'Continuous development cycle status' in java("MainActivity.java")
 
 def test_cellular_connection_is_bound_to_android_active_network():
     direct=java("PhoneDirectMcp.java")

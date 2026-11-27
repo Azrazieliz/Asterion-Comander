@@ -14,8 +14,9 @@ def test_obsolete_key_generator_and_duplicate_cards_removed():
     assert 'LinearLayout cycles=card()' not in ui
     assert 'LinearLayout mobile=card()' not in ui
     assert 'button(phone,"Check direct Control link"' in ui
-    assert 'button(handoff,"Inspect operator checkpoint"' in ui
-    assert 'twoActions(summary,"Open desktop","monitor",()->show(1),"Repair connection"' in ui
+    assert 'button(summary,"Cycle status","check",false,this::showCycleStatus)' in ui
+    assert 'button(summary,"Auto-repair connection","refresh",true,()->fullRepair(false))' in ui
+    assert 'showRemoteSection("desktop")' in ui
 
 def test_voice_picks_installed_high_quality_offline_voice_without_forcing_accent():
     voice=(SRC/"VoiceDialogueService.java").read_text()
@@ -41,6 +42,9 @@ def test_voice_preferences_use_owner_authenticated_private_api():
 def test_owner_operated_cycle_remains_acknowledged_before_next_step():
     agent=(SRC/"AgentService.java").read_text()
     ledger=(SRC/"ContinuationLedger.java").read_text()
-    assert 'cycles.tick()' not in agent
+    cycle=(ROOT/"android/app/src/main/java/com/asterion/control/ContinuationCycle.java").read_text(encoding="utf-8")
+    assert 'if(!state.optBoolean("active",false)||"paused".equals(state.optString("state")))' in cycle
+    assert 'if(!ledger.status().optBoolean("enabled",false))return status();' in cycle
+    assert 'if("acknowledged".equals(current))' in cycle
     assert 'submitted_unverified' in ledger and 'acknowledge(' in ledger
     assert 'requires_manual_review' in ledger

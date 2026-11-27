@@ -10,7 +10,9 @@ def test_native_registry_defaults_to_existing_windows_control_folder():
         assert "os.getenv('ASTERION_CONTROL_STATE'" in source
 
 def test_gateway_restart_config_sets_owner_state_before_importing_app():
-    p=(ROOT/'scripts/run_gateway_096.py').read_text(encoding='utf-8')
+    p=(ROOT/'scripts/start_windows.ps1').read_text(encoding='utf-8')
     assert 'ASTERION_CONTROL_STATE' in p
-    assert p.index('ASTERION_CONTROL_STATE') < p.index('import uvicorn')
-    assert "port=8995" in p
+    assert p.index('ASTERION_CONTROL_STATE') < p.index('uvicorn')
+    watchdog=(ROOT/'scripts/control_repair_watchdog.ps1').read_text(encoding='utf-8')
+    assert "'asterion_remote.native_phone_relay:app','--host','127.0.0.1','--port','8995'" in watchdog
+    assert not (ROOT/'scripts/run_gateway_096.py').exists()

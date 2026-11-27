@@ -14,12 +14,15 @@ def test_keyboard_does_not_overwrite_user_draft_or_blindly_hit_enter():
     s=(MAIN/"ControlAccessibilityService.java").read_text()
     assert 'if(!before.isEmpty()&&!message.equals(before))' in s
     assert 'tapVisibleBlueArrow' in s
-    assert 'Visible ChatGPT keyboard/blue Send arrow not confirmed; draft preserved' in s
-    assert 'ChatGPT text still in composer; Send did not complete' in s
+    assert 'Visible ChatGPT keyboard and blue Send arrow not confirmed; draft preserved' in s
+    assert 'Send tap completed but message remains visible; do not replay an uncertain submission' in s
     assert 'No lower-screen ChatGPT composer found' not in s
     assert 'result.put("foreground_package"' in s
     assert '.put("editor_package"' in s
 def test_release_911_uses_native_keyboard_not_privileged_adb():
     s=(ROOT/"android/app/build.gradle").read_text()
-    assert "versionCode 912" in s and "versionName '0.9.12'" in s
+    import re
+    code=int(re.search(r"versionCode\s+(\d+)",s).group(1))
+    version=tuple(map(int,re.search(r"versionName\s+'(\d+)\.(\d+)\.(\d+)'",s).groups()))
+    assert code==version[0]*10000+version[1]*100+version[2] and code>=912
     assert "adb shell input" not in (MAIN/"ControlAccessibilityService.java").read_text()

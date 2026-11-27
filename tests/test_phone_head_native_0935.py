@@ -30,7 +30,7 @@ class PhoneHeadTests(unittest.TestCase):
            "private void showPermissionDetails()",1)[0]
         self.assertIn("AppBridge.list(this)",block)
         self.assertIn("AppCatalog.launchable(this)",block)
-        self.assertIn("showAppIntegrationActions(pkg,installed.get(pkg)",block)
+        self.assertIn("showAppIntegrationActions(pkg,label,available,authorized)",block)
         self.assertNotIn('prefs.getString("url"',block)
         self.assertNotIn('prefs.getString("token"',block)
         self.assertIn('showRemoteSection("diagnostics")',block)
@@ -53,7 +53,8 @@ class PhoneHeadTests(unittest.TestCase):
         self.assertIn("test_scope",net)
         self.assertIn("private void showVpnVerification()",MAIN)
         self.assertIn("ControlVpnVerification.measure(",MAIN)
-        self.assertIn("Japan exit location",MAIN)
+        self.assertIn("Exit country, automatic address rotation, and a 75% speed ratio",MAIN)
+        self.assertIn("External DNS leakage, leak-free IPv6 routing, provider trust, exit country, IP rotation and sustained throughput are NOT certified.",MAIN)
         self.assertNotIn("ControlVpnVerification.measure(",(ROOT/
             "android/app/src/main/java/com/asterion/control/ControlPrivateVpn.java"
             ).read_text("utf8"))

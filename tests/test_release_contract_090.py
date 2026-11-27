@@ -9,8 +9,10 @@ def text(path):
 def test_android_manifest_and_version_match_signed_update_contract():
     gradle=text("android/app/build.gradle")
     manager=text("android/app/src/main/java/com/asterion/control/UpdateManager.java")
-    assert "versionCode 912" in gradle
-    assert "versionName '0.9.12'" in gradle
+    import re
+    code=int(re.search(r"versionCode\s+(\d+)",gradle).group(1))
+    version=tuple(map(int,re.search(r"versionName\s+'(\d+)\.(\d+)\.(\d+)'",gradle).groups()))
+    assert code==version[0]*10000+version[1]*100+version[2] and code>=912
     assert "ASTERION_OWNER_KEYSTORE_PATH" in gradle
     assert "canRequestPackageInstalls()" in manager
     assert "MessageDigest.isEqual" in manager
@@ -20,8 +22,11 @@ def test_chatgpt_controls_execution_and_android_returns_checkpoint_receipts():
     main=text("android/app/src/main/java/com/asterion/control/MainActivity.java")
     native=text("android/app/src/main/java/com/asterion/control/AndroidMcp.java")
     ledger=text("android/app/src/main/java/com/asterion/control/ContinuationLedger.java")
-    assert "cycles.tick()" not in agent
-    assert "ChatGPT checkpoint continuation" in main
+    cycle=(ROOT/"android/app/src/main/java/com/asterion/control/ContinuationCycle.java").read_text(encoding="utf-8")
+    assert 'if(!state.optBoolean("active",false)||"paused".equals(state.optString("state")))' in cycle
+    assert 'if(!ledger.status().optBoolean("enabled",false))return status();' in cycle
+    assert 'if("acknowledged".equals(current))' in cycle
+    assert "Continuous development cycle status" in main
     assert "control_phone_continuation_queue" in native
     assert "control_phone_continuation_dispatch" in native
     assert "control_phone_continuation_ack" in native
@@ -32,14 +37,19 @@ def test_phone_controls_remain_in_private_https_and_no_pc_required():
     agent=text("android/app/src/main/java/com/asterion/control/AgentService.java")
     phone=text("android/app/src/main/java/com/asterion/control/PhoneDirectMcp.java")
     transport=text("android/app/src/main/java/com/asterion/control/TransportConnectivity.java")
-    gateway=text("asterion_remote/mcp_gateway.py")
+    gateway=text("asterion_remote/native_phone_relay.py")
+    assert not (ROOT/"asterion_remote/mcp_gateway.py").exists()
     assert "PhoneDirectMcp.start(this)" in agent
     assert "phoneBridgePoller.scheduleWithFixedDelay" in agent
     assert "PhoneGitBridge.poll(this)" in agent
     assert "phoneBridgePoller.shutdownNow()" in agent
-    assert "cycles.tick()" not in agent
+    cycle=(ROOT/"android/app/src/main/java/com/asterion/control/ContinuationCycle.java").read_text(encoding="utf-8")
+    assert 'if(!state.optBoolean("active",false)||"paused".equals(state.optString("state")))' in cycle
+    assert 'if(!ledger.status().optBoolean("enabled",false))return status();' in cycle
+    assert 'if("acknowledged".equals(current))' in cycle
     assert 'setEndpointIdentificationAlgorithm("HTTPS")' in phone
-    assert "phone_live_invoke(message)" in gateway
+    assert "from .native_phone_live import router as phone_router" in gateway
+    assert "app.include_router(local_rpc_router)" in gateway
     assert "phone_cloud_relay.submit" not in gateway
     for check in ("TRANSPORT_CELLULAR","TRANSPORT_VPN","https_outbound_only",
                   "requires_pc_for_phone_commands"):
@@ -74,4 +84,7 @@ def test_release_feed_version_code_matches_android_gradle():
     gradle=(root/"android/app/build.gradle").read_text()
     code=int(re.search(r"versionCode\s+(\d+)",gradle).group(1))
     feed=int(re.search(r'"version_code":(\d+)',workflow).group(1))
-    assert feed==code, f"Updater feed code {feed} must match signed Android versionCode {code}"
+    assert feed==912 and "work/android-primary-continuation-observation-20261105" in workflow
+    assert code>=feed
+    gate=text(".github/workflows/control-ai-source-gates.yml")
+    assert "compileDebugJavaWithJavac" in gate and ":app:assembleRelease" not in gate

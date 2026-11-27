@@ -9,13 +9,13 @@ BRIDGE=ROOT/"android/app/src/main/java/com/asterion/control/PhoneGitBridge.java"
 def test_owner_opt_in_native_ui_and_encrypted_github_only():
     main=MAIN.read_text(encoding="utf8")
     bridge=BRIDGE.read_text(encoding="utf8")
-    assert 'button(privateBridge,"Enable private phone relay"' in main
+    assert '.setTitle("Enable direct phone relay")' in main
     assert "PhoneGitBridge.configure(this,token,enabled)" in main
     assert "Fine-grained GitHub token" in main
     assert "phoneBridgeFeedback" in main
     assert "GitHub token" in main
     assert "AndroidKeyStore" in bridge
-    assert "PhoneGitBridge.enabled" in main
+    assert 'state.optBoolean("enabled")' in main
     assert "Azrazieliz/Asterion-Control-Bridge" in bridge
 
 def test_phone_scheduler_live_but_disabled_by_default():

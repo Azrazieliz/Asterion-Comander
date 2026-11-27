@@ -14,9 +14,10 @@ def test_samsung_keyboard_and_visible_blue_arrow_action():
 def test_preserves_user_draft_and_does_not_fake_completed_cycle():
     assert 'if(!before.isEmpty()&&!message.equals(before))' in S
     assert 'Existing user draft preserved; refusing to overwrite' in S
-    assert 'ChatGPT text still in composer; Send did not complete' in S
+    assert 'Send tap completed but message remains visible; do not replay an uncertain submission' in S
     assert 'Blue Send action cleared draft; await visible ChatGPT reply' in S
-    assert 'ChatGPT is no longer foreground' in S
+    assert 'Delivery unverified until exact assistant reply' in S
+    assert 'ChatGPT Android app is not foreground' in S
     assert '"com.openai.chatgpt".contentEquals(root.getPackageName())' in S
 
 def test_safe_fallback_requires_actual_visible_keyboard_window():

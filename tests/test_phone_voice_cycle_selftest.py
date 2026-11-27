@@ -21,11 +21,14 @@ def test_chatgpt_is_the_operator_and_android_does_not_start_local_cycles():
     activity=java("MainActivity.java")
     agent=java("AgentService.java")
     native=java("AndroidMcp.java")
-    assert '"ChatGPT checkpoint continuation"' in activity
+    assert '"Continuous development cycle status"' in activity
     assert '"Run two-turn phone cycle test"' not in activity
     assert 'this::startPhoneCycleTest' not in activity
-    assert 'cycles.tick()' not in agent
-    assert 'cycleWorker' not in agent
+    cycle=(ROOT/"android/app/src/main/java/com/asterion/control/ContinuationCycle.java").read_text(encoding="utf-8")
+    assert 'if(!state.optBoolean("active",false)||"paused".equals(state.optString("state")))' in cycle
+    assert 'if(!ledger.status().optBoolean("enabled",false))return status();' in cycle
+    assert 'if("acknowledged".equals(current))' in cycle
+    assert 'Run two-turn phone cycle test' not in activity
     assert 'control_phone_continuation_queue' in native
     assert 'control_phone_continuation_dispatch' in native
     assert 'control_phone_continuation_ack' in native
@@ -41,8 +44,10 @@ def test_mobile_data_is_allowed_but_requires_real_authorization():
 def test_release_is_a_real_optimized_owner_signed_apk():
     gradle=(ROOT/"android/app/build.gradle").read_text()
     workflow=(ROOT/".github/workflows/android-continuation-branch.yml").read_text()
-    assert "versionCode 912" in gradle
-    assert "versionName '0.9.12'" in gradle
+    import re
+    code=int(re.search(r"versionCode\s+(\d+)",gradle).group(1))
+    version=tuple(map(int,re.search(r"versionName\s+'(\d+)\.(\d+)\.(\d+)'",gradle).groups()))
+    assert code==version[0]*10000+version[1]*100+version[2] and code>=912
     assert "debuggable false" in gradle
     assert "minifyEnabled true" in gradle
     assert "signingConfig signingConfigs.ownerRelease" in gradle
