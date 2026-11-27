@@ -28,15 +28,10 @@ final class AssistantCapabilities {
             "Do not invent a capability if the list is empty. Browser, memory and model settings are available in the app navigation.";
     }
     static JSONObject proposal(String response)throws Exception{
-        String marker="```asterion_action";
-        int start=response.indexOf(marker);
-        if(start<0)return null;
-        int end=response.indexOf("```",start+marker.length());
-        if(end<0||response.indexOf(marker,start+marker.length())>=0)return null;
-        String raw=response.substring(start+marker.length(),end).trim();
-        if(raw.length()>5000)return null;
+        String raw=AssistantStructured.singleBlock(response,"asterion_action");
+        if(raw==null||raw.length()>5000)return null;
         JSONObject object=new JSONObject(raw);
-        if(object.length()!=3||!object.has("package")||!object.has("action")||
+        if(object.length()!=3||!(object.opt("package") instanceof String)||!(object.opt("action") instanceof String)||
             !(object.opt("payload") instanceof JSONObject))return null;
         return object;
     }

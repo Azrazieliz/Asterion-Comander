@@ -22,13 +22,23 @@ import java.util.regex.Pattern;
 final class AssistantMarkdown {
     private AssistantMarkdown(){}
     static void render(Context c,LinearLayout parent,String source,int text,int muted,int panel){
+        render(c,parent,source,text,muted,panel,null);
+    }
+    static void render(Context c,LinearLayout parent,String source,int text,int muted,int panel,java.util.function.Consumer<String> send){
         String[] lines=source.split("\n",-1);
         for(int at=0;at<lines.length;){
             String line=lines[at];
             if(line.startsWith("```")){
                 String language=line.substring(3).trim();StringBuilder code=new StringBuilder();at++;
                 while(at<lines.length&&!lines[at].startsWith("```")){if(code.length()>0)code.append('\n');code.append(lines[at++]);}
+                boolean closed=at<lines.length&&lines[at].equals("\x60\x60\x60");
                 if(at<lines.length)at++;
+                if(send!=null&&closed&&(language.equals(AssistantStructured.CHART)||language.equals(AssistantStructured.FORM))){
+                    try{add(parent,AssistantStructuredView.render(c,AssistantStructured.parse(language,code.toString()),text,muted,panel,send),8);continue;}
+                    catch(IllegalArgumentException invalid){
+                        add(parent,DesignSystem.text(c,"Interactive response unavailable: invalid component data.",12,muted,false),5);
+                    }
+                }
                 LinearLayout box=DesignSystem.vertical(c);box.setPadding(dp(c,12),dp(c,8),dp(c,12),dp(c,12));
                 box.setBackground(DesignSystem.shape(c,panel,0,12));
                 TextView copy=DesignSystem.text(c,language.isEmpty()?"Copy code":language+" · Copy",12,muted,true);

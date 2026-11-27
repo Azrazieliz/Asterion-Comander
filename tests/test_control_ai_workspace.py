@@ -22,3 +22,16 @@ def test_executable_split_utf8_reasoning_and_conversation_regressions(tmp_path):
     match = re.fullmatch(r"(\d+) assistant output and conversation behavior assertions passed; no model/device acceptance claimed", result.stdout.strip())
     assert match, result.stdout
     assert int(match.group(1)) >= 548
+
+def test_native_structured_response_data(tmp_path):
+    compiler=shutil.which('javac')
+    runtime=shutil.which('java')
+    if not compiler or not runtime:
+        pytest.skip('JDK required for executable Java behavior tests')
+    subprocess.run([compiler,'-encoding','UTF-8','-d',str(tmp_path),
+                    str(JAVA/'AssistantStructured.java'),
+                    str(ROOT/'tests/java/com/asterion/control/AssistantStructuredTest.java')],
+                   check=True,capture_output=True,text=True)
+    result=subprocess.run([runtime,'-cp',str(tmp_path),'com.asterion.control.AssistantStructuredTest'],
+                          check=True,capture_output=True,text=True,timeout=30)
+    assert re.fullmatch(r"\d+ structured response assertions passed",result.stdout.strip())

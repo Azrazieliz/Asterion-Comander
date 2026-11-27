@@ -131,7 +131,9 @@ public final class AssistantActivity extends Activity {
                 TextView role=label(m.role.equals("user")?"You":"Asterion",12,muted,true);turn.addView(role);
                 LinearLayout answer=DesignSystem.vertical(this);turn.addView(answer);
                 if(m.state.equals("running")){liveAnswer=answer;liveText=m.text;}
-                AssistantMarkdown.render(this,answer,m.text,text,muted,panel);
+                if(m.role.equals("assistant")&&m.state.equals("completed"))
+                    AssistantMarkdown.render(this,answer,m.text,text,muted,panel,selection->submitSelection(c,m,selection));
+                else AssistantMarkdown.render(this,answer,m.text,text,muted,panel);
                 if(!m.state.equals("running")){
                     LinearLayout tools=DesignSystem.horizontal(this);
                     tools.addView(control("Copy",()->((ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("Asterion",m.text))));
@@ -143,7 +145,7 @@ public final class AssistantActivity extends Activity {
                             tools.addView(control("Retry",this::retry));
                             tools.addView(control("Continue",()->{if(idle())session.send(this,"Continue the previous answer from where it ended, avoiding repetition.");}));
                         }
-                        try{JSONObject proposal=AssistantCapabilities.proposal(m.text);if(proposal!=null)tools.addView(control("Review action",()->reviewAction(proposal)));}catch(Exception ignored){}
+                        try{JSONObject proposal=m.state.equals("completed")?AssistantCapabilities.proposal(m.text):null;if(proposal!=null)tools.addView(control("Review action",()->reviewAction(proposal)));}catch(Exception ignored){}
                     }
                     turn.addView(tools);
                     if(m.omittedContextMessages>0)turn.addView(label(m.omittedContextMessages+" earlier messages remain in history outside this response's context",12,muted,false));
@@ -157,6 +159,13 @@ public final class AssistantActivity extends Activity {
             if(!current.equals(liveText)){liveAnswer.removeAllViews();AssistantMarkdown.render(this,liveAnswer,current,text,muted,panel);liveText=current;}
         }
         if(atBottom)transcript.post(()->transcript.fullScroll(View.FOCUS_DOWN));
+    }
+    private void submitSelection(AssistantConversation owner,AssistantConversation.Message message,String selection){
+        if(session.conversation!=owner||!owner.messages.contains(message)||!message.state.equals("completed")||!idle())return;
+        try{
+            if(selection.length()>OnDeviceModelProfile.read(this).inputChars){notice("Selections exceed the current model input budget.");return;}
+        }catch(Exception invalid){notice("The installed model configuration could not be read.");return;}
+        session.send(this,selection);
     }
     private void notice(String value){status.setText(value);}
     private boolean idle(){if(session.conversation.running()){notice("Stop the active response before changing conversations.");return false;}return true;}
