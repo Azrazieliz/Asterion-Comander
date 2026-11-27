@@ -89,7 +89,7 @@ public final class AssistantActivity extends Activity {
         composer.setBackground(DesignSystem.shape(this,panel,edge,18));box.addView(composer,new LinearLayout.LayoutParams(-1,-2));
         LinearLayout actions=DesignSystem.horizontal(this);actions.addView(control("Attach",this::attach));actions.addView(control("Voice",this::voice));
         View space=new View(this);actions.addView(space,new LinearLayout.LayoutParams(0,1,1));
-        send=control("Send",()->{if(session.conversation.running())session.cancel();else submit();});send.setTextColor(accent);actions.addView(send);box.addView(actions);root.addView(box);
+        send=control("Send",()->{if(session.conversation.running()||session.importingModel())session.cancel();else submit();});send.setTextColor(accent);actions.addView(send);box.addView(actions);root.addView(box);
         if(state!=null){draft=state.getString("draft","");composer.setText(draft);}
         speech=new TextToSpeech(this,result->{speechReady=result==TextToSpeech.SUCCESS;});
         session.listeners.add(observer);render();
@@ -130,8 +130,8 @@ public final class AssistantActivity extends Activity {
         if(ControlAssistantPreferences.saveHistory(this)&&!c.messages.isEmpty())getSharedPreferences("control",MODE_PRIVATE).edit().putString("assistant_last_conversation",c.id).apply();
         title.setText(c.title);project.setText(c.project);
         model.setText("On device · "+ControlAssistantPreferences.effort(this));
-        send.setText(c.running()?"Stop":"Send");
-        send.setEnabled(!session.busy()||c.running());
+        send.setText(c.running()||session.importingModel()?"Stop":"Send");
+        send.setEnabled(!session.busy()||c.running()||session.importingModel());
         status.setText(!session.persistenceIssue.isEmpty()?session.persistenceIssue:session.status);
         boolean atBottom=transcript.getChildCount()==0||body.getHeight()-transcript.getScrollY()-transcript.getHeight()<dp(120);
         boolean rebuild=drawnRevision!=c.revision||drawnCount!=c.messages.size()||drawnRunning!=c.running();
@@ -237,12 +237,30 @@ public final class AssistantActivity extends Activity {
     }
     private void deleteConversation(){if(!idle())return;AssistantConversation original=session.conversation;new AlertDialog.Builder(this).setTitle("Delete this conversation?").setMessage("Saved memories remain under Memory controls.").setNegativeButton("Cancel",null).setPositiveButton("Delete",(d,w)->{if(!idle()||session.conversation!=original)return;ControlAssistantMemory.deleteConversation(this,session.conversation.id);session.conversation=new AssistantConversation();session.status="";render();}).show();}
     private void modelSettings(){
-        String[] modes={"Fast","Balanced","Deep","Memory and assistant settings","Installed model details"};
+        String[] modes={"Fast","Balanced","Deep","Memory and assistant settings","Installed model details","Import signed model files"};
         new AlertDialog.Builder(this).setTitle("Model and reasoning").setItems(modes,(d,index)->{
             if(index<3){ControlAssistantPreferences.save(this,new String[]{"fast","balanced","deep"}[index],ControlAssistantPreferences.guidance(this));render();}
             else if(index==3){startActivity(new Intent(this,MainActivity.class).putExtra("assistant_settings",true));}
+            else if(index==5){chooseModelArtifact();}
             else session.work.execute(()->{try{JSONObject p=OnDeviceLlm.status(this);runOnUiThread(()->new AlertDialog.Builder(this).setTitle("Installed model").setMessage(p.optString("model_name")+"\n"+(p.optBoolean("model_loaded")?"Loaded":"Not loaded")+"\nContext: "+p.optInt("model_context_tokens")+" tokens\n"+p.optString("model_source")).setPositiveButton("Close",null).show());}catch(Exception e){runOnUiThread(()->notice("Model details unavailable."));}});
         }).setNegativeButton("Close",null).show();
+    }
+    private void chooseModelArtifact(){
+        if(!idle())return;
+        try{
+            OnDeviceModelProfile profile=OnDeviceModelProfile.read(this);
+            if(!profile.externalModelPack){notice("This signed release uses a bundled model; no separate model import is required.");return;}
+            String[] options=profile.adapterFile.isEmpty()?new String[]{"Base · "+profile.file}:
+                new String[]{"Base · "+profile.file,"Adapter · "+profile.adapterFile};
+            new AlertDialog.Builder(this).setTitle("Install signed model pack")
+                .setMessage("Select the exact delivered GGUF file. Its size, SHA-256 and base/adapter binding come from this signed app. No unsigned profile can replace them.")
+                .setItems(options,(dialog,index)->{
+                    if(!idle())return;
+                    Intent picker=new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE);
+                    try{startActivityForResult(picker,index==0?215:216);}
+                    catch(Exception unavailable){notice("Model document picker unavailable.");}
+                }).setNegativeButton("Cancel",null).show();
+        }catch(Exception invalid){notice("Signed model profile unavailable.");}
     }
     private void voice(){try{Intent intent=new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE,"en-US");startActivityForResult(intent,210);}catch(Exception unavailable){notice("Speech recognition is unavailable. Check Android speech services.");}}
     private void exportArtifact(AssistantArtifact artifact){
@@ -297,6 +315,16 @@ public final class AssistantActivity extends Activity {
         });
     }
     @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);
+        if(request==215||request==216){
+            if(result!=RESULT_OK||data==null||data.getData()==null||!idle())return;
+            android.net.Uri uri=data.getData();
+            boolean adapter=request==216;
+            new AlertDialog.Builder(this).setTitle(adapter?"Import verified adapter":"Import verified base model")
+                .setMessage("Copy this selected document into private model storage and verify it against the signed profile? The original file is not changed.")
+                .setPositiveButton("Import",(d,w)->{if(idle())session.importModel(this,uri,adapter);})
+                .setNegativeButton("Cancel",null).show();
+            return;
+        }
         if(request==212){
             AssistantArtifact artifact=session.pendingArtifact;session.pendingArtifact=null;
             if(result!=RESULT_OK||data==null||data.getData()==null)return;
