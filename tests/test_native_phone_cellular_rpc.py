@@ -205,3 +205,53 @@ def test_transfer_rpc_has_strict_route_specific_chunk_budget(monkeypatch):
 
 def test_ipv6_private_pairing_preserves_required_brackets():
     assert phone_bridge.validate_base('http://[fd00::7]:8973')=='http://[fd00::7]:8973'
+
+
+def test_actual_websocket_session_revocation_and_reconnect(monkeypatch):
+    """Real ASGI WebSocket + HTTP RPC, not a mock invoke or simulated phone result."""
+    from concurrent.futures import ThreadPoolExecutor
+    from starlette.websockets import WebSocketDisconnect
+    from asterion_remote import native_phone_live as live
+    from fastapi import FastAPI
+    state={"token":TOKEN}
+    next_token="new-pairing-"+"N"*40
+    monkeypatch.setattr(live,"load_registered_phone",lambda:dict(state))
+    monkeypatch.setattr(rpc,"load_registered_phone",lambda:dict(state))
+    monkeypatch.setattr(live,"paired_device_is_authorized",lambda _:False)
+    monkeypatch.setattr(live,"try_record",lambda *a,**kw:None)
+    monkeypatch.setattr(live,"_active",None)
+    monkeypatch.setattr(live,"_active_registration",None)
+    monkeypatch.setattr(live,"_pending",{})
+    import asyncio
+    monkeypatch.setattr(live,"_send_lock",asyncio.Lock())
+    app=FastAPI()
+    app.include_router(live.router)
+    app.include_router(rpc.router)
+    def headers(token):return {"Authorization":"Bearer "+token}
+    def answer(socket,network):
+        envelope=socket.receive_json()
+        req=envelope["rpc"]
+        assert req["params"]["name"]=="control_phone_network_status"
+        socket.send_json({"id":envelope["id"],"rpc":{"jsonrpc":"2.0","id":req["id"],
+            "result":{"content":[{"type":"text","text":json.dumps({"network":network,"connected":True})}]}}})
+    with TestClient(app,client=("127.0.0.1",8123)) as client, ThreadPoolExecutor(max_workers=1) as pool:
+        def request(token):
+            return client.post("/phone/rpc",headers=headers(token),
+                json={"path":"/network/status","timeout_seconds":2})
+        with client.websocket_connect("/phone/live",headers=headers(TOKEN)) as old:
+            future=pool.submit(request,TOKEN)
+            answer(old,"wifi")
+            assert future.result(timeout=5).json()["value"]["network"]=="wifi"
+            # A second valid socket cannot steal the live pairing.
+            with pytest.raises(WebSocketDisconnect):
+                with client.websocket_connect("/phone/live",headers=headers(TOKEN)):
+                    pytest.fail("authorized session silently replaced")
+            state["token"]=next_token
+            assert request(next_token).status_code==503
+            assert request(TOKEN).status_code==401
+            with client.websocket_connect("/phone/live",headers=headers(next_token)) as new:
+                future=pool.submit(request,next_token)
+                answer(new,"cellular")
+                result=future.result(timeout=5)
+                assert result.status_code==200 and result.json()["value"]["network"]=="cellular"
+            assert not live.connected()
