@@ -218,6 +218,10 @@ final class OnDeviceLlm {
             guidance+="\nActive project: "+project+". This label scopes local memory; project source access requires verified retrieval evidence. "+
                 "Reference blocks may be omitted to fit the active context. Do not assume complete retrieval.\n"+AssistantStructured.GUIDANCE+"\n"+AssistantSchedulePlan.GUIDANCE;
             java.util.ArrayList<byte[]> references=new java.util.ArrayList<>();
+            try{
+                String local=AssistantLocalContext.observe(context,userPrompt);
+                if(!local.isEmpty())references.add(local.getBytes(StandardCharsets.UTF_8));
+            }catch(Exception unavailable){references.add("Native status observation unavailable.".getBytes(StandardCharsets.UTF_8));}
             StringBuilder actionEvidence=new StringBuilder();
             int records=0;
             for(int i=messages.size()-1;i>=0&&records<4;i--){

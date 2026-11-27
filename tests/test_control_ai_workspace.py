@@ -95,3 +95,16 @@ def test_history_retrieval_is_project_scoped_source_linked_and_local_only():
     assert 'return saveHistory(ctx)&&prefs(ctx).getBoolean(REUSE_HISTORY,true)' in prefs
     assert 'LIMIT ? OFFSET ?' in memory
     assert 'historyPage(offset+50)' in (JAVA/'AssistantActivity.java').read_text(encoding='utf-8')
+
+
+def test_native_assistant_uses_current_allowlisted_device_observations():
+    local=(JAVA/'AssistantLocalContext.java').read_text(encoding='utf-8')
+    llm=(JAVA/'OnDeviceLlm.java').read_text(encoding='utf-8')
+    for owner in ('TransportConnectivity.report(c)','PhoneDirectMcp.status()','ControlPrivateVpn.status(c)',
+                  'ControlSecurityPolicy.status(c)','ContinuationCycle.get(c).status()','AssistantSchedules.list(c)'):
+        assert owner in local
+    assert 'raw.opt(key)' in local
+    assert 'value instanceof Boolean||value instanceof Number' in local
+    assert '"transcript"' not in local and '"question"' not in local and '"token"' not in local
+    assert 'AssistantLocalContext.observe(context,userPrompt)' in llm
+    assert 'actual local state observations' in local
