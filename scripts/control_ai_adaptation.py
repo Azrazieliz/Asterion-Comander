@@ -150,7 +150,7 @@ def train_adapter(args):
         with p.open("rb") as f:
             for chunk in iter(lambda:f.read(1024*1024),b""):
                 h.update(chunk)
-        hashes[str(p.relative_to(base))]=h.hexdigest()
+        hashes[p.relative_to(base).as_posix()]=h.hexdigest()
     out=Path(args.output)
     if out.exists():
         raise ValueError("candidate output must not already exist")
@@ -248,7 +248,7 @@ def train_adapter(args):
         "training_metrics":metrics,"training_precision":precision,"preference_training":preference_record,"adapter_only":True,"evaluated":False,
         "device_verified":False,"production_replaced":False,"weights_changed":before!=after,
         "trainable_sha256_before":before,"trainable_sha256_after":after,
-        "artifact_sha256":{str(p.relative_to(out)):file_hash(p) for p in sorted((out/"adapter").rglob("*")) if p.is_file()},
+        "artifact_sha256":{p.relative_to(out).as_posix():file_hash(p) for p in sorted((out/"adapter").rglob("*")) if p.is_file()},
         "training_device":device,"elapsed_s":time.time()-started,
         "parameters_trainable":sum(p.numel() for p in model.parameters() if p.requires_grad),
         "seed":42,"training_arguments":vars(args),

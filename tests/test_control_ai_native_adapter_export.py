@@ -35,3 +35,16 @@ def test_conversion_admission_requires_actual_weight_change(tmp_path):
     p=candidate/"candidate.json";record=json.loads(p.read_text());record["trainable_sha256_after"]=record["trainable_sha256_before"];p.write_text(json.dumps(record))
     with pytest.raises(ValueError,match="invalid_training_weight_lineage"):
         admit(candidate,base)
+
+
+def test_legacy_windows_manifest_paths_and_alias_rejection(tmp_path):
+    candidate,base=fixture(tmp_path)
+    p=candidate/"candidate.json"
+    record=json.loads(p.read_text())
+    record["artifact_sha256"]={k.replace("/","\\"):v for k,v in record["artifact_sha256"].items()}
+    p.write_text(json.dumps(record))
+    assert admit(candidate,base)["peft_adapter_sha256"]==file_hash(candidate/"adapter/adapter_model.safetensors")
+    record["artifact_sha256"]["adapter/adapter_model.safetensors"]=file_hash(candidate/"adapter/adapter_model.safetensors")
+    p.write_text(json.dumps(record))
+    with pytest.raises(ValueError,match="ambiguous_or_invalid_artifact_path"):
+        admit(candidate,base)

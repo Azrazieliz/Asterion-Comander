@@ -26,6 +26,18 @@ def verified_file(root,name,expected):
         raise ValueError("artifact_digest_mismatch")
     return file
 
+def canonical_paths(mapping):
+    """Support prior Windows records without allowing ambiguous aliases."""
+    if not isinstance(mapping,dict):raise ValueError("invalid_artifact_inventory")
+    result={}
+    for name,digest in mapping.items():
+        name=name.replace("\\","/")
+        parts=name.split("/")
+        if any(part in ("",".","..") or ":" in part for part in parts) or name in result:
+            raise ValueError("ambiguous_or_invalid_artifact_path")
+        result[name]=digest
+    return result
+
 def admit(candidate,base):
     candidate=Path(candidate).resolve(strict=True)
     base=Path(base).resolve(strict=True)
@@ -40,13 +52,13 @@ def admit(candidate,base):
     revision=manifest.get("base_revision_declared","")
     if not re.fullmatch(r"[a-f0-9]{40,64}",revision):
         raise ValueError("immutable_base_revision_required")
-    artifacts=manifest["artifact_sha256"]
+    artifacts=canonical_paths(manifest["artifact_sha256"])
     for required in ("adapter/adapter_model.safetensors","adapter/adapter_config.json"):
         if required not in artifacts:raise ValueError("missing_adapter_artifact")
     for name,digest in artifacts.items():
         if not name.startswith("adapter/"):raise ValueError("invalid_adapter_path")
         verified_file(candidate,name,digest)
-    base_hashes=manifest["base_files_sha256"]
+    base_hashes=canonical_paths(manifest["base_files_sha256"])
     verified_file(base,"config.json",base_hashes["config.json"])
     # The converter needs the exact training architecture metadata, not
     # another release of a similarly named foundation.
