@@ -1,0 +1,35 @@
+{
+  "candidates": [
+    {
+      "id": "olmo2-0425-1b-instruct-48d788eca847",
+      "app": "control",
+      "repo": "allenai/OLMo-2-0425-1B-Instruct",
+      "revision": "48d788eca847d4d7548f375ad03d3c9312f6139e",
+      "artifact_sha256": "36d044c73655bb904f822915e6294ba3dae8e6e1af5e703e9d452f2d6a3a294f",
+      "architecture": "dense",
+      "parameters_total_b": 1.484916736,
+      "parameters_active_b": 1.484916736,
+      "artifact_bytes": 2969854224,
+      "license": "Apache-2.0",
+      "status": "staged",
+      "created_ms": 1795793217221,
+      "probes": [],
+      "adaptations": [
+        {
+          "id": "evidence-a6fdb945a70793a7",
+          "base_candidate_id": "olmo2-0425-1b-instruct-48d788eca847",
+          "adapter_sha256": "a6fdb945a70793a7e676c2d8924211a48742f88835845d8f6401825367266e14",
+          "training_record_sha256": "8f8877ba6b41458a57f15c14d699411b2f19882f8e0dcf0944f1b007a8a0157b",
+          "evaluation_record_sha256": "317040a190938adb8cf4fc8ecc50e2f39e11c3fcbd6fac66cbb02ad25a9b6350",
+          "weights_changed": 1,
+          "created_ms": 1795793308518
+        }
+      ],
+      "phone_qualified": false,
+      "reasoning_quality_certified": false,
+      "no_automatic_model_selection": true
+    }
+  ],
+  "count": 1,
+  "phone_certification_open": true
+}

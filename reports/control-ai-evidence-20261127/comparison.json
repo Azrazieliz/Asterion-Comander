@@ -1,0 +1,97 @@
+{
+  "variants": {
+    "base": {
+      "suite_sha256": "433eba1b40bcb0f7ca0f148ca71d27b49628e60cd2f75ffc8731ff2a1187e69c",
+      "model_revision": "48d788eca847d4d7548f375ad03d3c9312f6139e",
+      "total_cases": 24,
+      "assessed": 24,
+      "passed": 0,
+      "failed": 24,
+      "model_errors": 0,
+      "remaining": 0,
+      "verified_accuracy": 0.0,
+      "categories": [
+        {
+          "category": "decision-authority",
+          "verdict": "failed",
+          "count": 6
+        },
+        {
+          "category": "distinct-count",
+          "verdict": "failed",
+          "count": 6
+        },
+        {
+          "category": "french-unit-cost",
+          "verdict": "failed",
+          "count": 6
+        },
+        {
+          "category": "test-postconditions",
+          "verdict": "failed",
+          "count": 6
+        }
+      ],
+      "fully_evaluated": true,
+      "model_weights_trained": false,
+      "evaluations_are_real": true
+    },
+    "adapted": {
+      "suite_sha256": "433eba1b40bcb0f7ca0f148ca71d27b49628e60cd2f75ffc8731ff2a1187e69c",
+      "model_revision": "a6fdb945a70793a7e676c2d8924211a48742f88835845d8f6401825367266e14",
+      "total_cases": 24,
+      "assessed": 24,
+      "passed": 5,
+      "failed": 19,
+      "model_errors": 0,
+      "remaining": 0,
+      "verified_accuracy": 0.20833,
+      "categories": [
+        {
+          "category": "decision-authority",
+          "verdict": "failed",
+          "count": 3
+        },
+        {
+          "category": "decision-authority",
+          "verdict": "passed",
+          "count": 3
+        },
+        {
+          "category": "distinct-count",
+          "verdict": "failed",
+          "count": 6
+        },
+        {
+          "category": "french-unit-cost",
+          "verdict": "failed",
+          "count": 6
+        },
+        {
+          "category": "test-postconditions",
+          "verdict": "failed",
+          "count": 4
+        },
+        {
+          "category": "test-postconditions",
+          "verdict": "passed",
+          "count": 2
+        }
+      ],
+      "fully_evaluated": true,
+      "model_weights_trained": false,
+      "evaluations_are_real": true
+    }
+  },
+  "suite": "public procedural diagnostic",
+  "decoding": {
+    "sample": false,
+    "max_new_tokens": 18,
+    "device": "cpu",
+    "dtype": "float32"
+  },
+  "generations_sha256": "073b9d80cdb7f67d51cfdaaef7ddf5d67c535670989947deb2c1fa61b572da46",
+  "independent_maturity_cases": 0,
+  "human_reviews": 0,
+  "device_verified": false
+}

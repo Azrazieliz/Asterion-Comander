@@ -1,0 +1,10 @@
+{
+  "repo": "allenai/OLMo-2-0425-1B-Instruct",
+  "revision": "48d788eca847d4d7548f375ad03d3c9312f6139e",
+  "weights_sha256": "36d044c73655bb904f822915e6294ba3dae8e6e1af5e703e9d452f2d6a3a294f",
+  "license": "Apache-2.0",
+  "model_card_sha256": "5f5b891d66a46079920172f8d5957ec386825f76cfc14ae2e79c7208d4dca4d8",
+  "source_commit": "1ec8f8c6bda94f1ca1da58dee0f6130e00e8856e",
+  "weights_bytes": 2969854224,
+  "suite_sha256_before_fit": "433eba1b40bcb0f7ca0f148ca71d27b49628e60cd2f75ffc8731ff2a1187e69c"
+}
