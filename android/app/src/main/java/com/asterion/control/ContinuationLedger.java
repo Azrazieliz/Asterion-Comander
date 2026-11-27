@@ -17,6 +17,9 @@ import java.nio.charset.StandardCharsets;
 final class ContinuationLedger {
   private static final String FILE = "continuation-state.json";
   private static final int MAX_PROMPT = 3800;
+  // Only the already owner-configured internal cycle may add its canonical
+  // handoff and bounded spoken answer to the externally limited input.
+  private static final int MAX_CYCLE_PROMPT = 9000;
   // Every new automated turn requires an actual observed response receipt.
   private static final long COOLDOWN_MS = 3500L;
   private static volatile ContinuationLedger singleton;
@@ -68,6 +71,15 @@ final class ContinuationLedger {
     return status();
   }
   synchronized JSONObject queue(JSONObject body) throws Exception {
+    return queueBounded(body,MAX_PROMPT);
+  }
+  synchronized JSONObject queueCycle(JSONObject body,String prior,int sequence,String phase) throws Exception {
+    if(!CycleRecoveryPolicy.unchangedBeforeQueue(prior,sequence,phase,
+        state.optString("last_checkpoint",""),state.optInt("sequence",0),state.optString("state","idle")))
+      throw new IllegalStateException("Continuation ledger changed before durable queue");
+    return queueBounded(body,MAX_CYCLE_PROMPT);
+  }
+  private JSONObject queueBounded(JSONObject body,int maxPrompt) throws Exception {
     if (!state.optBoolean("enabled")) throw new IllegalStateException("Owner has not enabled ChatGPT continuation on this Android phone");
     String project = body.optString("project", "").trim();
     String checkpoint = body.optString("checkpoint_id", "").trim();
@@ -78,7 +90,7 @@ final class ContinuationLedger {
       throw new IllegalArgumentException("Invalid project or checkpoint identifier");
     if (!(tier.equals("5*") || tier.equals("6*") || tier.equals("7*")))
       throw new IllegalArgumentException("Priority tier must be 5*, 6* or 7*");
-    if (spec.length() < 3 || spec.length() > 250 || text.isEmpty() || text.length() > MAX_PROMPT)
+    if (spec.length() < 3 || spec.length() > 250 || text.isEmpty() || text.length() > maxPrompt)
       throw new IllegalArgumentException("Invalid spec reference or continuation message");
     JSONArray history=state.optJSONArray("history");
     if(history!=null)for(int i=0;i<history.length();i++)

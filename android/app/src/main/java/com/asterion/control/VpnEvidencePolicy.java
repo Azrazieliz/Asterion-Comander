@@ -9,6 +9,9 @@ final class VpnEvidencePolicy {
         return expected!=null&&!expected.isEmpty()&&expected.equals(current)&&
             !configured&&!transition&&!active;
     }
+    static boolean fullRoute(boolean vpn,boolean validated,boolean ipv4,boolean ipv6,int dnsCount){
+        return vpn&&validated&&ipv4&&ipv6&&dnsCount>0;
+    }
     static boolean knownTransport(String transport){
         return "wifi".equals(transport)||"cellular".equals(transport)||"ethernet".equals(transport);
     }

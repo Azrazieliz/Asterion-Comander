@@ -10,6 +10,8 @@ public final class VpnEvidencePolicyTest {
         expect(false,VpnEvidencePolicy.mayCommitEnrollment("attempt","attempt",true,false,false));
         expect(false,VpnEvidencePolicy.mayCommitEnrollment("attempt","attempt",false,true,false));
         expect(false,VpnEvidencePolicy.mayCommitEnrollment("attempt","attempt",false,false,true));
+        for(int i=0;i<32;i++)expect(i==31,VpnEvidencePolicy.fullRoute(
+            (i&1)!=0,(i&2)!=0,(i&4)!=0,(i&8)!=0,(i&16)!=0?2:0));
         expect(true,VpnEvidencePolicy.comparable("wifi","wifi",100,1000));
         expect(false,VpnEvidencePolicy.comparable("wifi","cellular",100,1000));
         expect(false,VpnEvidencePolicy.comparable("unknown","unknown",100,1000));

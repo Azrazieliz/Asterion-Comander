@@ -62,12 +62,9 @@ public final class AgentService extends Service {
       java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
    private android.net.ConnectivityManager networkManager;
   private android.net.ConnectivityManager.NetworkCallback networkCallback;
-  private final java.util.concurrent.atomic.AtomicLong lastNetworkWake =
-      new java.util.concurrent.atomic.AtomicLong(0);
   private void wakePrivateBridge(){
-    long now=android.os.SystemClock.elapsedRealtime();
-    long previous=lastNetworkWake.get();
-    if(now-previous<5000L||!lastNetworkWake.compareAndSet(previous,now))return;
+    // The bound socket itself filters duplicate notifications. Throttling all
+    // callbacks can suppress the actual second handover inside a five-second window.
     PhoneDirectMcp.networkChanged();
   }
   @Override public void onCreate(){
@@ -100,6 +97,7 @@ public final class AgentService extends Service {
       networkManager=(android.net.ConnectivityManager)getSystemService(CONNECTIVITY_SERVICE);
       networkCallback=new android.net.ConnectivityManager.NetworkCallback(){
         @Override public void onAvailable(android.net.Network network){wakePrivateBridge();}
+        @Override public void onLost(android.net.Network network){wakePrivateBridge();}
         @Override public void onCapabilitiesChanged(android.net.Network network,
             android.net.NetworkCapabilities caps){
           if(caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED))

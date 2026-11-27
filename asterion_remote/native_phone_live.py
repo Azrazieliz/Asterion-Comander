@@ -26,6 +26,7 @@ from starlette.websockets import WebSocketDisconnect
 # Do not keep a second inconsistent copy under LOCALAPPDATA.
 router = APIRouter()
 _active: WebSocket | None = None
+_active_registration: str | None = None
 _pending: dict[str, asyncio.Future] = {}
 _send_lock = asyncio.Lock()
 
@@ -49,8 +50,20 @@ def _authorized(candidate: str) -> bool:
     return paired_device_is_authorized(candidate)
 
 
+def _registration_identity() -> str | None:
+    record=load_registered_phone()
+    token=record.get("token") if isinstance(record,dict) else None
+    return hashlib.sha256(token.encode()).hexdigest() if isinstance(token,str) and token else None
+
+
+def _session_authorized(ws: WebSocket) -> bool:
+    header=ws.headers.get("authorization","")
+    return (header.startswith("Bearer ") and
+            _active_registration==_registration_identity() and _authorized(header[7:]))
+
+
 def connected() -> bool:
-    return _active is not None
+    return _active is not None and _session_authorized(_active)
 
 
 def _fail_pending(reason: str) -> None:
@@ -62,7 +75,7 @@ def _fail_pending(reason: str) -> None:
 
 @router.websocket("/phone/live")
 async def phone_live(ws: WebSocket):
-    global _active
+    global _active, _active_registration
     header = ws.headers.get("authorization", "")
     # Record exact server-side rejection stage, NEVER the bearer or source IP.
     if not header.startswith("Bearer ") or not _authorized(header[7:]):
@@ -71,19 +84,42 @@ async def phone_live(ws: WebSocket):
                        "reason":"missing_bearer_header" if not header.startswith("Bearer ") else "unapproved_phone_key"})
         await ws.close(code=1008)
         return
-    if _active is not None:
-        # Never replace an in-flight session and silently replay its requests.
-        try_record("transport_error",component="phone_wss_relay",severity="warning",
-                   state="failed",attributes={"stage":"upgrade","reason":"session_already_active"})
-        await ws.close(code=1008)
-        return
-    await ws.accept()
-    _active = ws
+    async with _send_lock:
+        # A newly registered key must never be routed to an obsolete socket.
+        # Only retire a provably revoked session; a live authorized socket
+        # keeps its original no-replacement/no-replay behavior.
+        if _active is not None:
+            if _session_authorized(_active):
+                try_record("transport_error",component="phone_wss_relay",severity="warning",
+                           state="failed",attributes={"stage":"upgrade","reason":"session_already_active"})
+                await ws.close(code=1008)
+                return
+            revoked=_active
+            _active=None
+            _active_registration=None
+            _fail_pending("Phone pairing changed; previous request outcome uncertain")
+            try:
+                await revoked.close(code=1008)
+            except (RuntimeError,WebSocketDisconnect,OSError):
+                pass
+        # Recheck after the previous asynchronous close.
+        if not _authorized(header[7:]):
+            await ws.close(code=1008)
+            return
+        registration=_registration_identity()
+        await ws.accept()
+        _active=ws
+        _active_registration=registration
     try_record("phone_connected",component="phone_wss_relay",state="connected",
                attributes={"stage":"websocket_accepted"})
     try:
         while True:
             raw = await ws.receive_text()
+            if _active is not ws:
+                break
+            if not _session_authorized(ws):
+                await ws.close(code=1008)
+                break
             if len(raw) > 8_000_000:
                 raise ValueError("Android native RPC result too large")
             message = json.loads(raw)
@@ -107,6 +143,7 @@ async def phone_live(ws: WebSocket):
     finally:
         if _active is ws:
             _active = None
+            _active_registration = None
             try_record("transport_error",component="phone_wss_relay",severity="warning",
                        state="disconnected",attributes={"stage":"session_end"})
             _fail_pending("Phone direct HTTPS session dropped; outcome uncertain")
@@ -114,7 +151,7 @@ async def phone_live(ws: WebSocket):
 
 async def invoke(rpc: dict[str, Any], timeout: float = 22.0) -> dict:
     ws = _active
-    if ws is None:
+    if ws is None or not _session_authorized(ws):
         raise ConnectionError("Phone direct cellular connection is offline")
     method = rpc.get("method")
     if method not in ("tools/call", "tools/list", "ping"):
@@ -129,8 +166,8 @@ async def invoke(rpc: dict[str, Any], timeout: float = 22.0) -> dict:
     _pending[id_] = future
     try:
         async with _send_lock:
-            if _active is not ws:
-                raise DirectPhoneUncertain("Phone session changed before dispatch")
+            if _active is not ws or not _session_authorized(ws):
+                raise DirectPhoneUncertain("Phone session or pairing changed before dispatch")
             await ws.send_text(json.dumps({"id": id_, "rpc": rpc}, separators=(",", ":")))
         # Timeout means the phone might have executed the request.
         return await asyncio.wait_for(future, timeout)

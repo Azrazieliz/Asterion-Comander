@@ -47,9 +47,11 @@ final class PhoneDirectMcp {
   private static final long HEALTHY_WSS_WINDOW_MS=65000L;
   private static final long HEARTBEAT_GRACE_MS=35000L;
   private static Thread worker;
+  private static AgentService requestedOwner;
   private PhoneDirectMcp(){}
 
   static synchronized void start(AgentService owner){
+    requestedOwner=owner;
     if(!STARTED.compareAndSet(false,true))return;
     stop=false;appContext=owner.getApplicationContext();
     worker=new Thread(()->loop(owner),"asterion-direct-mcp");
@@ -65,11 +67,17 @@ final class PhoneDirectMcp {
       Network current=manager==null?null:manager.getActiveNetwork();
       if(current!=null&&current.equals(socketNetwork))return;
     }
+    closeActiveSocket();
+  }
+  private static void closeActiveSocket(){
     SSLSocket sock=active;
     if(sock!=null)try{sock.close();}catch(Exception ignored){}
   }
   static synchronized void stop(){
-    stop=true;networkChanged();
+    requestedOwner=null;
+    stop=true;
+    // Explicit service shutdown must close even an unchanged bound network.
+    closeActiveSocket();
     Thread thread=worker;
     if(thread!=null)thread.interrupt();
   }
@@ -116,7 +124,13 @@ final class PhoneDirectMcp {
         sleep(2800);
       }
     }finally{
-      connected=false;phase="stopped";STARTED.set(false);
+      synchronized(PhoneDirectMcp.class){
+        connected=false;phase="stopped";worker=null;STARTED.set(false);
+        // Android may recreate the service before its previous thread exits.
+        // Start exactly one successor, not a second concurrent session.
+        AgentService next=requestedOwner;
+        if(next!=null)start(next);
+      }
     }
   }
   private static void sleep(long ms){
@@ -200,7 +214,11 @@ final class PhoneDirectMcp {
     Frame(int op,byte[] b){opcode=op;payload=b;}
   }
   private static Frame readFrame(InputStream in)throws Exception{
-    int a=(int)unsigned(in),b=(int)unsigned(in);
+    int a=(int)unsigned(in);
+    // Only an idle timeout BEFORE a frame is safe for a heartbeat.
+    // Once a frame starts, a timeout is an incomplete protocol message.
+    try{
+    int b=(int)unsigned(in);
     if((a&0x80)==0)throw new IllegalArgumentException("Fragmented WSS frames not supported");
     if((b&0x80)!=0)throw new IllegalArgumentException("Server masked a WebSocket frame");
     int opcode=a&0x0f;
@@ -214,6 +232,9 @@ final class PhoneDirectMcp {
     byte[] data=in.readNBytes((int)len);
     if(data.length!=(int)len)throw new java.io.EOFException("Truncated WebSocket payload");
     return new Frame(opcode,data);
+    }catch(SocketTimeoutException partial){
+      throw new IOException("Incomplete authenticated WebSocket frame",partial);
+    }
   }
   private static SSLSocket openBoundTlsSocket(Context owner)throws Exception{
     ConnectivityManager manager=(ConnectivityManager)owner.getSystemService(
@@ -247,6 +268,7 @@ final class PhoneDirectMcp {
     SSLSocket socket=openBoundTlsSocket(owner);
     active=socket;
     try(SSLSocket sock=socket){
+      if(stop)throw new IOException("Control service stopped before TLS handshake");
       SSLParameters options=sock.getSSLParameters();
       options.setEndpointIdentificationAlgorithm("HTTPS");
       sock.setSSLParameters(options);
@@ -263,6 +285,7 @@ final class PhoneDirectMcp {
         Frame frame;
         try{frame=readFrame(in);}
         catch(SocketTimeoutException timeout){
+          if(stop||!pairedToken.equals(AgentService.token(owner)))break;
           long now=System.currentTimeMillis();
           if(outstandingPingAtMs>0 &&
              now-outstandingPingAtMs>HEARTBEAT_GRACE_MS)
@@ -273,6 +296,7 @@ final class PhoneDirectMcp {
           }
           continue;
         }
+        if(stop||!pairedToken.equals(AgentService.token(owner)))break;
         if(frame.opcode==8)break;
         if(frame.opcode==9){
           lastWireResponseMs=System.currentTimeMillis();
