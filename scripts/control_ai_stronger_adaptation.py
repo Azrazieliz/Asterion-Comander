@@ -121,6 +121,11 @@ def prepare_evaluation(root,evaluation_id):
         raise ValueError("evaluation_directory_outside_root")
     evaluation=parent/evaluation_id
     evaluation.mkdir(exist_ok=False)
+    # The evaluator admits only datasets inside its approved evidence root.
+    # Preserve the frozen original and verify the exact copy before use.
+    frozen=evaluation/"generation-evaluation.jsonl"
+    shutil.copyfile(root/"generation-evaluation.jsonl",frozen)
+    verified_file(evaluation,frozen.name,report["suite_sha256"])
     for key in ("base_score","adapted_score","application_score","error"):
         report.pop(key,None)
     report.update(state="evaluation_admitted",evaluation_id=evaluation_id,
@@ -263,6 +268,8 @@ def run(root,expanded=False,device="cuda",steps=None,parent=None,phase="train",e
         # Real free-generation comparison; never certify the model on these fixtures.
         os.environ["HF_HUB_OFFLINE"]="1";os.environ["TRANSFORMERS_OFFLINE"]="1"
         os.environ["ASTERION_MODEL_EVAL_ROOT"]=str(evaluation)
+        suite=evaluation/"generation-evaluation.jsonl"
+        verified_file(evaluation,suite.name,report["suite_sha256"])
         import torch
         from peft import PeftModel
         from transformers import AutoModelForCausalLM,AutoTokenizer
