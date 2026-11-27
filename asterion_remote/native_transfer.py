@@ -131,6 +131,8 @@ def finalize_verified_android_transfer(
             if code not in (408,500,502,503,504):
                 raise RuntimeError(f"android_finish_http_{code}") from ex
             publish_state("outcome_unknown")
+    elif initial_phase=="outcome_unknown":
+        raise RuntimeError("android_publication_outcome_unknown")
     elif initial_phase not in ("verifying","publishing","completed","failed"):
         raise RuntimeError("android_unknown_initial_transfer_phase")
     if envelope is not None and envelope.get("ok") is True:
@@ -161,6 +163,8 @@ def finalize_verified_android_transfer(
             if phase=="completed":
                 receipt=state.get("result")
                 break
+            if phase=="outcome_unknown":
+                raise RuntimeError("android_publication_outcome_unknown")
             if phase=="failed":
                 error=state.get("error_code","android_publication_failed")
                 if not isinstance(error,str) or len(error)>100:
@@ -267,6 +271,8 @@ def _copy(key: str, path: Path, name: str, paired: dict, cancel: threading.Event
                 raise RuntimeError("Phone returned invalid transfer offset")
             _update(key,state="transferring",size=size,bytes_sent=offset,
                     recovered_bytes=offset,transport=client.route)
+            if init.get("phase","receiving")!="receiving" and offset!=size:
+                raise RuntimeError("Android transfer no longer accepts incomplete file")
             with path.open("rb") as file:
                 while offset<size:
                     if cancel.is_set():raise InterruptedError("Cancelled by user")
@@ -297,15 +303,17 @@ def _copy(key: str, path: Path, name: str, paired: dict, cancel: threading.Event
             "outcome uncertain" in str(e).lower() or \
             "outcome_unknown" in str(e).lower() or \
             "cancel_ambiguous" in str(e).lower()
-        label="cancelled" if aborted else ("outcome_unknown" if unknown else "failed")
-        _update(key,state=label,error=type(e).__name__+": "+str(e)[:160])
+        label="cancelled" if aborted and transfer_id is None else ("outcome_unknown" if unknown or aborted else "failed")
         if transfer_id and aborted:
             try:
                 with httpx.Client(timeout=4,trust_env=False,follow_redirects=False) as c:
                     route=_TransferTransport(c,base,paired["token"])
                     route.get(base+"/health",headers=headers).raise_for_status()
-                    route.post(base+"/transfer/cancel/"+transfer_id,json={},headers=headers)
+                    reply=route.post(base+"/transfer/cancel/"+transfer_id,json={},headers=headers)
+                    reply.raise_for_status()
+                    if reply.json().get("cancelled") is True:label="cancelled"
             except Exception:pass
+        _update(key,state=label,error=type(e).__name__+": "+str(e)[:160])
 
 def _run_copy(key,path,name,paired,cancel):
     try:

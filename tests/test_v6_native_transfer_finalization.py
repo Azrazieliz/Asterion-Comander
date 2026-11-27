@@ -257,3 +257,24 @@ def test_resumed_completed_transfer_reads_receipt_without_finish_replay():
             token='redacted',transfer_id='valid-id-123',checksum=EXPECTED,size=SIZE,
             publish_state=lambda phase:None,cancel=threading.Event(),initial_phase='completed')
     assert reply==LEGACY and client.posts==0 and client.gets==1
+
+
+def test_interrupted_android_publication_is_not_replayed():
+    import pytest
+    client=FakeClient(AssertionError("Must not reinsert or finish"))
+    with pytest.raises(RuntimeError,match="publication_outcome_unknown"):
+        finalize_verified_android_transfer(client=client,base="http://127.0.0.1:8765",
+            token="redacted",transfer_id="valid-id-123",checksum=EXPECTED,size=SIZE,
+            publish_state=lambda phase:None,cancel=threading.Event(),initial_phase="outcome_unknown")
+    assert client.posts==client.gets==0
+
+
+def test_recovery_poll_stops_on_durable_unknown_publication():
+    import pytest
+    client=FakeClient({"phase":"verifying"},[{"phase":"outcome_unknown","size":SIZE,"sha256":EXPECTED}])
+    with patch("asterion_remote.native_transfer.time.sleep",return_value=None):
+        with pytest.raises(RuntimeError,match="publication_outcome_unknown"):
+            finalize_verified_android_transfer(client=client,base="http://127.0.0.1:8765",
+                token="redacted",transfer_id="valid-id-123",checksum=EXPECTED,size=SIZE,
+                publish_state=lambda phase:None,cancel=threading.Event())
+    assert client.posts==1 and client.gets==1
