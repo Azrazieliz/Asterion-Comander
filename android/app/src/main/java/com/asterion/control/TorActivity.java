@@ -47,6 +47,9 @@ public final class TorActivity extends Activity {
     private TorService tor;
     private boolean bound,closed,probing;
     private volatile boolean ready;
+    private volatile boolean checkingWebView;
+    private long probeDeadline;
+    private int verifiedHttpPort=-1;
     private long started,verifiedAt;
     private int proxyPort=-1;
     private String privateProfile;
@@ -101,7 +104,7 @@ public final class TorActivity extends Activity {
         LinearLayout nav=DesignSystem.horizontal(this);
         for(String label:new String[]{"Back","Verify","Close Tor"}){
             Runnable action=label.equals("Back")?()->{if(ready&&web!=null&&web.canGoBack())web.goBack();}:
-                label.equals("Verify")?()->{if(ready){ready=false;go.setEnabled(false);web.stopLoading();web.getSettings().setBlockNetworkLoads(true);probe();}}:this::finish;
+                label.equals("Verify")?()->{if(ready){suspendNavigation();probe();}}:this::finish;
             nav.addView(button(label,action),new LinearLayout.LayoutParams(0,dp(48),1));
         }root.addView(nav);setContentView(root);root.requestApplyInsets();
         if(!WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)||!BrowserPrivateProfiles.supported()){
@@ -130,19 +133,47 @@ public final class TorActivity extends Activity {
             });
             web.setWebViewClient(new WebViewClient(){
                 @Override public boolean shouldOverrideUrlLoading(WebView v,WebResourceRequest request){
+                    if(checkingWebView)return !request.isForMainFrame()||!CHECK_API.equals(request.getUrl().toString());
                     return !ready||TorAddressPolicy.resolve(request.getUrl().toString())==null||!request.isForMainFrame();
                 }
                 @Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest request){
-                    if(!ready||!"GET".equals(request.getMethod())||TorAddressPolicy.resolve(request.getUrl().toString())==null)
+                    boolean proof=checkingWebView&&request.isForMainFrame()&&CHECK_API.equals(request.getUrl().toString());
+                    if((!ready&&!proof)||!"GET".equals(request.getMethod())||TorAddressPolicy.resolve(request.getUrl().toString())==null)
                         return new WebResourceResponse("text/plain","UTF-8",403,"Blocked",java.util.Collections.emptyMap(),new ByteArrayInputStream(new byte[0]));
                     return null;
                 }
                 @Override public void onReceivedSslError(WebView v,SslErrorHandler h,android.net.http.SslError e){h.cancel();status.setText("Tor · Website certificate rejected");}
                 @Override public void onReceivedError(WebView v,WebResourceRequest request,WebResourceError error){
-                    if(request.isForMainFrame())status.setText("Tor · Page could not load; no direct fallback");
+                    if(request.isForMainFrame()){
+                        if(checkingWebView){fail("Tor WebView exit check failed");return;}
+                        status.setText("Tor · Page could not load; no direct fallback");
+                    }
                 }
                 @Override public void onPageFinished(WebView v,String url){
-                    if(ready&&TorAddressPolicy.resolve(url)!=null){address.setText(url);status.setText("Tor exit verified · Restricted browser mode");}
+                    if(checkingWebView){
+                        if(!CHECK_API.equals(url))return;
+                        final int generation=epoch;
+                        // Read only the fixed official proof document, never run scripts on arbitrary sites.
+                        v.evaluateJavascript("document.body ? document.body.innerText : ''",value->{
+                            if(closed||generation!=epoch||!checkingWebView)return;
+                            try{
+                                Object decoded=new org.json.JSONTokener(value).nextValue();
+                                if(!(decoded instanceof String)||((String)decoded).length()>4096||
+                                    !TorProofPolicy.isTor(new JSONObject((String)decoded).optBoolean("IsTor",false),
+                                                         new JSONObject((String)decoded).optString("IP",""))||
+                                    tor==null||tor.getSocksPort()!=proxyPort||tor.getHttpTunnelPort()!=verifiedHttpPort){
+                                    fail("Tor WebView exit not verified");return;
+                                }
+                                checkingWebView=false;probing=false;verifiedAt=SystemClock.elapsedRealtime();
+                                ready=true;go.setEnabled(true);
+                                status.setText("Tor WebView exit verified · Restricted browser mode");
+                                if(pending!=null){String destination=pending;pending=null;navigate(destination);}
+                                else navigate(CHECK);
+                            }catch(Exception invalid){fail("Tor WebView proof unreadable");}
+                        });
+                        return;
+                    }
+                    if(ready&&TorAddressPolicy.resolve(url)!=null){address.setText(url);status.setText("Tor WebView exit verified · Restricted browser mode");}
                 }
             });
             web.setDownloadListener((u,a,d,m,l)->Toast.makeText(this,"Downloads disabled in isolated Tor mode",Toast.LENGTH_SHORT).show());
@@ -159,16 +190,20 @@ public final class TorActivity extends Activity {
         DesignSystem.clickable(v,this,DesignSystem.SURFACE2,DesignSystem.EDGE,12);
         v.setContentDescription(title);v.setFocusable(true);v.setOnClickListener(w->action.run());return v;
     }
+    private void suspendNavigation(){
+        ready=false;go.setEnabled(false);web.stopLoading();web.getSettings().setBlockNetworkLoads(true);
+    }
     private void poll(){
         if(closed||tor==null)return;
-        if(!ready&&verifiedAt==0&&SystemClock.elapsedRealtime()-started>120000){fail("Tor bootstrap timed out");return;}
+        long now=SystemClock.elapsedRealtime();
+        if(probing&&now>probeDeadline){fail("Tor verification timed out");return;}
         if(!ready&&!probing){
-            if(SystemClock.elapsedRealtime()-started>120000){fail("Tor bootstrap timed out");return;}
+            if(verifiedAt==0&&now-started>120000){fail("Tor bootstrap timed out");return;}
             int socks=tor.getSocksPort(),http=tor.getHttpTunnelPort();
             if(socks>0&&http>0){proxyPort=socks;probe();}
-        }else if(ready&&(tor.getSocksPort()!=proxyPort||SystemClock.elapsedRealtime()-verifiedAt>300000)){
-            ready=false;go.setEnabled(false);web.stopLoading();web.getSettings().setBlockNetworkLoads(true);
-            if(tor.getSocksPort()!=proxyPort){fail("Tor proxy changed; reopen mode");return;}
+        }else if(ready&&(tor.getSocksPort()!=proxyPort||tor.getHttpTunnelPort()!=verifiedHttpPort||now-verifiedAt>300000)){
+            suspendNavigation();
+            if(tor.getSocksPort()!=proxyPort||tor.getHttpTunnelPort()!=verifiedHttpPort){fail("Tor proxy changed; reopen mode");return;}
             probe();
         }
         ui.postDelayed(this::poll,1000);
@@ -177,7 +212,7 @@ public final class TorActivity extends Activity {
         if(closed||probing||tor==null)return;
         final int socks=tor.getSocksPort(),http=tor.getHttpTunnelPort(),generation=++epoch;
         if(socks<=0||http<=0){fail("Tor proxy unavailable");return;}
-        probing=true;status.setText("Tor · Checking actual exit through native proxy");
+        probing=true;probeDeadline=SystemClock.elapsedRealtime()+65000;status.setText("Tor · Checking actual exit through native proxy");
         io.execute(()->{
             boolean verified=false;
             HttpURLConnection conn=null;
@@ -192,7 +227,7 @@ public final class TorActivity extends Activity {
                         ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] buf=new byte[512];int n;
                         while((n=in.read(buf))!=-1){if(out.size()+n>4096)throw new IllegalStateException("oversized proof");out.write(buf,0,n);}
                         JSONObject proof=new JSONObject(new String(out.toByteArray(),StandardCharsets.UTF_8));
-                        verified=proof.optBoolean("IsTor",false)&&!proof.optString("IP","").isEmpty();
+                        verified=TorProofPolicy.isTor(proof.optBoolean("IsTor",false),proof.optString("IP",""));
                     }
                 }
             }catch(Exception ignored){}finally{if(conn!=null)conn.disconnect();}
@@ -200,7 +235,7 @@ public final class TorActivity extends Activity {
             ui.post(()->{
                 if(closed||generation!=epoch)return;
                 probing=false;
-                if(!ok||tor==null||tor.getSocksPort()!=socks){
+                if(!ok||tor==null||tor.getSocksPort()!=socks||tor.getHttpTunnelPort()!=http){
                     if(SystemClock.elapsedRealtime()-started>120000||verifiedAt>0){fail("Tor exit could not be verified");return;}
                     status.setText("Tor · Building circuit; exit proof pending");return;
                 }
@@ -210,11 +245,11 @@ public final class TorActivity extends Activity {
                     probing=true;
                     ProxyController.getInstance().setProxyOverride(config,getMainExecutor(),()->{
                         if(closed||generation!=epoch)return;
-                        probing=false;proxyPort=socks;verifiedAt=SystemClock.elapsedRealtime();
-                        ready=true;web.getSettings().setBlockNetworkLoads(false);go.setEnabled(true);
-                        status.setText("Tor exit verified · Restricted browser mode");
-                        if(pending!=null){String url=pending;pending=null;navigate(url);}
-                        else if(web.getUrl()==null)navigate(CHECK);
+                        if(tor==null||tor.getSocksPort()!=socks||tor.getHttpTunnelPort()!=http){fail("Tor proxy changed before WebView check");return;}
+                        proxyPort=socks;verifiedHttpPort=http;checkingWebView=true;
+                        status.setText("Tor · Checking the actual WebView exit");
+                        web.getSettings().setBlockNetworkLoads(false);
+                        web.loadUrl(CHECK_API);
                     });
                 }catch(RuntimeException failure){fail("WebView Tor proxy could not be applied");}
             });
@@ -229,7 +264,7 @@ public final class TorActivity extends Activity {
         web.loadUrl(url);
     }
     private void fail(String reason){
-        ready=false;closed=true;epoch++;ui.removeCallbacksAndMessages(null);go.setEnabled(false);status.setText(reason+" · No direct fallback");
+        ready=false;checkingWebView=false;closed=true;epoch++;ui.removeCallbacksAndMessages(null);go.setEnabled(false);status.setText(reason+" · No direct fallback");
         if(web!=null){web.stopLoading();web.getSettings().setBlockNetworkLoads(true);}
         releaseService();
     }
@@ -238,7 +273,7 @@ public final class TorActivity extends Activity {
         tor=null;
     }
     @Override public void onDestroy(){
-        closed=true;ready=false;epoch++;ui.removeCallbacksAndMessages(null);
+        closed=true;ready=false;checkingWebView=false;epoch++;ui.removeCallbacksAndMessages(null);
         if(web!=null){
             web.stopLoading();web.getSettings().setBlockNetworkLoads(true);
             if(web.getParent()!=null)((android.view.ViewGroup)web.getParent()).removeView(web);

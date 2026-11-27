@@ -3,10 +3,12 @@ on:
   push:
     branches:
       - work/control-non-ai-sandbox-integrity-20261126
+      - work/control-native-ai-reconstruction-20261126
     paths:
       - 'asterion_remote/isolated_test_runner.py'
       - 'tests/test_isolated_candidate_snapshot.py'
       - '.github/workflows/control-isolated-candidate-acceptance.yml'
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
