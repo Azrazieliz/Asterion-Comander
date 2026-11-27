@@ -27,9 +27,13 @@ final class BrowserResearchText {
     static String excerpt(String text,String term){
         if(term==null||term.isBlank()||term.length()>120||term.codePoints().anyMatch(Character::isISOControl))
             throw new IllegalArgumentException("Invalid comparison term");
+        // Compare captured content, not URL/title/timestamp/hash metadata.
+        int boundary=text.startsWith("Browser source capture\n")?text.indexOf("\n\n"): -1;
+        int contentStart=boundary<0?0:boundary+2;
         Matcher match=Pattern.compile(Pattern.quote(term.strip()),Pattern.CASE_INSENSITIVE|Pattern.UNICODE_CASE).matcher(text);
+        match.region(contentStart,text.length());
         if(!match.find())return "No literal match in captured text.";
-        int start=Math.max(0,match.start()-120),end=Math.min(text.length(),match.end()+120);
+        int start=Math.max(contentStart,match.start()-120),end=Math.min(text.length(),match.end()+120);
         if(start>0&&Character.isLowSurrogate(text.charAt(start)))start--;
         if(end<text.length()&&Character.isHighSurrogate(text.charAt(end-1)))end++;
         return "Exact record UTF-16 ["+start+","+end+"):\n"+text.substring(start,end);

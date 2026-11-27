@@ -22,7 +22,7 @@ public final class BrowserResearchActivity extends Activity {
     private final ExecutorService io=Executors.newSingleThreadExecutor();
     private LinearLayout body;
     private TextView status;
-    private boolean alive=true;
+    private volatile boolean alive=true;
     private JSONArray sources=new JSONArray();
     private int dp(int x){return DesignSystem.dp(this,x);}
     private TextView label(String t,int size,int color,boolean bold){return DesignSystem.text(this,t,size,color,bold);}
@@ -36,6 +36,13 @@ public final class BrowserResearchActivity extends Activity {
         super.onCreate(state);DesignSystem.configure(this);
         LinearLayout root=DesignSystem.vertical(this);root.setBackgroundColor(DesignSystem.BG);
         root.setPadding(dp(16),dp(12),dp(16),dp(12));
+        if(android.os.Build.VERSION.SDK_INT>=30){
+            getWindow().setDecorFitsSystemWindows(false);
+            root.setOnApplyWindowInsetsListener((v,insets)->{
+                android.graphics.Insets bars=insets.getInsets(android.view.WindowInsets.Type.systemBars()|android.view.WindowInsets.Type.displayCutout());
+                root.setPadding(bars.left+dp(16),bars.top+dp(12),bars.right+dp(16),bars.bottom+dp(12));return insets;
+            });
+        }
         root.addView(label("Research board",24,DesignSystem.TEXT,true));
         root.addView(label("Saved browser sources · exact captures and local comparisons",13,DesignSystem.MUTED,false));
         LinearLayout bar=DesignSystem.horizontal(this);
@@ -43,7 +50,7 @@ public final class BrowserResearchActivity extends Activity {
         bar.addView(action("Back",this::finish),new LinearLayout.LayoutParams(0,-2,1));root.addView(bar);
         status=label("",13,DesignSystem.MUTED,false);root.addView(status);
         ScrollView scroll=new ScrollView(this);body=DesignSystem.vertical(this);scroll.addView(body);
-        root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));setContentView(root);
+        root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));setContentView(root);root.requestApplyInsets();
         Intent incoming=getIntent();String capture=incoming.getStringExtra("capture"),name=incoming.getStringExtra("source_name");
         incoming.removeExtra("capture");incoming.removeExtra("source_name");
         if(state==null&&capture!=null&&capture.length()<=34000&&name!=null){
@@ -58,6 +65,7 @@ public final class BrowserResearchActivity extends Activity {
         }else refresh("");
     }
     private void refresh(String message){
+        if(!alive||io.isShutdown())return;
         io.execute(()->{
             try{
                 JSONArray rows=ControlAssistantMemory.projectSources(this,BrowserResearchText.PROJECT);
@@ -84,7 +92,8 @@ public final class BrowserResearchActivity extends Activity {
                 String content=ControlAssistantMemory.readProjectSource(this,BrowserResearchText.PROJECT,row.getString("id"));
                 runOnUiThread(()->{
                     if(!alive)return;
-                    TextView text=label(content,14,DesignSystem.TEXT,false);text.setTextIsSelectable(true);
+                    String visible=content.length()>40000?content.substring(0,40000)+"\n\n[Preview limited; the complete encrypted source is retained.]":content;
+                    TextView text=label(visible,14,DesignSystem.TEXT,false);text.setTextIsSelectable(true);
                     text.setPadding(dp(16),dp(8),dp(16),dp(8));
                     ScrollView scroll=new ScrollView(this);scroll.addView(text);
                     new AlertDialog.Builder(this).setTitle(citation+" · "+row.optString("name")).setView(scroll)
