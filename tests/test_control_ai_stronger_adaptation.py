@@ -78,7 +78,8 @@ def _retained_evaluation(tmp_path):
         "trainable_sha256_before":"a"*64,"trainable_sha256_after":"b"*64,
         "base_revision_declared":revision,"base_files_sha256":{"config.json":"c"*64},
         "artifact_sha256":{str(p.relative_to(candidate)):file_hash(p) for p in adapter.iterdir()}})
-    suite=tmp_path/"generation-evaluation.jsonl";suite.write_text('{"prompt":"test"}\n')
+    suite=tmp_path/"generation-evaluation.jsonl"
+    suite.write_text(json.dumps({"id":"case-0001","split":"holdout","category":"reasoning","mode":"exact","prompt":"Return the requested result","expected":"test"})+"\n",encoding="utf-8")
     dump(tmp_path/"report.json",{"model":MODEL,"base":BASE,"revision":revision,
         "base_revision":"6e5971d9eba42665f5bd5a0fcf047f299ce1dccc","state":"trained",
         "adapter_sha256":digest,"suite_sha256":file_hash(suite)})
@@ -122,3 +123,16 @@ def test_retained_evaluation_rejects_modified_suite(tmp_path):
     with pytest.raises(ValueError,match="artifact_digest_mismatch"):
         prepare_evaluation(tmp_path,"first")
     assert not (tmp_path/"evaluations").exists()
+
+def test_retained_evaluation_suite_is_inside_approved_evaluator_root(tmp_path,monkeypatch):
+    from scripts.control_ai_stronger_adaptation import prepare_evaluation
+    from scripts.control_ai_adaptation import file_hash
+    from asterion_remote import model_evaluation
+    _retained_evaluation(tmp_path)
+    report,attempt=prepare_evaluation(tmp_path,"frozen")
+    frozen=attempt/"generation-evaluation.jsonl"
+    monkeypatch.setenv("ASTERION_MODEL_EVAL_ROOT",str(attempt))
+    assert file_hash(frozen)==report["suite_sha256"]
+    assert model_evaluation.inspect(frozen)["total_cases"]==1
+    result=model_evaluation.run_batch(frozen,"diagnostic-fixture",lambda p,i:{"content":"test"})
+    assert result["fully_evaluated"] and result["passed"]==1
