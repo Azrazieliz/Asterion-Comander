@@ -136,7 +136,7 @@ def phone_native(path,method='GET',body=None):
     from .phone_bridge import request
     return request(path,method,body,timeout=10.0).json()
 
-_PARTNER_PACKAGE=re.compile(r'[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*){1,12}')
+_PARTNER_PACKAGE=re.compile(r'[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*){1,12}')
 _PARTNER_ACTION=re.compile(r'[a-z][a-z0-9_.-]{0,79}')
 _PARTNER_ID=re.compile(r'[A-Za-z0-9_.:-]{8,100}')
 
