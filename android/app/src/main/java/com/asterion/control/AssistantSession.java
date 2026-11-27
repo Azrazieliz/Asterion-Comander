@@ -15,7 +15,7 @@ final class AssistantSession {
     final CopyOnWriteArrayList<Runnable> listeners=new CopyOnWriteArrayList<>();
     AssistantConversation conversation=new AssistantConversation();
     String status="",persistenceIssue="";
-    private volatile boolean stopRequested;
+    private InferenceGate.Request activeRequest;
     private long lastNotification;
     void changed(){for(Runnable listener:listeners)listener.run();}
     void save(Context c){
@@ -26,14 +26,18 @@ final class AssistantSession {
         if(conversation.running())return;
         Context app=context.getApplicationContext();
         final AssistantConversation target=conversation;
-        long generation=target.begin(prompt);stopRequested=false;
+        long generation=target.begin(prompt);
+        InferenceGate.Request request=new InferenceGate.Request();
+        activeRequest=request;
+        String project=target.project;
+        java.util.List<AssistantConversation.Message> messages=target.modelMessages();
         status="Preparing local model";save(app);changed();
         work.execute(()->{
             String[] finalText={""};
             try{
-                if(stopRequested)throw new InterruptedException();
-                String answer=OnDeviceLlm.generate(app,target.project,target.modelMessages(),new OnDeviceLlm.Stream(){
+                String answer=OnDeviceLlm.generate(app,project,messages,new OnDeviceLlm.Stream(){
                     public void context(int tokens,int omitted){main.post(()->{
+                        if(activeRequest!=request || !target.running() || target.revision!=generation)return;
                         target.messages.get(target.messages.size()-1).omittedContextMessages=omitted;
                         status=omitted==0?"Generating on this phone":"Generating · "+omitted+" earlier messages outside active context";changed();});}
                     public void text(String text){
@@ -42,19 +46,28 @@ final class AssistantSession {
                         if(now-lastNotification<70)return;lastNotification=now;
                         main.post(()->{if(target.update(generation,text,"running"))changed();});
                     }
-                });
+                },request);
                 main.post(()->{
-                    target.update(generation,answer,stopRequested?"cancelled":"completed");
-                    status=stopRequested?"Stopped":"";save(app);changed();
+                    if(activeRequest!=request)return;
+                    activeRequest=null;
+                    target.update(generation,answer,request.isCancelled()?"cancelled":"completed");
+                    status=request.isCancelled()?"Stopped":"";save(app);changed();
                 });
             }catch(Exception|LinkageError failure){
                 main.post(()->{
-                    target.update(generation,finalText[0],stopRequested?"cancelled":"failed");
-                    status=stopRequested?"Stopped":"The local model could not finish. Your message is retained; you can retry.";
+                    if(activeRequest!=request)return;
+                    activeRequest=null;
+                    target.update(generation,finalText[0],request.isCancelled()?"cancelled":"failed");
+                    status=request.isCancelled()?"Stopped":"The local model could not finish. Your message is retained; you can retry.";
                     save(app);changed();
                 });
             }
         });
     }
-    void cancel(){if(conversation.running()){stopRequested=true;OnDeviceLlm.cancel();status="Stopping";changed();}}
+    void cancel(){
+        if(activeRequest!=null&&conversation.running()){
+            OnDeviceLlm.cancel(activeRequest);
+            status="Stopping";changed();
+        }
+    }
 }

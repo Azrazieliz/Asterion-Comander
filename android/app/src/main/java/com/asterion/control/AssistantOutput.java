@@ -5,10 +5,14 @@ import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
-import java.util.Locale;
 
 /** Presentation boundary for model output. Never treats model text as an executable command. */
 final class AssistantOutput {
+    private static final String[] MARKERS={"<think>","</think>","<analysis>","</analysis>",
+            "<|im_start|>","<|im_end|>","<|endoftext|>","<|eot_id|>",
+            "<|start_header_id|>","<|end_header_id|>",
+            "<|channel|>analysis<|message|>","<|channel|>final<|message|>",
+            "<|end|>","<|return|>","<|im_sep|>"};
     private final ByteArrayOutputStream bytes=new ByteArrayOutputStream();
     private boolean initiallyThinking;
     synchronized void initialThinking(boolean value){initiallyThinking=value;}
@@ -27,32 +31,31 @@ final class AssistantOutput {
     static String visible(String raw,boolean complete){return visible(raw,complete,false);}
     static String visible(String raw,boolean complete,boolean initiallyThinking){
         if(raw==null)return "";
-        String lower=raw.toLowerCase(Locale.ROOT);
-        String[] markers={"<think>","</think>","<analysis>","</analysis>",
-            "<|im_start|>","<|im_end|>","<|endoftext|>","<|eot_id|>",
-            "<|start_header_id|>","<|end_header_id|>",
-            "<|channel|>analysis<|message|>","<|channel|>final<|message|>",
-            "<|end|>","<|return|>","<|im_sep|>"};
         StringBuilder result=new StringBuilder();
         int depth=initiallyThinking?1:0;
         for(int i=0;i<raw.length();){
             String match=null;
-            for(String marker:markers)if(lower.startsWith(marker,i)){match=marker;break;}
+            if(raw.charAt(i)=='<'){
+                int available=raw.length()-i;
+                boolean partial=false;
+                for(String marker:MARKERS){
+                    int length=Math.min(available,marker.length());
+                    if(!raw.regionMatches(true,i,marker,0,length))continue;
+                    if(length==marker.length()){match=marker;break;}
+                    partial=true;
+                }
+                if(match==null&&partial)break;
+            }
             if(match!=null){
                 if(match.equals("<think>")||match.equals("<analysis>")||
                     match.equals("<|channel|>analysis<|message|>"))depth++;
                 else if(match.equals("</think>")||match.equals("</analysis>"))depth=Math.max(0,depth-1);
                 else if(match.equals("<|channel|>final<|message|>"))depth=0;
-                else if(match.equals("<|im_start|>")||match.equals("<|start_header_id|>"))break;
+                else if(match.equals("<|im_start|>")||match.equals("<|start_header_id|>")||
+                        match.equals("<|im_end|>")||match.equals("<|endoftext|>")||
+                        match.equals("<|eot_id|>")||match.equals("<|return|>"))break;
                 i+=match.length();continue;
             }
-            // Withhold incomplete delimiters at EVERY token boundary, including final
-            // truncated generations. A visible prefix must never flash internal text.
-            String tail=lower.substring(i);
-            boolean prefix=false;
-            if(tail.charAt(0)=='<')for(String marker:markers)
-                if(marker.startsWith(tail)){prefix=true;break;}
-            if(prefix)break;
             if(depth==0)result.append(raw.charAt(i));
             i++;
         }

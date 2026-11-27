@@ -38,7 +38,7 @@ final class OnDeviceAiJobs {
         final String id,sha;
         final long requestedAt;
         volatile String state="queued";
-        volatile boolean cancelRequested=false;
+        final InferenceGate.Request request=new InferenceGate.Request();
         volatile String result="",error="";
         volatile long finishedAt=0;
         Job(String id,String sha){
@@ -140,7 +140,7 @@ final class OnDeviceAiJobs {
     }
     private static void execute(Context ctx,Job job,String prompt){
         synchronized(LOCK){
-            if(job.cancelRequested){
+            if(job.request.isCancelled()){
                 job.state="cancelled";job.finishedAt=System.currentTimeMillis();
                 try{persist(ctx,job);}catch(Exception ignored){}
                 return;
@@ -156,11 +156,11 @@ final class OnDeviceAiJobs {
         }
         String output=null;
         String error="";
-        try{output=OnDeviceLlm.generate(ctx,prompt);}
+        try{output=OnDeviceLlm.generate(ctx,prompt,job.request);}
         catch(Exception|LinkageError failure){error=failure.getClass().getSimpleName();}
         synchronized(LOCK){
             job.finishedAt=System.currentTimeMillis();
-            if(job.cancelRequested)job.state="cancelled";
+            if(job.request.isCancelled())job.state="cancelled";
             else if(error.isEmpty()&&output!=null&&!output.isBlank()){
                 job.result=output;job.state="completed";
             }else{
@@ -196,8 +196,7 @@ final class OnDeviceAiJobs {
             if("completed".equals(job.state)||"failed".equals(job.state)||
                 "cancelled".equals(job.state))
                 return response(job).put("cancel_effective",false);
-            job.cancelRequested=true;
-            if("running".equals(job.state))OnDeviceLlm.cancel();
+            OnDeviceLlm.cancel(job.request);
             job.state="cancel_requested";
             persist(c,job);
             return response(job).put("cancel_effective",true);

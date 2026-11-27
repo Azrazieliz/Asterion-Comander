@@ -24,6 +24,7 @@ static bool load_profile(const char *path,const char *adapter,const char *backen
     if(!initialized){llama_backend_init();initialized=true;}
     llama_model_params params=llama_model_default_params();
     params.n_gpu_layers=layers;
+    params.progress_callback=[](float,void *){return !cancel_generation.load();};
     ggml_backend_dev_t devices[2]={nullptr,nullptr};
     if(layers>0){
         if(!backend||!*backend)return false;

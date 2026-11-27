@@ -1,6 +1,6 @@
 """Execute production Java presentation/state logic, without Android or an inference surrogate."""
 from pathlib import Path
-import os
+import re
 import shutil
 import subprocess
 import pytest
@@ -13,10 +13,12 @@ def test_executable_split_utf8_reasoning_and_conversation_regressions(tmp_path):
     runtime=shutil.which('java')
     if not compiler or not runtime:
         pytest.skip('JDK required for executable Java behavior tests')
-    subprocess.run([compiler,'-d',str(tmp_path),str(JAVA/'AssistantOutput.java'),
-                    str(JAVA/'AssistantConversation.java'),
+    subprocess.run([compiler,'-encoding','UTF-8','-d',str(tmp_path),str(JAVA/'AssistantOutput.java'),
+                    str(JAVA/'AssistantConversation.java'),str(JAVA/'InferenceGate.java'),
                     str(ROOT/'tests/java/com/asterion/control/AssistantWorkspaceTest.java')],
                    check=True,capture_output=True,text=True)
     result=subprocess.run([runtime,'-cp',str(tmp_path),'com.asterion.control.AssistantWorkspaceTest'],
                           check=True,capture_output=True,text=True,timeout=30)
-    assert '523 assistant output and conversation behavior assertions passed' in result.stdout
+    match = re.fullmatch(r"(\d+) assistant output and conversation behavior assertions passed; no model/device acceptance claimed", result.stdout.strip())
+    assert match, result.stdout
+    assert int(match.group(1)) >= 548

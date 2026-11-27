@@ -72,7 +72,7 @@ class CapabilitySurfaceTests(unittest.TestCase):
         workspace=(ROOT/"android/app/src/main/java/com/asterion/control/AssistantActivity.java").read_text("utf8")
         session=(ROOT/"android/app/src/main/java/com/asterion/control/AssistantSession.java").read_text("utf8")
         self.assertIn('session.send(this,prompt)',workspace)
-        self.assertIn('OnDeviceLlm.generate(app,target.project,target.modelMessages()',session)
+        self.assertIn('OnDeviceLlm.generate(app,project,messages,',session)
 
     def test_embedded_windows_navigation_not_duplicated(self):
         text=JAVA.read_text("utf8")

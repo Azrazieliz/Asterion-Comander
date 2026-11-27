@@ -1,6 +1,6 @@
 """Phone-head source contract. A server-side status is not a phone model."""
 from pathlib import Path
-import re, unittest
+import json, re, unittest
 
 ROOT=Path(__file__).resolve().parents[1]
 MAIN=(ROOT/"android/app/src/main/java/com/asterion/control/MainActivity.java").read_text("utf8")
@@ -9,18 +9,31 @@ NATIVE=(ROOT/"android/app/src/main/cpp/on_device_llm.cpp").read_text("utf8")
 CMAKE=(ROOT/"android/app/src/main/cpp/CMakeLists.txt").read_text("utf8")
 GRADLE=(ROOT/"android/app/build.gradle").read_text("utf8")
 
+JAVA=ROOT/"android/app/src/main/java/com/asterion/control"
+WORKSPACE=(JAVA/"AssistantActivity.java").read_text("utf8")
+SESSION=(JAVA/"AssistantSession.java").read_text("utf8")
+JOBS=(JAVA/"OnDeviceAiJobs.java").read_text("utf8")
+GATE=(JAVA/"InferenceGate.java").read_text("utf8")
+PROFILE=json.loads((ROOT/"android/app/src/main/assets/models/control-model.json").read_text("utf8"))
+
 class PhoneHeadTests(unittest.TestCase):
     def test_model_runs_only_in_phone(self):
-        self.assertIn('OnDeviceLlm.generate(getApplicationContext(),prompt)',MAIN)
+        self.assertIn('new Intent(this,AssistantActivity.class)',MAIN)
+        self.assertIn('session.send(this,prompt)',WORKSPACE)
+        self.assertIn('OnDeviceLlm.generate(app,project,messages,',SESSION)
+        self.assertIn('OnDeviceLlm.generate(ctx,prompt,job.request)',JOBS)
         self.assertIn("System.loadLibrary(\"asterion_llm\")",LOCAL)
-        self.assertIn('nativeGenerate(prompt,192)',LOCAL)
+        self.assertIn('byte[] output=nativeGenerate(systemText.getBytes(StandardCharsets.UTF_8),roles,content,',LOCAL)
+        self.assertIn('outputBudget,contextBudget,stream)',LOCAL)
+        self.assertGreater(PROFILE["max_new_tokens"],192)
         self.assertIn("llama_model_load_from_file",NATIVE)
         self.assertIn("llama_process",NATIVE)
         self.assertIn("LLAMA_SOURCE_DIR",CMAKE)
-        self.assertIn("MODEL_BYTES=484220288L",LOCAL)
-        self.assertIn("MODEL_SHA256=",LOCAL)
-        self.assertIn("373db06783953f0981572d008f183eb2167b93304f5adbf7c4ce6ed6a91ee437",LOCAL)
-        self.assertIn("external_server_required",LOCAL)
+        self.assertIn('stageArtifact(context,folder,profile.file,profile.bytes,profile.sha256,request)',LOCAL)
+        self.assertIn('received!=length||!sha.equals(hex(digest.digest()))',LOCAL)
+        self.assertEqual(PROFILE["bytes"],484220288)
+        self.assertEqual(PROFILE["sha256"],"373db06783953f0981572d008f183eb2167b93304f5adbf7c4ce6ed6a91ee437")
+        self.assertIn('"external_server_required",false',LOCAL)
         self.assertIn('"paid_cloud_api_required",false',LOCAL)
         self.assertNotIn('http://',LOCAL)
         self.assertNotIn('https://',LOCAL)
@@ -35,12 +48,18 @@ class PhoneHeadTests(unittest.TestCase):
         self.assertNotIn('prefs.getString("token"',block)
         self.assertIn('showRemoteSection("diagnostics")',block)
     def test_real_model_hard_release_gate(self):
-        build=(ROOT/"scripts/build_owner_signed_control_0935.ps1").read_text("utf8")
+        code=int(re.search(r"versionCode (\d+)",GRADLE).group(1))
+        version=re.search(r"versionName '([0-9.]+)'",GRADLE).group(1)
+        self.assertGreaterEqual(code,938)
+        build=(ROOT/f"scripts/build_owner_signed_control_{version.replace('.', '')}.ps1").read_text("utf8")
         for required in ("actual bundled GGUF is missing","actual bundled GGUF SHA mismatch",
                          "native inference library not compiled"):
             self.assertIn(required,build)
-        self.assertIn("versionCode 935",GRADLE)
-        self.assertIn("versionName '0.9.35'",GRADLE)
+        self.assertIn(f"$code={code}",build)
+        self.assertIn(f"$version='{version}'",build)
+        self.assertIn(PROFILE["file"],build)
+        self.assertIn(str(PROFILE["bytes"]),build)
+        self.assertIn(PROFILE["sha256"],build)
     def test_real_vpn_measurement(self):
         net=(ROOT/"android/app/src/main/java/com/asterion/control/ControlVpnVerification.java").read_text("utf8")
         self.assertIn("https://api.ipify.org?format=json",net)
@@ -67,14 +86,18 @@ class PhoneHeadTests(unittest.TestCase):
         self.assertIn("Android VPN permission is still required",MAIN)
 
     def test_phone_ai_can_cancel_expensive_decode(self):
-        self.assertIn("OnDeviceLlm.cancel()",MAIN)
+        self.assertIn("session.cancel()",WORKSPACE)
+        self.assertIn('c.running()?"Stop":"Send"',WORKSPACE)
+        self.assertIn("OnDeviceLlm.cancel(activeRequest)",SESSION)
+        self.assertIn("OnDeviceLlm.cancel(job.request)",JOBS)
         self.assertIn("nativeCancel()",LOCAL)
         self.assertIn("nativeResetCancel()",LOCAL)
-        self.assertIn("on_device_inference_already_running",LOCAL)
-        self.assertIn("BUSY.compareAndSet(false,true)",LOCAL)
+        self.assertIn("on_device_inference_already_running",GATE)
+        self.assertIn("GATE.begin(request)",LOCAL)
+        self.assertIn("GATE.end(request)",LOCAL)
         self.assertIn("Java_com_asterion_control_OnDeviceLlm_nativeCancel",NATIVE)
         self.assertIn("cancel_generation.load",NATIVE)
-        self.assertIn('setNegativeButton("Stop"',MAIN)
+        self.assertIn("cp.abort_callback=",NATIVE)
 
     def test_new_native_ui_choices_visible(self):
         app=MAIN.split("private void showAppIntegrationActions(",1)[1].split(

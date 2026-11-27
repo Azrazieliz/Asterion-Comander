@@ -79,8 +79,8 @@ def test_model_wrapper_rejects_arbitrary_tools(path,method):
 
 
 def test_model_jobs_have_real_offline_execution_and_private_journal():
-    assert "OnDeviceLlm.generate(ctx,prompt)" in JOB
-    assert "OnDeviceLlm.cancel()" in JOB
+    assert "OnDeviceLlm.generate(ctx,prompt,job.request)" in JOB
+    assert "OnDeviceLlm.cancel(job.request)" in JOB
     assert "Executors.newSingleThreadExecutor" in JOB
     assert "SharedPreferences" in JOB
     assert "prompt_sha256" in JOB

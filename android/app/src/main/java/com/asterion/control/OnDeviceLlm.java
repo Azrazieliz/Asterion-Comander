@@ -12,7 +12,6 @@ import java.security.MessageDigest;
 import java.util.Locale;
 import java.util.List;
 import java.util.Collections;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * In-process, on-device GGUF inference. No Windows AI server and no cloud API.
@@ -22,8 +21,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 final class OnDeviceLlm {
     private static final Object LOCK=new Object();
-    private static final AtomicBoolean BUSY=new AtomicBoolean(false);
-    private static final AtomicBoolean CANCELLED=new AtomicBoolean(false);
     private static final boolean LIBRARY_LOADED;
     private static volatile boolean modelReady=false;
     private static volatile String lastFailure="";
@@ -34,6 +31,8 @@ final class OnDeviceLlm {
         catch (UnsatisfiedLinkError error) {loaded=false;lastFailure="native_library_missing";}
         LIBRARY_LOADED=loaded;
     }
+    private static final InferenceGate GATE=new InferenceGate(
+        ()->{if(LIBRARY_LOADED)nativeResetCancel();}, ()->{if(LIBRARY_LOADED)nativeCancel();});
     private OnDeviceLlm(){}
     private static native boolean nativeLoad(String privateFile);
     private static native boolean nativeLoadProfile(String file,String adapter,String backend,int layers);
@@ -50,7 +49,7 @@ final class OnDeviceLlm {
         final AssistantOutput output=new AssistantOutput();
         final Stream listener;
         int promptTokens,omittedMessages,pieces;
-        long firstPieceNanos,lastPieceNanos;
+        long firstPieceNanos,lastPieceNanos,firstVisibleNanos;
         NativeStream(Stream listener){this.listener=listener;}
         public void onStart(boolean thinking,int tokens,int omitted){
             promptTokens=tokens;
@@ -62,15 +61,13 @@ final class OnDeviceLlm {
             lastPieceNanos=System.nanoTime();
             if(pieces++==0)firstPieceNanos=lastPieceNanos;
             String text=output.append(bytes);
+            if(firstVisibleNanos==0 && !text.isBlank())firstVisibleNanos=lastPieceNanos;
             if(listener!=null)listener.text(text);
         }
     }
     private static native void nativeCancel();
     private static native void nativeResetCancel();
-    static void cancel(){
-        CANCELLED.set(true);
-        if(LIBRARY_LOADED)nativeCancel();
-    }
+    static void cancel(InferenceGate.Request request){GATE.cancel(request);}
     private static native void nativeUnload();
 
     static JSONObject status(Context context) throws Exception {
@@ -81,7 +78,7 @@ final class OnDeviceLlm {
             .put("platform","android_phone")
             .put("inference_backend","llama_cpp_jni")
             .put("native_library_loaded",LIBRARY_LOADED)
-            .put("inference_active",BUSY.get())
+            .put("inference_active",GATE.busy())
             .put("model_bundled_in_apk",hasPackagedModel(context,profile))
             .put("model_name",profile.file)
             .put("model_context_tokens",profile.contextTokens)
@@ -112,7 +109,7 @@ final class OnDeviceLlm {
             return false;
         }
     }
-    static boolean ensureLoaded(Context context) {
+    private static boolean ensureLoaded(Context context,InferenceGate.Request request) {
         synchronized(LOCK) {
             if(!LIBRARY_LOADED){lastFailure="native_library_missing";return false;}
             try{
@@ -122,16 +119,16 @@ final class OnDeviceLlm {
                 if(!folder.isDirectory()&&!folder.mkdirs()){
                     lastFailure="private_model_storage_unavailable";return false;
                 }
-                File file=stageArtifact(context,folder,profile.file,profile.bytes,profile.sha256);
-                if(CANCELLED.get())throw new InterruptedException("user_cancelled");
+                File file=stageArtifact(context,folder,profile.file,profile.bytes,profile.sha256,request);
+                if(request.isCancelled())throw new InterruptedException("user_cancelled");
                 if(profile.adapterFile.isEmpty()&&profile.backendDevice.isEmpty()){
                     modelReady=nativeLoad(file.getAbsolutePath());
                 }else{
                     String adapter="";
                     if(!profile.adapterFile.isEmpty())
                         adapter=stageArtifact(context,folder,profile.adapterFile,profile.adapterBytes,
-                            profile.adapterSha256).getAbsolutePath();
-                    if(CANCELLED.get())throw new InterruptedException("user_cancelled");
+                            profile.adapterSha256,request).getAbsolutePath();
+                    if(request.isCancelled())throw new InterruptedException("user_cancelled");
                     modelReady=nativeLoadProfile(file.getAbsolutePath(),adapter,profile.backendDevice,profile.offloadLayers);
                 }
                 lastFailure=modelReady?"":"native_model_load_failed";
@@ -145,14 +142,14 @@ final class OnDeviceLlm {
             }
         }
     }
-    private static File stageArtifact(Context context,File folder,String name,long length,String sha)throws Exception {
+    private static File stageArtifact(Context context,File folder,String name,long length,String sha,InferenceGate.Request request)throws Exception {
         File file=new File(folder,name);
         MessageDigest digest=MessageDigest.getInstance("SHA-256");
         byte[] buffer=new byte[256*1024];
         if(file.isFile()&&file.length()==length){
             try(InputStream in=new FileInputStream(file)){
                 for(int size;(size=in.read(buffer))!=-1;){
-                    if(CANCELLED.get())throw new InterruptedException("user_cancelled");
+                    if(request.isCancelled())throw new InterruptedException("user_cancelled");
                     digest.update(buffer,0,size);
                 }
             }
@@ -165,7 +162,7 @@ final class OnDeviceLlm {
             try(InputStream input=context.getAssets().open("models/"+name,AssetManager.ACCESS_STREAMING);
                 FileOutputStream output=new FileOutputStream(temporary)){
                 for(int size;(size=input.read(buffer))!=-1;){
-                    if(CANCELLED.get())throw new InterruptedException("user_cancelled");
+                    if(request.isCancelled())throw new InterruptedException("user_cancelled");
                     received+=size;
                     if(received>length)throw new IllegalStateException("invalid_length");
                     output.write(buffer,0,size);
@@ -187,29 +184,26 @@ final class OnDeviceLlm {
             String.format(Locale.ROOT,"%02x",value&255));
         return result.toString();
     }
-    static String generate(Context context,String userPrompt) throws Exception {
+    static String generate(Context context,String userPrompt,InferenceGate.Request request) throws Exception {
         return generate(context,"General",Collections.singletonList(new AssistantConversation.Message(
-            "single-turn","user",userPrompt,"completed")),null);
+            "single-turn","user",userPrompt,"completed")),null,request);
     }
-    static String generate(Context context,String project,List<AssistantConversation.Message> messages,Stream listener) throws Exception {
+    static String generate(Context context,String project,List<AssistantConversation.Message> messages,Stream listener,InferenceGate.Request request) throws Exception {
         OnDeviceModelProfile profile=OnDeviceModelProfile.read(context);
         if(messages==null||messages.isEmpty()||messages.size()>1000)
             throw new IllegalArgumentException("invalid_conversation_messages");
         String userPrompt=messages.get(messages.size()-1).text;
         if(userPrompt==null||userPrompt.isBlank()||userPrompt.length()>profile.inputChars)
             throw new IllegalArgumentException("prompt_length_invalid");
-        if(!BUSY.compareAndSet(false,true))
-            throw new IllegalStateException("on_device_inference_already_running");
-        CANCELLED.set(false);
+        GATE.begin(request);
         try{
             if(!LIBRARY_LOADED)throw new IllegalStateException("native_library_missing");
-            nativeResetCancel();
             long requestStarted=System.nanoTime();
             boolean warm=modelReady;
             int outputBudget=ControlAssistantPreferences.outputTokens(context,profile);
             new OnDeviceModelResources(context).contextTokens(profile,outputBudget,modelReady);
-            if(!ensureLoaded(context))throw new IllegalStateException(lastFailure);
-            if(CANCELLED.get())throw new InterruptedException("user_cancelled");
+            if(!ensureLoaded(context,request))throw new IllegalStateException(lastFailure);
+            if(request.isCancelled())throw new InterruptedException("user_cancelled");
             String recalled=ControlAssistantMemory.relevant(context,userPrompt,project);
             String guidance=ControlAssistantPreferences.promptGuidance(context);
             guidance+="\nRuntime identity: You are the assistant embedded in the native Asterion Control Android application. "
@@ -236,10 +230,12 @@ final class OnDeviceLlm {
             long inferenceStarted=System.nanoTime();
             byte[] output=nativeGenerate(systemText.getBytes(StandardCharsets.UTF_8),roles,content,
                 outputBudget,contextBudget,stream);
-            if(CANCELLED.get())throw new InterruptedException("user_cancelled");
+            if(request.isCancelled())throw new InterruptedException("user_cancelled");
             if(output==null||output.length==0)throw new IllegalStateException("native_context_or_generation_failed");
             String result=stream.output.finish(output);
             if(result.isBlank())throw new IllegalStateException("no_visible_model_answer");
+            long answerReady=System.nanoTime();
+            if(stream.firstVisibleNanos==0)stream.firstVisibleNanos=answerReady;
             OnDeviceModelResources after=new OnDeviceModelResources(context);
             lastCompletedGeneration=new JSONObject()
                 .put("base_sha256",profile.sha256)
@@ -252,6 +248,8 @@ final class OnDeviceLlm {
                 .put("prompt_tokens",stream.promptTokens)
                 .put("omitted_messages",stream.omittedMessages)
                 .put("generated_token_pieces",stream.pieces)
+                .put("request_to_first_visible_ms",(stream.firstVisibleNanos-requestStarted)/1_000_000)
+                .put("request_total_ms",(answerReady-requestStarted)/1_000_000)
                 .put("request_to_first_piece_ms",(stream.firstPieceNanos-requestStarted)/1_000_000)
                 .put("inference_to_first_piece_ms",(stream.firstPieceNanos-inferenceStarted)/1_000_000)
                 .put("decode_between_pieces_ms",(stream.lastPieceNanos-stream.firstPieceNanos)/1_000_000)
@@ -261,6 +259,6 @@ final class OnDeviceLlm {
                 .put("thermal_before",resources.thermalStatus)
                 .put("thermal_after",after.thermalStatus);
             return result;
-        }finally{BUSY.set(false);}
+        }finally{GATE.end(request);}
     }
 }

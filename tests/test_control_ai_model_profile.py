@@ -34,7 +34,8 @@ def test_on_device_loader_uses_profile_not_named_vendor_constants():
     assert "ControlAssistantPreferences.outputTokens(context,profile)" in source
     assert "outputBudget,contextBudget" in source
     assert "sha.equals(hex(digest.digest()))" in source
-    assert "on_device_inference_already_running" in source
+    assert "GATE.begin(request)" in source
+    assert "GATE.end(request)" in source
     assert "/no_think" not in source
     assert "MODEL_FILE=" not in source
     assert "Qwen3-0.6B" not in source
@@ -60,7 +61,7 @@ def test_jobs_keep_durable_receipt_before_work_and_use_profile_budget():
     assert "prompt.length()>maxInputChars" in source
     assert "persist(ctx,job);" in source
     assert "EXECUTOR.submit(()->execute(app,job,prompt));" in source
-    assert "OnDeviceLlm.generate(ctx,prompt)" in source
+    assert "OnDeviceLlm.generate(ctx,prompt,job.request)" in source
     assert "previous_process_outcome_unavailable" in source
 
 

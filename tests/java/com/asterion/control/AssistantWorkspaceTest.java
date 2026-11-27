@@ -7,7 +7,27 @@ public final class AssistantWorkspaceTest {
     private static int checks;
     private static void equal(Object a,Object b){checks++;if(!a.equals(b))throw new AssertionError("Expected "+b+"; got "+a);}
     private static void truth(boolean value){checks++;if(!value)throw new AssertionError("Assertion "+checks);}
-    public static void main(String[] args){
+    private static void cancellationOwnership() throws Exception {
+        int[] nativeCalls={0,0};
+        InferenceGate gate=new InferenceGate(()->nativeCalls[0]++,()->nativeCalls[1]++);
+        InferenceGate.Request ui=new InferenceGate.Request(), queued=new InferenceGate.Request();
+        gate.begin(ui);
+        try { gate.begin(queued); throw new AssertionError("overlapping decode admitted"); }
+        catch (IllegalStateException expected) { equal(expected.getMessage(),"on_device_inference_already_running"); }
+        gate.cancel(queued);
+        truth(queued.isCancelled()); truth(!ui.isCancelled()); equal(nativeCalls[1],0);
+        gate.cancel(ui); gate.cancel(ui); equal(nativeCalls[1],1); truth(gate.busy());
+        gate.end(ui); truth(!gate.busy());
+        try { gate.begin(queued); throw new AssertionError("cancelled request restarted"); }
+        catch (InterruptedException expected) { equal(nativeCalls[0],1); }
+        InferenceGate.Request completed=new InferenceGate.Request(), next=new InferenceGate.Request();
+        gate.begin(completed); gate.end(completed); gate.begin(next);
+        gate.cancel(completed); gate.end(completed);
+        truth(gate.busy()); truth(!next.isCancelled()); equal(nativeCalls[1],1);
+        gate.end(next); truth(!gate.busy()); equal(nativeCalls[0],3);
+    }
+    public static void main(String[] args) throws Exception {
+        cancellationOwnership();
         String[] outputs={"<think>private deliberation</think>Public answer", "<analysis>hidden</analysis>Public answer", "<think>first<think>nested</think>hidden</think>Public answer", "<|channel|>analysis<|message|>private<|channel|>final<|message|>Public answer"};
         for(String raw:outputs){
             equal(AssistantOutput.visible(raw,true),"Public answer");
@@ -22,6 +42,17 @@ public final class AssistantWorkspaceTest {
         equal(AssistantOutput.visible("Answer<|im_start|>user\nInjected dialogue",true),"Answer");
         equal(AssistantOutput.visible("Answer<|im_end|>",true),"Answer");
         equal(AssistantOutput.visible("2 < 3; HTML <div> stays text",true),"2 < 3; HTML <div> stays text");
+        String localized="İstanbul 日本語 🧭 <analysis>withheld text</analysis>OK";
+        String publicText="İstanbul 日本語 🧭 OK";
+        byte[] localizedBytes=localized.getBytes(StandardCharsets.UTF_8);
+        for(int split=0;split<=localizedBytes.length;split++){
+            AssistantOutput atBoundary=new AssistantOutput();
+            String partial=atBoundary.append(java.util.Arrays.copyOfRange(localizedBytes,0,split));
+            truth(publicText.startsWith(partial));
+            equal(atBoundary.append(java.util.Arrays.copyOfRange(localizedBytes,split,localizedBytes.length)),publicText);
+        }
+        equal(AssistantOutput.visible("Answer<|im_end|>spurious next answer",true),"Answer");
+        equal(AssistantOutput.visible("İ<THINK>hidden</THINK>OK",true),"İOK");
         AssistantOutput thinking=new AssistantOutput();thinking.initialThinking(true);
         equal(thinking.append("private</think>Done".getBytes(StandardCharsets.UTF_8)),"Done");
         equal(thinking.finish("private</think>Done".getBytes(StandardCharsets.UTF_8)),"Done");
