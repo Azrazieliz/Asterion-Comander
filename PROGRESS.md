@@ -1,3 +1,7 @@
+## 2026-11-28 — physical VPN baseline follow-up
+
+Authenticated bridge receipt `control-20261128-native-vpn-baseline` completed (exit 0). WireGuard Go backend reported OFF, no configuration present, full tunnel not owner-approved, no verified active tunnel or route, peer reachability false, Android system consent required. Configuration-at-rest policy reports encryption enabled; no profile exists to verify enrollment or tunnel functionality. No activation or provider enrollment performed. Exact PR #42 candidate CI run 46080127182 in progress at last inspection; no merge or release authorization inferred.
+
 # 2026-11-28 — Retained neural adapter recovery, evaluator correction, live transfer diagnosis
 
 Owner reaffirmed complete implementation including AI and all earlier V3–V6/M0–M13 systems. Canonical starting HEAD verified as c530f76a8969d9809669e59c1f338e8e73db204e. No release hold relaxation, new worker, APK install, production replacement, paid compute or owner-data export.
