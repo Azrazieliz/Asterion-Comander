@@ -73,7 +73,10 @@ final class ContinuationLedger {
   synchronized JSONObject queue(JSONObject body) throws Exception {
     return queueBounded(body,MAX_PROMPT);
   }
-  synchronized JSONObject queueCycle(JSONObject body) throws Exception {
+  synchronized JSONObject queueCycle(JSONObject body,String prior,int sequence,String phase) throws Exception {
+    if(!CycleRecoveryPolicy.unchangedBeforeQueue(prior,sequence,phase,
+        state.optString("last_checkpoint",""),state.optInt("sequence",0),state.optString("state","idle")))
+      throw new IllegalStateException("Continuation ledger changed before durable queue");
     return queueBounded(body,MAX_CYCLE_PROMPT);
   }
   private JSONObject queueBounded(JSONObject body,int maxPrompt) throws Exception {
