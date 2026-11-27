@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <vector>
+#include <utility>
 
 // The fit function must format with the real model template and reserve output tokens.
 // It never admits a partial user turn or a fragment of a source passage.

@@ -22,7 +22,7 @@ final class AssistantCapabilities {
             for(JSONObject app:ranked){
                 if(attempted>=4){omitted++;continue;}
                 // Do not block ordinary conversation on unrelated Binder calls.
-                if(rank(app,terms)==0&&!terms.matches("(?s).*\\b(apps|applications|capabilities|tools|integrations|outils)\\b.*")){omitted++;continue;}
+                if(rank(app,terms)==0&&!terms.matches("(?s).*\\\b(apps|applications|capabilities|tools|integrations|outils)\\\b.*")){omitted++;continue;}
                 attempted++;
                 String pkg=app.getString("package");
                 JSONObject entry=new JSONObject().put("package",pkg).put("name",app.optString("name"));
@@ -47,8 +47,8 @@ final class AssistantCapabilities {
         String name=app.optString("name").toLowerCase(java.util.Locale.ROOT);
         String pkg=app.optString("package").toLowerCase(java.util.Locale.ROOT);
         int score=terms.contains(pkg)?10:0;
-        for(String word:name.split("[^\\p{L}\\p{N}]+")){
-            if(word.length()>2&&!word.equals("asterion")&&terms.matches("(?s).*\\b"+java.util.regex.Pattern.quote(word)+"\\b.*"))score+=3;
+        for(String word:name.split("[^\\\p{L}\\\p{N}]+")){
+            if(word.length()>2&&!word.equals("asterion")&&terms.matches("(?s).*\\\b"+java.util.regex.Pattern.quote(word)+"\\\b.*"))score+=3;
         }
         return score;
     }
