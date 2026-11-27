@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - work/control-native-ai-reconstruction-20261126
+      - 'work/control-non-ai-transfer-resume-*'
     paths:
       - '.github/workflows/control-nonai-full-regression.yml'
       - 'asterion_remote/**'
