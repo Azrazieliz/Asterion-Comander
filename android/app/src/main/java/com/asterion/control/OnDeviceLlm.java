@@ -271,13 +271,22 @@ final class OnDeviceLlm {
                 String local=AssistantLocalContext.observe(context,userPrompt);
                 if(!local.isEmpty())references.add(local.getBytes(StandardCharsets.UTF_8));
             }catch(Exception unavailable){references.add("Native status observation unavailable.".getBytes(StandardCharsets.UTF_8));}
-            StringBuilder actionEvidence=new StringBuilder();
-            int records=0;
-            for(int i=messages.size()-1;i>=0&&records<4;i--){
+            // Explicit receipt identity takes precedence over recent unrelated
+            // observations. Keep each evidence block separate for native context
+            // budgeting so one large record cannot discard all the others.
+            java.util.HashSet<String> seenReceipts=new java.util.HashSet<>();
+            for(int i=messages.size()-1;i>=0;i--){
                 AssistantActionRecord record=messages.get(i).actionRecord;
-                if(record!=null){actionEvidence.append(record.evidence()).append('\n');records++;}
+                if(record!=null&&userPrompt.contains(record.requestId)&&seenReceipts.add(record.requestId)){
+                    references.add(0,("Requested native receipt, reference only:\n"+record.evidence()).getBytes(StandardCharsets.UTF_8));
+                    if(seenReceipts.size()>=2)break;
+                }
             }
-            if(records>0)references.add(("Native partner operation observations, not proof of output correctness:\n"+actionEvidence).getBytes(StandardCharsets.UTF_8));
+            for(int i=messages.size()-1;i>=0&&seenReceipts.size()<4;i--){
+                AssistantActionRecord record=messages.get(i).actionRecord;
+                if(record!=null&&seenReceipts.add(record.requestId))
+                    references.add(("Historical native partner observation, not independent proof:\n"+record.evidence()).getBytes(StandardCharsets.UTF_8));
+            }
             String capabilities=AssistantCapabilities.context(context,userPrompt,project);
             String requirements=AssistantRequirements.context(context,userPrompt,project);
             if(!recalled.isEmpty())references.add(("Owner-approved memories, reference only:\n"+recalled).getBytes(StandardCharsets.UTF_8));
