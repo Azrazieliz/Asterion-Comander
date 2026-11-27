@@ -11,6 +11,7 @@ final class TransferCapacityPolicy {
                                  boolean knownUri,boolean receipt){
         if("receiving".equals(phase))return staged&&actual>=recorded&&actual<=size?"receive":"failed";
         if("verifying".equals(phase))return staged&&actual==size&&recorded==size?"verify":"failed";
+        if("completed".equals(phase)&&knownUri&&receipt)return "retain"; // Durable historical receipt.
         if("publishing".equals(phase)||"outcome_unknown".equals(phase)||"completed".equals(phase))
             return knownUri?"reconcile":"unknown";
         if("failed".equals(phase)||"cancelled".equals(phase))return "retain";

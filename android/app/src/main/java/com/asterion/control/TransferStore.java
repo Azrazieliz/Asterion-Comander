@@ -109,6 +109,11 @@ final class TransferStore {
         job.failureCode=saved.optString("error_code","");
         job.publicationUri=saved.optString("publication_uri","");
         job.finalReceipt=saved.optJSONObject("result");
+        if(job.finalReceipt!=null&&(!job.finalReceipt.optBoolean("ok")||
+           !job.expected.equals(job.finalReceipt.optString("sha256"))||
+           job.size!=job.finalReceipt.optLong("size",-1)||
+           !job.publicationUri.equals(job.finalReceipt.optString("uri"))))
+          throw new IllegalStateException("Persisted completion receipt identity mismatch");
         job.path=new File(stagingDir,id+".part");
         if(job.size<0||job.size>FILE_MAX||job.written<0||job.written>job.size||
            !job.expected.matches("[a-f0-9]{64}"))
@@ -252,7 +257,9 @@ final class TransferStore {
     job.created=System.currentTimeMillis();
     job.path=new File(dir,id+".part");
     if(!job.path.createNewFile())throw new IllegalStateException("Transfer path already exists");
-    persist(job); // No accepted transfer ID before its identity is durable.
+    try{persist(job);}catch(Exception failure){
+      if(job.path.exists())job.path.delete();journalHealthy=false;throw failure;
+    } // No accepted transfer ID before its identity is durable.
     jobs.put(id,job);
     return new JSONObject().put("id",id).put("chunk_max",CHUNK_MAX)
       .put("received",0).put("size",size).put("sha256",digest)
@@ -338,7 +345,7 @@ final class TransferStore {
   private void commitInBackground(Job job){
     String failure="unknown_publication_failure";
     Uri uri=null;
-    boolean published=false,releaseAttempted=false;
+    boolean published=false,insertionAttempted=false,releaseAttempted=false;
     try{
       // Re-hash stable private staging; MessageDigest.digest() consumes state
       // and cannot safely be reused after an ambiguous final HTTP response.
@@ -373,6 +380,7 @@ final class TransferStore {
       values.put(MediaStore.MediaColumns.RELATIVE_PATH,
         Environment.DIRECTORY_DOWNLOADS+"/Asterion Control/");
       values.put(MediaStore.MediaColumns.IS_PENDING,1);
+      insertionAttempted=true;
       uri=app.getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI,values);
       if(uri==null){
         failure="downloads_insert_denied";
@@ -424,7 +432,8 @@ final class TransferStore {
     }finally{
       // After an attempted release, deletion could destroy a successfully
       // published file. Reconcile read-only; never delete or republish it.
-      boolean uncertain=releaseAttempted&&(!published||job.finalReceipt==null);
+      boolean uncertain=(insertionAttempted&&uri==null)||
+        (releaseAttempted&&(!published||job.finalReceipt==null));
       if(!releaseAttempted&&uri!=null){
         try{if(app.getContentResolver().delete(uri,null,null)!=1)uncertain=true;}
         catch(Exception ignored){uncertain=true;}

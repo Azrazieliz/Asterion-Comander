@@ -35,7 +35,7 @@ class TransferRequest(BaseModel):
 
 def _name(value: str) -> str:
     if not value or len(value)>180 or value in (".","..") or value.startswith(".") or any(
-        c in value for c in ("/","\\",":","\0")) or any(ord(c)<32 for c in value):
+        c in value for c in ("/","\\",":","\0")) or any(ord(c)<32 or ord(c)==127 for c in value):
         raise HTTPException(422,"Unsafe Android destination filename")
     return value
 

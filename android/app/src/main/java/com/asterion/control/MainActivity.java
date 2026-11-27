@@ -96,6 +96,8 @@ public final class MainActivity extends Activity {
   private TextView healthBattery,healthTemp,healthMemory,healthStorage,healthThermal,healthWifi,healthActionStatus,pcPerformanceActionStatus;
   private TextView remoteConnection,remotePlaceholder,agentConnection,captureConnection,accessConnection,phoneAddress,hostHealth,pairingFeedback,transferFeedback,updateFeedback,phoneBridgeFeedback;
   private String activeTransferId=null;
+  private int transferPollGeneration=0;
+  private boolean transferSubmitting=false;
   private LinearLayout phoneAccessAction,phoneCaptureAction,phoneStopAction,transferCancelAction,voiceStartAction,voiceTalkAction,voiceStopAction;
   private DesignSystem.Meter batteryMeter,memoryMeter,storageMeter;
   private EditText serverUrl,serverToken,localAddress;
@@ -176,6 +178,14 @@ public final class MainActivity extends Activity {
     pages[0]=scrollHome();pages[1]=remotePage();pages[2]=scrollHealth();pages[3]=scrollDevices();pages[4]=scrollTools();
     for(View page:pages){page.setVisibility(View.GONE);stage.addView(page,new FrameLayout.LayoutParams(-1,-1));}
     buildNav();show(getIntent().getBooleanExtra("assistant_settings",false)?4:0);updateHealth();handler.postDelayed(ticker,3500);
+    String savedTransfer=prefs.getString("active_transfer_id","");
+    if(savedTransfer.matches("[a-f0-9]{32}")){
+      activeTransferId=savedTransfer;
+      transferStatus("Reconnecting to the previously accepted transfer…");
+      beginTransferPolling(savedTransfer);
+    }else if(prefs.getBoolean("transfer_submission_uncertain",false)){
+      transferStatus("Previous submission was interrupted. Check Downloads or explicitly resume the same file; it will not be sent automatically.");
+    }
     // Owner-authorized continuation is persistent and controlled by the internal
     // ledger. No diagnostic/transport toggles belong on the everyday UI.
     if(!prefs.getBoolean("continuation_initial_default_v0913",false)){
@@ -1154,6 +1164,7 @@ public final class MainActivity extends Activity {
     gap(devicesBody,12);LinearLayout phone=card();
     rowTitle(phone,"This Android phone","Optional incoming screen and touch access",icon("phone",DesignSystem.TEAL,23));
     gap(phone,12);phoneAddress=t("Checking phone access…",12,DesignSystem.MUTED,false);wide(phone,phoneAddress);
+    gap(phone,9);button(phone,"Check direct Control link","activity",false,this::showAwayFromHomeStatus);
     gap(phone,13);phoneAccessAction=v();
     button(phoneAccessAction,"Grant phone access","shield",true,this::enablePhoneControl);
     wide(phone,phoneAccessAction);
@@ -1281,6 +1292,9 @@ public final class MainActivity extends Activity {
     wide(voice,voiceStopAction);
     gap(voice,9);
     button(voice,"Voice assistant route","settings",false,this::showOwnerVoiceRoute);
+    gap(voice,9);button(voice,"Test speaker and microphone now","activity",false,this::testVoiceDialogue);
+    gap(voice,8);voiceTestStatus=t("No local voice test performed in this session.",12,DesignSystem.MUTED,false);
+    wide(voice,voiceTestStatus);
     wide(toolsBody,voice);
 
     gap(toolsBody,12);LinearLayout integrations=card();
@@ -1296,11 +1310,12 @@ public final class MainActivity extends Activity {
     wide(toolsBody,integrations);
 
     gap(advancedPanel,12);LinearLayout transfer=card();
-    rowTitle(transfer,"Direct Wi-Fi file transfer","PC → Phone · Files are saved to Downloads/Asterion Control",icon("download",DesignSystem.TEAL,24));
+    rowTitle(transfer,"Private file transfer","PC → Phone · Paired LAN or existing native WSS",icon("download",DesignSystem.TEAL,24));
     gap(transfer,12);button(transfer,"Send a PC file to this phone","share",true,this::promptWifiTransfer);
+    gap(transfer,9);button(transfer,"Check transfer status","refresh",false,this::checkLastTransfer);
     transferCancelAction=v();button(transferCancelAction,"Cancel transfer","power",false,this::cancelWifiTransfer);
     wide(transfer,transferCancelAction);transferCancelAction.setVisibility(View.GONE);
-    gap(transfer,9);transferFeedback=t("No transfer active. Uses the existing private Wi-Fi connection, never GitHub or ADB.",12,DesignSystem.MUTED,false);
+    gap(transfer,9);transferFeedback=t("No transfer active. File contents use the paired private connection, never GitHub or ADB.",12,DesignSystem.MUTED,false);
     transferFeedback.setMaxLines(6);wide(transfer,transferFeedback);wide(advancedPanel,transfer);
 
     gap(advancedPanel,12);LinearLayout updater=card();
@@ -1755,7 +1770,7 @@ public final class MainActivity extends Activity {
     }
     EditText field=input("",false,"PC path, for example Downloads\\report.zip");
     new AlertDialog.Builder(this)
-      .setTitle("Send PC file over Wi-Fi")
+      .setTitle("Send PC file over the paired connection")
       .setMessage("Enter the path of an existing Windows file inside the authorized Asterion Control PC root. The phone receives it in Downloads/Asterion Control.")
       .setView(field)
       .setPositiveButton("Transfer",(d,w)->{
@@ -1772,6 +1787,7 @@ public final class MainActivity extends Activity {
     HttpURLConnection conn=(HttpURLConnection)new URL(url+path).openConnection();
     try{
       conn.setConnectTimeout(4000);conn.setReadTimeout(9000);
+      conn.setInstanceFollowRedirects(false);
       conn.setRequestMethod(method);
       conn.setRequestProperty("Authorization","Bearer "+token);
       if(body!=null){
@@ -1782,59 +1798,112 @@ public final class MainActivity extends Activity {
       java.io.InputStream input=code<400?conn.getInputStream():conn.getErrorStream();
       String json=input==null?"{}":new String(input.readNBytes(4000),StandardCharsets.UTF_8);
       JSONObject parsed=new JSONObject(json);
-      if(code>=400)throw new IllegalStateException("HTTP "+code+": "+parsed.optString("detail","transfer refused"));
+      if(code<200||code>=300)throw new TransferRequestFailure(code,parsed.optString("detail","transfer request refused"));
       return parsed;
     }finally{conn.disconnect();}
   }
+  private static final class TransferRequestFailure extends Exception{
+    final int status;
+    TransferRequestFailure(int code,String detail){super("HTTP "+code+": "+detail);status=code;}
+  }
+  private void rememberTransfer(String id){
+    activeTransferId=id;
+    prefs.edit().putString("active_transfer_id",id).putString("last_transfer_id",id)
+      .putBoolean("transfer_submission_uncertain",false).commit();
+  }
+  private void releaseTransferMonitor(){
+    activeTransferId=null;transferPollGeneration++;
+    prefs.edit().remove("active_transfer_id").commit();
+  }
+  private void beginTransferPolling(String id){
+    int generation=++transferPollGeneration;
+    pollWifiTransfer(id,0,generation);
+  }
+  private void checkLastTransfer(){
+    if(transferSubmitting){toast("Submission is still being checked");return;}
+    String id=activeTransferId!=null?activeTransferId:prefs.getString("last_transfer_id","");
+    if(!id.matches("[a-f0-9]{32}")){toast("No accepted transfer receipt to check");return;}
+    rememberTransfer(id);transferStatus("Checking the original transfer receipt…");beginTransferPolling(id);
+  }
   private void submitWifiTransfer(String pcPath){
-    if(activeTransferId!=null){toast("Cancel or finish the current transfer first");return;}
-    transferStatus("Preparing authenticated Wi-Fi transfer…");
+    if(transferSubmitting||activeTransferId!=null){toast("Check or finish the current transfer first");return;}
+    transferSubmitting=true;
+    prefs.edit().putBoolean("transfer_submission_uncertain",true).commit();
+    transferStatus("Preparing authenticated transfer…");
     io.execute(()->{
       try{
         JSONObject out=pcTransferRequest("/api/v1/phone/transfers","POST",new JSONObject().put("pc_path",pcPath));
         String id=out.getString("id");
+        if(!id.matches("[a-f0-9]{32}"))throw new IllegalStateException("Invalid transfer identity");
         runOnUiThread(()->{
-          activeTransferId=id;
-          transferStatus("Transfer request accepted · awaiting first progress · "+pcPath);
-          pollWifiTransfer(id,0);
+          transferSubmitting=false;
+          rememberTransfer(id);
+          if(destroyed)return;
+          transferStatus("Transfer accepted · awaiting first progress");
+          beginTransferPolling(id);
         });
-      }catch(Exception e){runOnUiThread(()->transferStatus("Transfer not started: "+e.getMessage()));}
+      }catch(Exception e){runOnUiThread(()->{
+        transferSubmitting=false;
+        boolean refused=e instanceof TransferRequestFailure&&
+          java.util.Arrays.asList(400,401,403,404,409,413,422,429).contains(((TransferRequestFailure)e).status);
+        if(refused)prefs.edit().putBoolean("transfer_submission_uncertain",false).commit();
+        if(!destroyed)transferStatus(refused?"Transfer refused: "+e.getMessage():
+          "Submission outcome unknown. No automatic resend. Check Downloads or deliberately resume the same source file.");
+      });}
     });
   }
-  private void pollWifiTransfer(String id,int attempts){
-    if(destroyed||!id.equals(activeTransferId))return;
-    if(attempts>1800){transferStatus("Transfer status timed out. Check Downloads and Windows.");activeTransferId=null;return;}
+  private void pollWifiTransfer(String id,int attempts,int generation){
+    if(destroyed||generation!=transferPollGeneration||!id.equals(activeTransferId))return;
+    if(attempts>1800){
+      transferStatus("Status polling paused. Original receipt retained; use Check transfer status.");
+      return;
+    }
     io.execute(()->{
       try{
         JSONObject job=pcTransferRequest("/api/v1/phone/transfers/"+id,"GET",null);
         runOnUiThread(()->{
-          if(destroyed||!id.equals(activeTransferId))return;
+          if(destroyed||generation!=transferPollGeneration||!id.equals(activeTransferId))return;
+          if(!id.equals(job.optString("id",""))){
+            transferStatus("Different transfer identity received. Polling stopped; no action repeated.");
+            return;
+          }
           String state=job.optString("state","unknown");
           long sent=job.optLong("bytes_sent",0),total=job.optLong("size",0);
           if(state.equals("completed")){
             JSONObject receipt=job.optJSONObject("result");
-            activeTransferId=null;
-            transferStatus(receipt!=null&&receipt.optString("location").length()>0&&
-                 receipt.optString("sha256").matches("[a-fA-F0-9]{64}")?
-                 "Windows reports transfer finished at "+receipt.optString("location")+
-                   "\nReported SHA-256: "+receipt.optString("sha256"):
-                 "Windows reported transfer completion without an independently checkable phone receipt");
-            if(receipt!=null)offerVerifiedControlUpdate(receipt);
+            releaseTransferMonitor();
+            boolean verified=receipt!=null&&receipt.optBoolean("verified",false)&&
+              total>=0&&sent==total&&receipt.optLong("size",-1)==total&&
+              receipt.optString("location").startsWith("Downloads/Asterion Control/")&&
+              receipt.optString("android_uri").startsWith("content://")&&
+              receipt.optString("sha256").matches("[a-fA-F0-9]{64}");
+            transferStatus(verified?
+              "Verified transfer · "+receipt.optString("location")+"\\nSHA-256: "+receipt.optString("sha256"):
+              "Completion receipt incomplete: file publication not verified.");
+            if(verified)offerVerifiedControlUpdate(receipt);
           }else if(state.equals("failed")||state.equals("cancelled")){
-            activeTransferId=null;
+            releaseTransferMonitor();
             transferStatus("Transfer "+state+": "+job.optString("error",""));
+          }else if(state.equals("outcome_unknown")&&!job.optBoolean("worker_active",true)){
+            releaseTransferMonitor();
+            transferStatus("Transfer outcome unknown. Original receipt retained. No duplicate publication requested.");
           }else{
-            double percent=total>0?100.0*sent/total:0;
+            double percent=total>0?Math.max(0,Math.min(100.0,100.0*sent/total)):0;
             transferStatus(state+" · "+sent+" / "+total+" bytes · "+
-              String.format(Locale.US,"%.1f",percent)+"%");
-            handler.postDelayed(()->pollWifiTransfer(id,attempts+1),750);
+              String.format(Locale.US,"%.1f",percent)+"%"+
+              (job.optString("transport","").isEmpty()?"":" · "+job.optString("transport")));
+            handler.postDelayed(()->pollWifiTransfer(id,attempts+1,generation),750);
           }
         });
       }catch(Exception e){runOnUiThread(()->{
-        if(!destroyed&&id.equals(activeTransferId)){
-          transferStatus("Transfer status unavailable: "+e.getMessage());
-          handler.postDelayed(()->pollWifiTransfer(id,attempts+1),1500);
+        if(destroyed||generation!=transferPollGeneration||!id.equals(activeTransferId))return;
+        if(e instanceof TransferRequestFailure&&((TransferRequestFailure)e).status==404){
+          releaseTransferMonitor();
+          transferStatus("Windows no longer has this job receipt. Result unknown; check Downloads or resume the same source file.");
+          return;
         }
+        transferStatus("Transfer status temporarily unavailable. Original receipt retained.");
+        handler.postDelayed(()->pollWifiTransfer(id,attempts+1,generation),Math.min(10000L,1500L+attempts*250L));
       });}
     });
   }
@@ -1873,8 +1942,9 @@ public final class MainActivity extends Activity {
     String id=activeTransferId;
     if(id==null){toast("No active transfer");return;}
     io.execute(()->{
-      try{pcTransferRequest("/api/v1/phone/transfers/"+id+"/cancel","POST",new JSONObject());
-        runOnUiThread(()->transferStatus("Cancellation requested"));
+      try{JSONObject receipt=pcTransferRequest("/api/v1/phone/transfers/"+id+"/cancel","POST",new JSONObject());
+        runOnUiThread(()->{if(id.equals(activeTransferId))transferStatus(receipt.optBoolean("ok",false)?
+          "Cancellation requested · waiting for final Android receipt":"Cancellation not accepted · "+receipt.optString("state","unknown"));});
       }catch(Exception e){runOnUiThread(()->transferStatus("Cancellation failed: "+e.getMessage()));}
     });
   }
@@ -2308,9 +2378,30 @@ public final class MainActivity extends Activity {
         +"\nLast error: "+cycle.optString("last_error","none")
         +"\nA cycle is a long-running sequence of substantive ChatGPT turns, not one tap or one turn."
         +"\nA real reply/receipt is required before any continuation; uncertain sends are never replayed.";
-      new AlertDialog.Builder(this).setTitle("Continuous development cycle status")
-        .setMessage(information).setPositiveButton("Close",null).show();
+      AlertDialog.Builder dialog=new AlertDialog.Builder(this).setTitle("Continuous development cycle status")
+        .setMessage(information).setPositiveButton("Close",null);
+      if(cycle.optBoolean("active",false))dialog.setNeutralButton("Manage cycle",(d,w)->manageCurrentCycle());
+      dialog.show();
     }catch(Exception e){toast("Cycle status unavailable: "+e.getClass().getSimpleName());}
+  }
+  private void manageCurrentCycle(){
+    try{
+      ContinuationCycle cycle=ContinuationCycle.get(this);
+      JSONObject current=cycle.status();
+      if(!current.optBoolean("active",false)){toast("No active development cycle");return;}
+      String phase=current.optString("state","");
+      boolean paused="paused".equals(phase)||"needs_review".equals(phase);
+      String[] options={paused?"Resume verified checkpoint":"Pause development cycle","Stop development cycle"};
+      new AlertDialog.Builder(this).setTitle("Manage active development cycle")
+        .setItems(options,(dialog,which)->{
+          if(which==1){new AlertDialog.Builder(this).setTitle("Stop this cycle?")
+            .setMessage("Stops further continuation. Already submitted work is not replayed or silently cancelled.")
+            .setPositiveButton("Stop",(d,w)->{try{cycle.stop();showCycleStatus();}catch(Exception e){toast("Cycle stop unavailable");}})
+            .setNegativeButton("Cancel",null).show();return;}
+          try{if(paused)cycle.resume();else cycle.pause();showCycleStatus();}
+          catch(Exception e){toast("Cycle state unchanged: "+e.getMessage());}
+        }).setNegativeButton("Close",null).show();
+    }catch(Exception e){toast("Cycle controls unavailable");}
   }
   private void testVoiceDialogue(){
     if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){

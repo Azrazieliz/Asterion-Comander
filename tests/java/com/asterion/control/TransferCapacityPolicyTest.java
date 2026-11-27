@@ -15,11 +15,12 @@ public final class TransferCapacityPolicyTest {
         check("failed","verifying",true,8,10,10,false,false);
         check("unknown","publishing",true,10,10,10,false,false);
         check("reconcile","publishing",true,10,10,10,true,false);
-        check("reconcile","completed",false,0,10,10,true,true);
+        check("retain","completed",false,0,10,10,true,true);
+        check("reconcile","completed",false,0,10,10,true,false);
         check("unknown","outcome_unknown",true,10,10,10,false,false);
         check("retain","failed",false,0,0,10,false,false);
         check("invalid","unrecognized",true,10,10,10,true,true);
-        System.out.println("Transfer capacity and restart reconciliation: 20 assertions passed");
+        System.out.println("Transfer capacity and restart reconciliation: 21 assertions passed");
     }
     private static void check(String expected,String phase,boolean staged,long actual,long recorded,long size,boolean uri,boolean receipt){
         String result=TransferCapacityPolicy.recoveryAction(phase,staged,actual,recorded,size,uri,receipt);
