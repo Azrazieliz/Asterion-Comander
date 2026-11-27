@@ -545,7 +545,8 @@ final class ContinuationCycle {
              other.optString("last_checkpoint",""),other.optInt("sequence",0),
              other.optString("state","idle")))
           throw new IllegalStateException("Queue identity or prior ledger changed");
-        ledger.queueCycle(body);
+        ledger.queueCycle(body,state.optString("queue_prior_checkpoint",""),
+            state.optInt("queue_prior_sequence",-1),state.optString("queue_prior_state",""));
         other=ledger.status();
       }
       if(!checkpoint.equals(other.optString("last_checkpoint","")))
