@@ -167,7 +167,8 @@ def run(root,expanded=False):
         if expanded:
             from scripts.control_ai_application_evaluate import evaluate
             report["application_score"]=evaluate(provider,report["adapter_sha256"],root/"application-evaluation")
-        report["state"]="evaluated" if all(report[x]["fully_evaluated"] and not report[x]["model_errors"] for x in ("base_score","adapted_score")) else "evaluation_errors"
+        required_scores=["base_score","adapted_score"]+ (["application_score"] if expanded else [])
+        report["state"]="evaluated" if all(report[x]["fully_evaluated"] and not report[x]["model_errors"] for x in required_scores) else "evaluation_errors"
         save()
         if report["state"]!="evaluated":raise RuntimeError("incomplete_evaluation")
     except Exception as e:
