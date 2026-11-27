@@ -48,3 +48,19 @@ def test_legacy_windows_manifest_paths_and_alias_rejection(tmp_path):
     p.write_text(json.dumps(record))
     with pytest.raises(ValueError,match="ambiguous_or_invalid_artifact_path"):
         admit(candidate,base)
+
+
+def test_continued_training_requires_identical_base_lineage(tmp_path):
+    from scripts.control_ai_adaptation import admit_parent_adapter
+    candidate,base=fixture(tmp_path)
+    hashes={p.name:file_hash(p) for p in base.iterdir()}
+    adapter,lineage=admit_parent_adapter(candidate,base,"a"*40,hashes)
+    assert adapter==candidate/"adapter"
+    assert lineage["parent_trainable_sha256"]=="b"*64 and lineage["optimizer_continued"] is False
+    with pytest.raises(ValueError,match="parent_training_base_mismatch"):
+        admit_parent_adapter(candidate,base,"c"*40,hashes)
+    with pytest.raises(ValueError,match="parent_training_base_mismatch"):
+        admit_parent_adapter(candidate,base,"a"*40,dict(hashes,extra="d"*64))
+    (candidate/"adapter"/"optimizer.pt").write_bytes(b"synthetic unsafe fixture")
+    with pytest.raises(ValueError,match="unsafe_parent_adapter_format"):
+        admit_parent_adapter(candidate,base,"a"*40,hashes)

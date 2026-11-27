@@ -122,6 +122,21 @@ def training_device(requested,cuda_available):
         raise RuntimeError("CUDA accelerator unavailable; CPU training requires explicit --device cpu and a memory budget")
     return "cuda"
 
+def admit_parent_adapter(candidate,base,revision,base_hashes):
+    """Continue a completed local LoRA candidate, never arbitrary pickled optimizer state."""
+    from scripts.control_ai_native_adapter_export import admit,canonical_paths
+    candidate=Path(candidate).resolve(strict=True)
+    identity=admit(candidate,Path(base))
+    parent=json.loads((candidate/"candidate.json").read_text(encoding="utf-8"))
+    if identity["training_base_revision"]!=revision or canonical_paths(parent["base_files_sha256"])!=base_hashes:
+        raise ValueError("parent_training_base_mismatch")
+    adapter=candidate/"adapter"
+    if any(p.suffix in {".bin",".pt",".pth",".pkl",".pickle"} for p in adapter.rglob("*") if p.is_file()):
+        raise ValueError("unsafe_parent_adapter_format")
+    return adapter,{**identity,"parent_candidate_manifest_sha256":file_hash(candidate/"candidate.json"),
+                    "parent_trainable_sha256":parent["trainable_sha256_after"],
+                    "optimizer_continued":False}
+
 def train_adapter(args):
     train,holdout,manifest=validate(args.train,args.holdout)
     preferences=read_preferences(args.preferences,train,holdout) if getattr(args,"preferences",None) else []
@@ -130,7 +145,7 @@ def train_adapter(args):
     os.environ["TRANSFORMERS_OFFLINE"]="1"
     import torch
     from transformers import AutoConfig,AutoModelForCausalLM,AutoTokenizer,BitsAndBytesConfig,Trainer,TrainingArguments
-    from peft import LoraConfig,get_peft_model,prepare_model_for_kbit_training
+    from peft import LoraConfig,PeftModel,get_peft_model,prepare_model_for_kbit_training
     device=training_device(getattr(args,"device","auto"),torch.cuda.is_available())
     torch.manual_seed(42)
     torch.set_num_threads(getattr(args,"threads",4))
@@ -199,10 +214,19 @@ def train_adapter(args):
         model=prepare_model_for_kbit_training(model,use_gradient_checkpointing=True)
     requested=getattr(args,"target_modules","all-linear")
     targets=requested if requested=="all-linear" else requested.split(",")
-    model=get_peft_model(model,LoraConfig(r=getattr(args,"rank",16),lora_alpha=2*getattr(args,"rank",16),lora_dropout=0.05,
-        target_modules=targets,bias="none",task_type="CAUSAL_LM"))
+    parent=None
+    parent_path=getattr(args,"start_candidate",None)
+    if parent_path:
+        adapter,parent=admit_parent_adapter(parent_path,base,args.revision,hashes)
+        model=PeftModel.from_pretrained(model,str(adapter),is_trainable=True,
+                                       local_files_only=True)
+    else:
+        model=get_peft_model(model,LoraConfig(r=getattr(args,"rank",16),lora_alpha=2*getattr(args,"rank",16),lora_dropout=0.05,
+            target_modules=targets,bias="none",task_type="CAUSAL_LM"))
     model.enable_input_require_grads()
     before=trainable_hash(model)
+    if parent and before!=parent["parent_trainable_sha256"]:
+        raise RuntimeError("loaded_parent_weight_identity_mismatch")
     def collate(rows):
         width=max(len(r["input_ids"]) for r in rows)
         def padded(key,pad):
@@ -214,22 +238,28 @@ def train_adapter(args):
     # weights during long runs; an interrupted checkpoint is not a certified adapter.
     plan={**manifest,"base_revision_declared":args.revision,"base_files_sha256":hashes,
           "training_arguments":vars(args),"trainable_sha256_before":before,
-          "status":"training_started","production_replaced":False,"maturity_certified":False}
+          "status":"training_started","parent_adapter":parent,"production_replaced":False,"maturity_certified":False}
     (out/"training-plan.json").write_text(json.dumps(plan,indent=2),encoding="utf-8")
     checkpoint_steps=getattr(args,"save_steps",0)
-    trainer=Trainer(model=model,train_dataset=encoded,data_collator=collate,
-        args=TrainingArguments(output_dir=str(out/"checkpoints"),
-            per_device_train_batch_size=1,gradient_accumulation_steps=getattr(args,"accumulate",8),
-            gradient_checkpointing=True,num_train_epochs=args.epochs,
-            max_steps=getattr(args,"max_steps",-1),use_cpu=device=="cpu",
-            learning_rate=getattr(args,"learning_rate",1e-4),bf16=bf16,fp16=device=="cuda" and not bf16,logging_steps=1,
-            save_strategy="steps" if checkpoint_steps else "epoch",save_steps=checkpoint_steps or 500,save_total_limit=2,report_to=[],
-            remove_unused_columns=False,seed=42))
-    metrics=trainer.train().metrics
-    del trainer
-    after_sft=trainable_hash(model)
-    if before==after_sft:
-        raise RuntimeError("sft_did_not_change_adapter_weights")
+    if getattr(args,"preference_only",False):
+        if not parent or not preferences:
+            raise ValueError("preference_only_requires_verified_parent_and_pairs")
+        metrics={"sft_skipped":True,"reason":"continue_completed_adapter_with_preference_training"}
+        after_sft=before
+    else:
+        trainer=Trainer(model=model,train_dataset=encoded,data_collator=collate,
+            args=TrainingArguments(output_dir=str(out/"checkpoints"),
+                per_device_train_batch_size=1,gradient_accumulation_steps=getattr(args,"accumulate",8),
+                gradient_checkpointing=True,num_train_epochs=args.epochs,
+                max_steps=getattr(args,"max_steps",-1),use_cpu=device=="cpu",
+                learning_rate=getattr(args,"learning_rate",1e-4),bf16=bf16,fp16=device=="cuda" and not bf16,logging_steps=1,
+                save_strategy="steps" if checkpoint_steps else "epoch",save_steps=checkpoint_steps or 500,save_total_limit=2,report_to=[],
+                remove_unused_columns=False,seed=42))
+        metrics=trainer.train().metrics
+        del trainer
+        after_sft=trainable_hash(model)
+        if before==after_sft:
+            raise RuntimeError("sft_did_not_change_adapter_weights")
     preference_record=None
     if preferences:
         model.zero_grad(set_to_none=True)
@@ -245,7 +275,7 @@ def train_adapter(args):
     model.save_pretrained(str(out/"adapter"),safe_serialization=True)
     tokenizer.save_pretrained(str(out/"adapter"))
     manifest.update({"base_revision_declared":args.revision,"base_files_sha256":hashes,
-        "training_metrics":metrics,"training_precision":precision,"preference_training":preference_record,"adapter_only":True,"evaluated":False,
+        "training_metrics":metrics,"training_precision":precision,"preference_training":preference_record,"parent_adapter":parent,"adapter_only":True,"evaluated":False,
         "device_verified":False,"production_replaced":False,"weights_changed":before!=after,
         "trainable_sha256_before":before,"trainable_sha256_after":after,
         "artifact_sha256":{p.relative_to(out).as_posix():file_hash(p) for p in sorted((out/"adapter").rglob("*")) if p.is_file()},
@@ -310,6 +340,8 @@ def main():
             q.add_argument("--precision",choices=("native","nf4"),default="native")
             q.add_argument("--target-modules",default="all-linear")
             q.add_argument("--preferences")
+            q.add_argument("--start-candidate",help="Continue verified completed local adapter weights; reset optimizer")
+            q.add_argument("--preference-only",action="store_true")
             q.add_argument("--preference-steps",type=int,default=0)
             q.add_argument("--preference-learning-rate",type=float,default=5e-6)
             q.add_argument("--preference-beta",type=float,default=0.1)
@@ -324,6 +356,7 @@ def main():
         if not 0<=a.save_steps<=10000:raise ValueError("invalid_checkpoint_interval")
         if not re.fullmatch(r"(?:all-linear|[A-Za-z_][A-Za-z0-9_]*(?:,[A-Za-z_][A-Za-z0-9_]*)*)",a.target_modules):
             raise ValueError("invalid_adapter_modules")
+        if a.preference_only and (not a.start_candidate or not a.preferences):raise ValueError("preference_only_requires_verified_parent_and_pairs")
         if bool(a.preferences)!=bool(a.preference_steps) or not 0<=a.preference_steps<=100000:
             raise ValueError("invalid_preference_training_steps")
         if not 0<a.preference_learning_rate<=0.01 or not 0<a.preference_beta<=10:
