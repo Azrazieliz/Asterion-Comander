@@ -81,3 +81,17 @@ def test_local_schedule_reserves_before_dispatch_and_reuses_native_queue():
     assert 'No automatic replay' in code
     assert 'AssistantSchedules.tick(this)' in (JAVA/'AgentService.java').read_text(encoding='utf-8')
     assert 'SCHEDULE_AAD' in (JAVA/'ControlAssistantMemory.java').read_text(encoding='utf-8')
+
+
+def test_history_retrieval_is_project_scoped_source_linked_and_local_only():
+    memory=(JAVA/'ControlAssistantMemory.java').read_text(encoding='utf-8')
+    llm=(JAVA/'OnDeviceLlm.java').read_text(encoding='utf-8')
+    prefs=(JAVA/'ControlAssistantPreferences.java').read_text(encoding='utf-8')
+    assert 'if(!project.equals(saved.getString("project")))continue;' in memory
+    assert 'search.add(id+"/"+mid,project,"Historical "+role' in memory
+    assert '!seen.add(mid)' in memory and 'active)seen.add(m.id)' in memory
+    assert 'scan coverage: ' in memory and 'bounded/partial' in memory
+    assert 'if(listener!=null&&ControlAssistantPreferences.reuseHistory(context))' in llm
+    assert 'return saveHistory(ctx)&&prefs(ctx).getBoolean(REUSE_HISTORY,true)' in prefs
+    assert 'LIMIT ? OFFSET ?' in memory
+    assert 'historyPage(offset+50)' in (JAVA/'AssistantActivity.java').read_text(encoding='utf-8')

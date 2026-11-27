@@ -193,15 +193,30 @@ public final class AssistantActivity extends Activity {
     }
     private void edit(int index){if(!idle())return;input("Edit message",session.conversation.messages.get(index).text,value->{session.save(this);session.conversation=session.conversation.fork();session.conversation.editFrom(index,value);session.send(this,value);});}
     private void retry(){if(!idle())return;try{session.save(this);session.conversation=session.conversation.fork();session.send(this,session.conversation.retry());}catch(Exception failure){notice("This conversation has no response to regenerate.");}}
-    private void history(){
+    private void history(){historyPage(0);}
+    private void historyPage(int offset){
         if(!idle())return;notice("Opening encrypted history");
         AssistantConversation original=session.conversation;
         session.work.execute(()->{
-            try{JSONArray list=ControlAssistantMemory.conversations(this);runOnUiThread(()->{
-                if(!alive||session.busy()||session.conversation!=original)return;String[] titles=new String[list.length()];for(int i=0;i<list.length();i++){JSONObject item=list.optJSONObject(i);titles[i]=item.optString("title")+"\n"+item.optString("project");}
-                new AlertDialog.Builder(this).setTitle("Conversations").setItems(titles,(d,index)->{
-                    session.work.execute(()->{try{AssistantConversation selected=ControlAssistantMemory.loadConversation(this,list.getJSONObject(index).getString("id"));runOnUiThread(()->{if(!alive||session.busy()||session.conversation!=original)return;session.conversation=selected;session.status="";render();});}catch(Exception failure){runOnUiThread(()->notice("This encrypted conversation could not be opened."));}});
-                }).setNeutralButton("Delete current",(d,w)->deleteConversation()).setNegativeButton("Close",null).show();notice("");
+            try{JSONArray list=ControlAssistantMemory.conversations(this,offset,51);runOnUiThread(()->{
+                if(!alive||session.busy()||session.conversation!=original)return;
+                int count=Math.min(50,list.length());
+                java.util.ArrayList<String> titles=new java.util.ArrayList<>();
+                if(offset>0)titles.add("Previous 50 conversations");
+                int first=titles.size();
+                for(int i=0;i<count;i++){JSONObject item=list.optJSONObject(i);titles.add(item.optString("title")+"\n"+item.optString("project"));}
+                if(list.length()>count)titles.add("Next 50 conversations");
+                new AlertDialog.Builder(this).setTitle("Conversations · "+(offset+1)+"–"+(offset+count))
+                    .setItems(titles.toArray(new String[0]),(d,index)->{
+                        if(first==1&&index==0){historyPage(Math.max(0,offset-50));return;}
+                        if(index-first==count){historyPage(offset+50);return;}
+                        session.work.execute(()->{
+                            try{
+                                AssistantConversation selected=ControlAssistantMemory.loadConversation(this,list.getJSONObject(index-first).getString("id"));
+                                runOnUiThread(()->{if(!alive||session.busy()||session.conversation!=original)return;session.conversation=selected;session.status="";render();});
+                            }catch(Exception failure){runOnUiThread(()->notice("This encrypted conversation could not be opened."));}
+                        });
+                    }).setNeutralButton("Delete current",(d,w)->deleteConversation()).setNegativeButton("Close",null).show();notice("");
             });}catch(Exception e){runOnUiThread(()->notice("Encrypted history could not be opened."));}
         });
     }

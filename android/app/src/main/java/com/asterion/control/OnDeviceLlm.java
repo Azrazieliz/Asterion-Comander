@@ -230,6 +230,15 @@ final class OnDeviceLlm {
             if(!recalled.isEmpty())references.add(("Owner-approved memories, reference only:\n"+recalled).getBytes(StandardCharsets.UTF_8));
             if(!capabilities.isEmpty())references.add(capabilities.getBytes(StandardCharsets.UTF_8));
             if(!requirements.isEmpty())references.add(requirements.getBytes(StandardCharsets.UTF_8));
+            // Only local interactive/voice sessions receive past conversation text.
+            // Remote WSS and scheduled single-turn inference have no history listener.
+            if(listener!=null&&ControlAssistantPreferences.reuseHistory(context)){
+                try{
+                    String history=ControlAssistantMemory.conversationContext(context,userPrompt,project,messages,request);
+                    if(!history.isEmpty())references.add(history.getBytes(StandardCharsets.UTF_8));
+                }catch(InterruptedException cancelled){throw cancelled;}
+                catch(Exception unavailable){references.add("Encrypted historical context unavailable this turn.".getBytes(StandardCharsets.UTF_8));}
+            }
             String systemText=profile.systemInstructions(guidance);
             OnDeviceModelResources resources=new OnDeviceModelResources(context);
             int contextBudget=resources.contextTokens(profile,outputBudget,true);

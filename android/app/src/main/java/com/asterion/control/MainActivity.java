@@ -1416,6 +1416,12 @@ public final class MainActivity extends Activity {
     keepHistory.setText("Remember local AI conversations (encrypted on device)");
     keepHistory.setChecked(ControlAssistantPreferences.saveHistory(this));
     panel.addView(keepHistory);
+    CheckBox reuseHistory=new CheckBox(this);
+    reuseHistory.setText("Recover relevant previous conversations in local chat only");
+    reuseHistory.setChecked(ControlAssistantPreferences.reuseHistory(this));
+    reuseHistory.setEnabled(keepHistory.isChecked());
+    keepHistory.setOnCheckedChangeListener((button,checked)->reuseHistory.setEnabled(checked));
+    panel.addView(reuseHistory);
     new AlertDialog.Builder(this)
       .setTitle("Local Asterion AI preferences")
       .setView(panel)
@@ -1424,7 +1430,7 @@ public final class MainActivity extends Activity {
           String level=new String[]{"fast","balanced","deep"}[
             effortChoice.getSelectedItemPosition()];
           ControlAssistantPreferences.save(this,level,
-            guidance.getText().toString(),keepHistory.isChecked());
+            guidance.getText().toString(),keepHistory.isChecked(),reuseHistory.isChecked());
           toast("Local AI preferences saved");
         }catch(Exception e){
           toast("Could not save local preferences: "+e.getClass().getSimpleName());

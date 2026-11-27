@@ -13,6 +13,7 @@ final class ControlAssistantPreferences {
     private static final String EFFORT="reasoning_effort";
     private static final String GUIDANCE="owner_response_guidance";
     private static final String SAVE_HISTORY="encrypted_local_chat_history_enabled";
+    private static final String REUSE_HISTORY="local_project_history_retrieval_enabled";
     private ControlAssistantPreferences(){}
 
     private static SharedPreferences prefs(Context ctx){
@@ -31,17 +32,23 @@ final class ControlAssistantPreferences {
     static boolean saveHistory(Context ctx){
         return prefs(ctx).getBoolean(SAVE_HISTORY,true);
     }
+    static boolean reuseHistory(Context ctx){
+        return saveHistory(ctx)&&prefs(ctx).getBoolean(REUSE_HISTORY,true);
+    }
     static void save(Context ctx,String effort,String guidance){
         save(ctx,effort,guidance,saveHistory(ctx));
     }
     static void save(Context ctx,String effort,String guidance,boolean keepHistory){
+        save(ctx,effort,guidance,keepHistory,prefs(ctx).getBoolean(REUSE_HISTORY,true));
+    }
+    static void save(Context ctx,String effort,String guidance,boolean keepHistory,boolean reuseHistory){
         if(!"fast".equals(effort)&&!"balanced".equals(effort)&&!"deep".equals(effort))
             throw new IllegalArgumentException("invalid_reasoning_effort");
         if(guidance==null||guidance.length()>2000)
             throw new IllegalArgumentException("owner_guidance_too_large");
         if(!prefs(ctx).edit().putString(EFFORT,effort)
                 .putString(GUIDANCE,guidance)
-                .putBoolean(SAVE_HISTORY,keepHistory).commit())
+                .putBoolean(SAVE_HISTORY,keepHistory).putBoolean(REUSE_HISTORY,reuseHistory).commit())
             throw new IllegalStateException("local_ai_preferences_not_saved");
     }
     static int outputTokens(Context ctx,OnDeviceModelProfile profile){
