@@ -44,7 +44,7 @@ public final class ControlAccessibilityService extends AccessibilityService {
   }
   private String inputText(InputMethod.AccessibilityInputConnection input){
     if(input==null)return null;
-    SurroundingText text=input.getSurroundingText(4096,4096,0);
+    SurroundingText text=input.getSurroundingText(12000,12000,0);
     return text==null||text.getText()==null?null:text.getText().toString();
   }
   /** Visible ChatGPT composer action: tap its blue send arrow, just above
@@ -569,6 +569,8 @@ public final class ControlAccessibilityService extends AccessibilityService {
     return null;
   }
   JSONObject sendChatMessage(String message) {
+    if(message==null||message.isEmpty()||message.length()>12000)
+      return chatOutcome(false,false,"Message exceeds the bounded verified editor capacity");
     final CountDownLatch done=new CountDownLatch(1);
     final JSONObject[] output={chatOutcome(false,true,"Native keyboard dispatch did not finish")};
     main.post(()->{
