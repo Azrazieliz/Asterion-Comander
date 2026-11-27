@@ -120,3 +120,48 @@ class DiagnosticSnapshotTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_measured_resource_pressure_is_reported_without_private_mount_paths():
+    gib=1024**3
+    with patch("asterion_remote.diagnostic_snapshot.host_health",return_value={
+        "sampled_at":12345,"memory":{"available":gib+1,"total":8*gib},
+        "disks":[{"mount":"C:\\","free":gib-1,"total":120*gib},
+                 {"mount":"D:\\","free":80*gib,"total":500*gib},
+                 {"mount":"/private/user/folder","free":gib,"total":100*gib}],
+        "token":"private-secret"}):
+        result=snapshot._pc_resources()
+    assert result["observed"] is True
+    assert result["memory"]["pressure_band"]=="low"
+    assert result["volumes"][0]["volume"]=="C:"
+    assert result["volumes"][0]["pressure_band"]=="critical"
+    assert result["volumes"][1]["pressure_band"]=="above_low_threshold"
+    assert result["volumes"][2]["volume"]=="volume-3"
+    assert len(result["findings"])==3
+    assert all(f["root_cause_verified"] is False for f in result["findings"])
+    assert "private" not in str(result)
+
+def test_invalid_resource_measurement_and_unavailable_host_are_not_zero():
+    assert snapshot._resource_pair(None,1024)["available"] is False
+    assert snapshot._resource_pair(True,1024)["available"] is False
+    assert snapshot._resource_pair(2048,1024)["available"] is False
+    with patch("asterion_remote.diagnostic_snapshot.host_health",side_effect=RuntimeError("private secret")):
+        result=snapshot._pc_resources()
+    assert result=={"observed":False,"reason":"RuntimeError","findings":[],"root_cause_verified":False}
+
+def test_phone_fresh_resource_and_native_transport_measurements_are_separate():
+    gib=1024**3
+    with patch("asterion_remote.diagnostic_snapshot.phone_bridge.load",return_value={"device":"Samsung"}), \\
+         patch("asterion_remote.diagnostic_snapshot.phone_bridge.request",side_effect=[
+             PhoneReply({"ok":True,"memory_available":gib-1,"memory_total":12*gib,
+                         "storage_available":80*gib,"storage_total":500*gib,
+                         "remote_transport":{"network":"wifi","connected":True,"validated":True,
+                                             "direct_mcp":{"transport":"direct_wss","connected":False}}}),
+             RuntimeError("no journal"),RuntimeError("no exits")]):
+        result=snapshot._phone()
+    assert result["reachability_verified"] is True
+    assert result["transport"]["connected"] is True
+    assert result["transport"]["native_wss_connected"] is False
+    assert result["resources"]["memory"]["pressure_band"]=="critical"
+    assert result["resources"]["storage"]["pressure_band"]=="above_low_threshold"
+    assert len(result["resources"]["findings"])==1
