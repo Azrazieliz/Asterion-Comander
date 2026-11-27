@@ -1,5 +1,6 @@
 """Public 7B adaptation diagnostic; no owner data, deployment or maturity claims."""
 from __future__ import annotations
+import argparse
 import json
 import os
 import shutil
@@ -7,7 +8,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from scripts.control_ai_adaptation import file_hash, validate
+from scripts.control_ai_adaptation import file_hash, validate, training_device
 from scripts.control_ai_quality_probe import cases
 
 MODEL = "unsloth/Olmo-3-7B-Instruct-unsloth-bnb-4bit"
@@ -69,18 +70,64 @@ def corpus():
 def dump(path, value):
     path.write_text(json.dumps(value,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
 
-def run(root,expanded=False):
+def step_budget(device, expanded, steps):
+    if device == "cpu" and steps is None:
+        raise ValueError("CPU training requires an explicit diagnostic step budget")
+    count = steps if steps is not None else (48 if expanded else 12)
+    if not 1 <= count <= 10000:
+        raise ValueError("invalid_step_budget")
+    return count
+
+def memory_admission(weight_bytes, host_bytes, disk_bytes, device, accelerator_bytes=None):
+    if weight_bytes <= 0 or disk_bytes < weight_bytes + (2 << 30):
+        raise RuntimeError("insufficient_training_disk")
+    if device == "cpu":
+        if host_bytes < weight_bytes + (3 << 30):
+            raise RuntimeError("insufficient_cpu_training_memory")
+    elif device == "cuda":
+        if accelerator_bytes is None or accelerator_bytes < weight_bytes + (3 << 30):
+            raise RuntimeError("insufficient_cuda_training_memory")
+        if host_bytes < weight_bytes + (1 << 30):
+            raise RuntimeError("insufficient_cuda_host_staging_memory")
+    else:
+        raise ValueError("invalid_training_device")
+
+def run(root,expanded=False,device="cuda",steps=None,parent=None,phase="train",evaluation_id="evaluation"):
+    import torch
+    device=training_device(device,torch.cuda.is_available())
+    if phase not in {"train","evaluate","both"}:
+        raise ValueError("invalid_adaptation_phase")
+    if phase=="evaluate" and (steps is not None or parent is not None):
+        raise ValueError("evaluation_cannot_change_training")
+    count=step_budget(device,expanded,steps) if phase!="evaluate" else None
     import psutil
     from huggingface_hub import HfApi,snapshot_download
-    root=root.resolve();root.mkdir(parents=True,exist_ok=False)
-    report={"state":"admission","model":MODEL,"base":BASE,"production_promoted":False,
-            "device_verified":False,"owner_private_data":False,"maturity_certified":False}
+    root=root.resolve()
+    if phase=="evaluate":
+        report=json.loads((root/"report.json").read_text(encoding="utf-8"))
+        if report.get("model")!=MODEL or report.get("base")!=BASE:
+            raise ValueError("evaluation_foundation_mismatch")
+        expanded=report.get("curriculum")=="native_application_v1"
+        for key in ("base_score","adapted_score","application_score"):
+            report.pop(key,None)
+    else:
+        root.mkdir(parents=True,exist_ok=False)
+        report={"state":"admission","model":MODEL,"base":BASE,"production_promoted":False,
+                "device_verified":False,"owner_private_data":False,"maturity_certified":False}
+    report.update(execution_device=device,execution_phase=phase)
     def save(): dump(root/"report.json",report);print(json.dumps(report),flush=True)
     save()
     try:
         api=HfApi(token=False)
-        model=api.model_info(MODEL,files_metadata=True)
-        base=api.model_info(BASE)
+        # Reuse the measured immutable base; an explicit parent must match it.
+        revision=report.get("revision") if phase=="evaluate" else "5d19c438a3f72bd74a2b1e1f7aa90e24d359c690"
+        base_revision=report.get("base_revision") if phase=="evaluate" else "6e5971d9eba42665f5bd5a0fcf047f299ce1dccc"
+        if not revision or not base_revision:
+            raise ValueError("missing_pinned_revision")
+        model=api.model_info(MODEL,revision=revision,files_metadata=True)
+        base=api.model_info(BASE,revision=base_revision)
+        if model.sha!=revision or base.sha!=base_revision:
+            raise ValueError("model_revision_mismatch")
         for info in (model,base):
             if (info.card_data or {}).get("license")!="apache-2.0":
                 raise ValueError("unapproved_model_license")
@@ -91,8 +138,9 @@ def run(root,expanded=False):
         budget=(psutil.virtual_memory().available-(1024<<20))//(1<<20)
         report.update(revision=model.sha,base_revision=base.sha,weights_bytes=size,
                       memory_budget_mib=budget,available_disk_bytes=shutil.disk_usage(root).free)
-        if size+(3<<30)>budget*(1<<20) or size+(2<<30)>report["available_disk_bytes"]:
-            report["state"]="outside_measured_host_budget";save();return
+        accelerator_bytes=torch.cuda.mem_get_info()[0] if device=="cuda" else None
+        report.update(accelerator_free_bytes=accelerator_bytes)
+        memory_admission(size,budget*(1<<20),report["available_disk_bytes"],device,accelerator_bytes)
         snapshot=Path(snapshot_download(MODEL,revision=model.sha,token=False,
               local_dir=root.parent/"training-base",
               allow_patterns=["*.safetensors","*.json","*.model","*.jinja","*.txt","README.md","LICENSE*"]))
@@ -104,40 +152,58 @@ def run(root,expanded=False):
         quant=config.get("quantization_config") or {}
         if quant.get("quant_method")!="bitsandbytes" or quant.get("bnb_4bit_quant_type")!="nf4":
             raise ValueError("expected_prequantized_nf4")
-        train,hold=corpus()
-        preference_path=None
-        if expanded:
-            from scripts.control_ai_evidence_corpus import application_curriculum,application_preferences
-            more,validation=application_curriculum()
-            # Preserve the earlier diagnostic examples; the new contract-based
-            # fixtures add practical behavior without touching public evaluations.
-            for row in train:row["workflow_family"]="original-diagnostic-training"
-            for row in hold:row["workflow_family"]="original-diagnostic-validation"
-            train+=more;hold+=validation
-            preference_path=root/"preferences.jsonl"
-            preference_path.write_text("".join(json.dumps(x,ensure_ascii=False)+"\n" for x in application_preferences(more)),encoding="utf-8")
-        for name,rows in (("train",train),("holdout",hold)):
-            (root/(name+".jsonl")).write_text("".join(json.dumps(x,ensure_ascii=False)+"\n" for x in rows),encoding="utf-8")
-        validate(root/"train.jsonl",root/"holdout.jsonl")
-        # Freeze independent generation cases before fitting.
         suite=root/"generation-evaluation.jsonl"
-        suite.write_text("".join(json.dumps(x,sort_keys=True,ensure_ascii=False)+"\n" for x in cases()),encoding="utf-8")
-        report.update(state="training",curriculum="native_application_v1" if expanded else "diagnostic",suite_sha256=file_hash(suite),train_rows=len(train),holdout_rows=len(hold),step_budget=48 if expanded else 12,private_owner_data=False);save()
-        args=[sys.executable,"-m","scripts.control_ai_adaptation","train","--base",str(snapshot),
-              "--revision",model.sha,"--train",str(root/"train.jsonl"),"--holdout",str(root/"holdout.jsonl"),
-              "--output",str(root/"candidate"),"--device","cpu","--precision","nf4",
-              "--memory-budget-mib",str(budget),"--context","256","--rank","8","--accumulate","1",
-              "--max-steps","48" if expanded else "12","--target-modules","q_proj,v_proj","--threads","4","--save-steps","4"]
-        # SFT is the priority. Preference pairs are preserved for a subsequent
-        # reviewed optimization pass rather than doubling this CPU run budget.
-        subprocess.run(args,check=True)
-        manifest=json.loads((root/"candidate/candidate.json").read_text())
-        if not manifest["weights_changed"] or file_hash(suite)!=report["suite_sha256"]:
-            raise RuntimeError("adaptation_or_evaluation_integrity_failure")
-        report.update(state="trained",adapter_sha256=file_hash(root/"candidate/adapter/adapter_model.safetensors"));save()
+        if phase!="evaluate":
+            train,hold=corpus()
+            preference_path=None
+            if expanded:
+                from scripts.control_ai_evidence_corpus import application_curriculum,application_preferences
+                more,validation=application_curriculum()
+                # Preserve the earlier diagnostic examples; the new contract-based
+                # fixtures add practical behavior without touching public evaluations.
+                for row in train:row["workflow_family"]="original-diagnostic-training"
+                for row in hold:row["workflow_family"]="original-diagnostic-validation"
+                train+=more;hold+=validation
+                preference_path=root/"preferences.jsonl"
+                preference_path.write_text("".join(json.dumps(x,ensure_ascii=False)+"\n" for x in application_preferences(more)),encoding="utf-8")
+            for name,rows in (("train",train),("holdout",hold)):
+                (root/(name+".jsonl")).write_text("".join(json.dumps(x,ensure_ascii=False)+"\n" for x in rows),encoding="utf-8")
+            validate(root/"train.jsonl",root/"holdout.jsonl")
+            # Freeze independent generation cases before fitting.
+            suite=root/"generation-evaluation.jsonl"
+            suite.write_text("".join(json.dumps(x,sort_keys=True,ensure_ascii=False)+"\n" for x in cases()),encoding="utf-8")
+            report.update(state="training",curriculum="native_application_v1" if expanded else "diagnostic",suite_sha256=file_hash(suite),train_rows=len(train),holdout_rows=len(hold),step_budget=count,private_owner_data=False);save()
+            args=[sys.executable,"-m","scripts.control_ai_adaptation","train","--base",str(snapshot),
+                  "--revision",model.sha,"--train",str(root/"train.jsonl"),"--holdout",str(root/"holdout.jsonl"),
+                  "--output",str(root/"candidate"),"--device",device,"--precision","nf4",
+                  "--memory-budget-mib",str(budget),"--context","256","--rank","8","--accumulate","1",
+                  "--max-steps",str(count),"--target-modules","q_proj,v_proj","--threads","4","--save-steps","1"]
+            if parent is not None:args.extend(["--start-candidate",str(Path(parent).resolve(strict=True))])
+            # SFT is the priority. Preference pairs are preserved for a subsequent
+            # reviewed optimization pass rather than doubling this CPU run budget.
+            subprocess.run(args,check=True)
+            manifest=json.loads((root/"candidate/candidate.json").read_text())
+            if not manifest["weights_changed"] or file_hash(suite)!=report["suite_sha256"]:
+                raise RuntimeError("adaptation_or_evaluation_integrity_failure")
+            report.update(state="trained",adapter_sha256=file_hash(root/"candidate/adapter/adapter_model.safetensors"));save()
+            if phase=="train":
+                return
+        from scripts.control_ai_native_adapter_export import admit, canonical_paths, verified_file
+        evidence=admit(root/"candidate",snapshot)
+        manifest=json.loads((root/"candidate/candidate.json").read_text(encoding="utf-8"))
+        if evidence["training_base_revision"]!=model.sha or file_hash(suite)!=report["suite_sha256"]:
+            raise ValueError("evaluation_lineage_mismatch")
+        for name,digest in canonical_paths(manifest["base_files_sha256"]).items():
+            verified_file(snapshot,name,digest)
+        report["adapter_sha256"]=evidence["peft_adapter_sha256"]
+        if not evaluation_id or not evaluation_id.isascii() or not all(c.isalnum() or c in "-_" for c in evaluation_id):
+            raise ValueError("invalid_evaluation_id")
+        evaluation=root/"evaluations"/evaluation_id
+        evaluation.mkdir(parents=True,exist_ok=False)
+        report.update(state="evaluating",evaluation_id=evaluation_id);save()
         # Real free-generation comparison; never certify the model on these fixtures.
         os.environ["HF_HUB_OFFLINE"]="1";os.environ["TRANSFORMERS_OFFLINE"]="1"
-        os.environ["ASTERION_MODEL_EVAL_ROOT"]=str(root)
+        os.environ["ASTERION_MODEL_EVAL_ROOT"]=str(evaluation)
         import torch
         from peft import PeftModel
         from transformers import AutoModelForCausalLM,AutoTokenizer
@@ -145,18 +211,19 @@ def run(root,expanded=False):
         torch.set_num_threads(4)
         tok=AutoTokenizer.from_pretrained(snapshot,local_files_only=True,trust_remote_code=False)
         core=AutoModelForCausalLM.from_pretrained(snapshot,local_files_only=True,trust_remote_code=False,
-             use_safetensors=True,torch_dtype=torch.float32,device_map={"":"cpu"})
+             use_safetensors=True,torch_dtype=torch.float32 if device=="cpu" else (torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16),device_map={"":device})
         model=PeftModel.from_pretrained(core,str(root/"candidate/adapter"),is_trainable=False,local_files_only=True)
         model.eval()
         def provider(prompt,request_id):
             tokens=tok.apply_chat_template([{"role":"user","content":prompt}],tokenize=True,
                        add_generation_prompt=True,return_tensors="pt")
             if hasattr(tokens,"input_ids"):tokens=tokens.input_ids
+            tokens=tokens.to(device)
             with torch.inference_mode():
                 generated=model.generate(tokens,max_new_tokens=192,do_sample=False,
                     pad_token_id=tok.pad_token_id if tok.pad_token_id is not None else tok.eos_token_id)
             response=tok.decode(generated[0,tokens.shape[-1]:],skip_special_tokens=True)
-            with (root/"generations.jsonl").open("a",encoding="utf-8") as f:
+            with (evaluation/"generations.jsonl").open("a",encoding="utf-8") as f:
                 f.write(json.dumps({"request_id":request_id,"response":response},ensure_ascii=False)+"\n")
             return {"content":response}
         import hashlib
@@ -166,7 +233,7 @@ def run(root,expanded=False):
         report["adapted_score"]=model_evaluation.run_batch(suite,report["adapter_sha256"],provider)
         if expanded:
             from scripts.control_ai_application_evaluate import evaluate
-            report["application_score"]=evaluate(provider,report["adapter_sha256"],root/"application-evaluation")
+            report["application_score"]=evaluate(provider,report["adapter_sha256"],evaluation/"application-evaluation")
         required_scores=["base_score","adapted_score"]+ (["application_score"] if expanded else [])
         report["state"]="evaluated" if all(report[x]["fully_evaluated"] and not report[x]["model_errors"] for x in required_scores) else "evaluation_errors"
         save()
@@ -174,5 +241,17 @@ def run(root,expanded=False):
     except Exception as e:
         report.update(state="blocked_or_failed",error=str(e)[:1000]);save();raise
 
+def parse_args(argv=None):
+    p=argparse.ArgumentParser(description=__doc__)
+    p.add_argument("root",type=Path)
+    p.add_argument("--curriculum",action="store_true")
+    p.add_argument("--device",choices=("cuda","cpu"),default="cuda")
+    p.add_argument("--phase",choices=("train","evaluate","both"),default="train")
+    p.add_argument("--steps",type=int)
+    p.add_argument("--parent",type=Path)
+    p.add_argument("--evaluation-id",default="evaluation")
+    return p.parse_args(argv)
+
 if __name__=="__main__":
-    run(Path(sys.argv[1]),expanded="--curriculum" in sys.argv[2:])
+    a=parse_args()
+    run(a.root,a.curriculum,a.device,a.steps,a.parent,a.phase,a.evaluation_id)

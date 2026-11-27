@@ -1,15 +1,16 @@
 name: Control Model Lab 7B application adaptation
 on:
-  push:
-    branches: [work/control-native-ai-reconstruction-20261126]
-    paths:
-      - 'scripts/control_ai_evidence_corpus.py'
   workflow_dispatch:
+    inputs:
+      cpu_diagnostic:
+        description: 'Explicitly authorize one CPU diagnostic optimizer step; not full curriculum training'
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
   adapt:
-    if: github.event.repository.private == false
+    if: github.event.repository.private == false && inputs.cpu_diagnostic == true
     runs-on: ubuntu-24.04
     timeout-minutes: 125
     env:
@@ -30,9 +31,9 @@ jobs:
       - run: |
           python -m pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cpu
           python -m pip install transformers==4.57.1 peft==0.17.1 accelerate==1.10.1 bitsandbytes==0.48.2 huggingface-hub==0.34.4 psutil
-      - name: Train application curriculum and compare actual generations
+      - name: Run explicitly requested one-step CPU diagnostic
         timeout-minutes: 110
-        run: python -m scripts.control_ai_stronger_adaptation measured-adaptation --curriculum
+        run: python -m scripts.control_ai_stronger_adaptation measured-adaptation --curriculum --device cpu --steps 1 --phase train
       - uses: actions/upload-artifact@v4
         if: always()
         with:

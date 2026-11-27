@@ -35,3 +35,32 @@ def test_application_curriculum_has_native_protocol_targets_and_separate_familie
             assert answer.startswith(fence) and answer.endswith("\n"+fence)
             if family=="native-signed-proposal":
                 assert set(json.loads(answer.splitlines()[1]))=={"package","action","payload"}
+
+
+def test_accelerated_training_is_default_and_cpu_requires_explicit_budget():
+    import pytest
+    from scripts.control_ai_stronger_adaptation import parse_args, step_budget
+    a=parse_args(["output","--curriculum"])
+    assert a.device=="cuda" and a.phase=="train"
+    assert step_budget(a.device,a.curriculum,a.steps)==48
+    with pytest.raises(ValueError,match="explicit diagnostic"):
+        step_budget("cpu",True,None)
+    assert step_budget("cpu",True,1)==1
+    for steps in (0,-1,10001):
+        with pytest.raises(ValueError,match="invalid_step_budget"):
+            step_budget("cuda",True,steps)
+
+def test_memory_admission_requires_actual_accelerator_and_host_budget():
+    import pytest
+    from scripts.control_ai_stronger_adaptation import memory_admission
+    GiB=1<<30
+    memory_admission(5*GiB,7*GiB,10*GiB,"cuda",9*GiB)
+    for accelerator in (None,7*GiB):
+        with pytest.raises(RuntimeError,match="cuda_training_memory"):
+            memory_admission(5*GiB,10*GiB,10*GiB,"cuda",accelerator)
+    with pytest.raises(RuntimeError,match="host_staging"):
+        memory_admission(5*GiB,5*GiB,10*GiB,"cuda",9*GiB)
+    with pytest.raises(RuntimeError,match="training_disk"):
+        memory_admission(5*GiB,10*GiB,6*GiB,"cuda",9*GiB)
+    with pytest.raises(RuntimeError,match="cpu_training_memory"):
+        memory_admission(5*GiB,7*GiB,10*GiB,"cpu")
