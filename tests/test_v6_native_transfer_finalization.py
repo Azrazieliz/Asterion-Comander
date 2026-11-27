@@ -333,3 +333,20 @@ def test_receipt_failure_refuses_submission(tmp_path,monkeypatch):
     with pytest.raises(HTTPException) as e:
         t.start_transfer(t.TransferRequest(pc_path=str(src)),lambda _:src)
     assert e.value.status_code==503 and not t._jobs and not t._cancels
+
+def test_stale_reconciliation_cannot_replace_verified_receipt(tmp_path,monkeypatch):
+    from asterion_remote import session_journal as j
+    monkeypatch.setenv("ASTERION_DIAGNOSTIC_ROOT",str(tmp_path))
+    row={"id":"c"*32,"state":"outcome_unknown","size":SIZE,"bytes_sent":SIZE}
+    j.save_transfer_receipt(row)
+    j.save_transfer_receipt(dict(row,state="completed",result={"verified":True}))
+    result=j.save_transfer_receipt(row)
+    assert result["state"]=="completed"
+    assert j.get_transfer_receipt(row["id"])["result"]["verified"] is True
+
+def test_stale_offset_cannot_regress_receipt(tmp_path,monkeypatch):
+    from asterion_remote import session_journal as j
+    monkeypatch.setenv("ASTERION_DIAGNOSTIC_ROOT",str(tmp_path))
+    row={"id":"d"*32,"state":"outcome_unknown","size":4,"bytes_sent":4}
+    j.save_transfer_receipt(row)
+    assert j.save_transfer_receipt(dict(row,bytes_sent=2))["bytes_sent"]==4

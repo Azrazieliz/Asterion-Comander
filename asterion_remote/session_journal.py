@@ -183,7 +183,7 @@ def _transfer_table(db):
     db.execute("""CREATE TABLE IF NOT EXISTS transfer_receipts(
         id TEXT PRIMARY KEY, worker_epoch TEXT NOT NULL, receipt TEXT NOT NULL)""")
 
-def save_transfer_receipt(row: dict) -> None:
+def save_transfer_receipt(row: dict) -> dict:
     ident=row.get("id","")
     if not _SAFE.fullmatch(ident):
         raise ValueError("Invalid transfer receipt identity")
@@ -200,8 +200,24 @@ def save_transfer_receipt(row: dict) -> None:
         db=_connection()
         try:
             _transfer_table(db)
-            db.execute("INSERT INTO transfer_receipts VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET worker_epoch=excluded.worker_epoch,receipt=excluded.receipt",
-                       (ident,_EPOCH,encoded))
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                prior=db.execute("SELECT receipt FROM transfer_receipts WHERE id=?",(ident,)).fetchone()
+                if prior:
+                    previous=json.loads(prior[0])
+                    # An earlier status read may arrive after a later terminal
+                    # observation. Never downgrade verified terminal evidence.
+                    if previous["state"] in ("completed","failed","cancelled") or (
+                        record.get("bytes_sent",0)<previous.get("bytes_sent",0)):
+                        db.execute("COMMIT")
+                        return previous
+                db.execute("INSERT INTO transfer_receipts VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET worker_epoch=excluded.worker_epoch,receipt=excluded.receipt",
+                           (ident,_EPOCH,encoded))
+                db.execute("COMMIT")
+                return record
+            except BaseException:
+                db.execute("ROLLBACK")
+                raise
         finally:db.close()
 
 def get_transfer_receipt(ident: str) -> dict | None:

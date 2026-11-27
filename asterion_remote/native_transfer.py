@@ -412,8 +412,8 @@ def _reconcile_receipt(job: dict) -> dict:
             observed.update(state="failed",error="Android reported publication failure")
         else:
             observed["error"]="Android phase: "+phase if phase in ("receiving","verifying","publishing","outcome_unknown") else "Android outcome unverified"
-        session_journal.save_transfer_receipt(observed)
-        return observed
+        durable=session_journal.save_transfer_receipt(observed)
+        return dict(durable,worker_active=False,source='durable_transfer_receipt')
     except Exception:
         return job
 
@@ -430,7 +430,10 @@ def transfer_status(key: str):
     observed=_reconcile_receipt(snapshot)
     with _guard:
         if key in _jobs and key not in _cancels:
-            _jobs[key].update(observed)
+            if _jobs[key]["state"] not in ("completed","failed","cancelled"):
+                _jobs[key].update(observed)
+            else:
+                return dict(_jobs[key],worker_active=False)
     return observed
 
 def cancel_transfer(key: str):

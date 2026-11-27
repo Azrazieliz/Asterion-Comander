@@ -130,7 +130,7 @@ final class ControlVpnVerification {
             }
             default4=v4;default6=v6;dns=link.getDnsServers().size();privateDns=link.isPrivateDnsActive();
         }
-        boolean stable(RouteSnapshot other){return network.equals(other.network)&&vpn==other.vpn&&
+        boolean stable(RouteSnapshot other){return network.equals(other.network)&&vpn==other.vpn&&validated==other.validated&&
             transport.equals(other.transport)&&default4==other.default4&&default6==other.default6&&dns==other.dns&&privateDns==other.privateDns;}
     }
 
@@ -225,6 +225,9 @@ final class ControlVpnVerification {
                 throw new IllegalStateException("validated_known_network_required");
             if(baseline?(active||initial.vpn):(!active||!initial.vpn))
                 throw new IllegalStateException("incorrect_vpn_measurement_phase");
+            SharedPreferences prefs=context.getSharedPreferences(PREFS,Context.MODE_PRIVATE);
+            if(baseline&&!prefs.edit().remove("long_timestamp_ms").commit())
+                throw new IllegalStateException("old_baseline_invalidation_failed");
             String ip=fetchPublicIp(initial.network,false);
             byte[] buffer=new byte[32768];
             long began=SystemClock.elapsedRealtimeNanos(),bytes=0;
@@ -276,7 +279,6 @@ final class ControlVpnVerification {
                 .put("ipv6_leak_free_verified",false)
                 .put("provider_country_verified",false)
                 .put("sustained_25_percent_loss_verified",false);
-            SharedPreferences prefs=context.getSharedPreferences(PREFS,Context.MODE_PRIVATE);
             if(baseline){
                 if(complete&&!prefs.edit().putString("long_transport",initial.transport)
                     .putString("long_ipv4",ip).putString("long_mbps",Double.toString(mbps))
