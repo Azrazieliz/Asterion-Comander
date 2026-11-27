@@ -53,7 +53,8 @@ jobs:
             tests/test_control_partner_bridge_ui_0934.py \
             tests/test_native_signed_intent_routing.py \
             tests/test_model_evaluation.py \
-            tests/test_v6_native_transfer_finalization.py
+            tests/test_v6_native_transfer_finalization.py \
+            tests/test_diagnostic_snapshot.py
   android-java-only:
     needs: python-contracts
     runs-on: ubuntu-latest
