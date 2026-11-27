@@ -17,11 +17,15 @@ final class OnDeviceModelProfile {
     final String precision,backendDevice,adapterFile,adapterSha256;
     final int offloadLayers,kvBits;
     final long adapterBytes,residentBytes,workspaceBytes,kvBytesPerToken;
-    final boolean allowSmallerContext;
+    final boolean allowSmallerContext,externalModelPack;
     private OnDeviceModelProfile(JSONObject j) throws Exception {
         file=j.getString("file");
         if(!NAME.matcher(file).matches())throw new IllegalArgumentException("invalid_model_filename");
         asset="models/"+file;
+        String distribution=j.optString("distribution","bundled");
+        if(!"bundled".equals(distribution)&&!"owner_import".equals(distribution))
+            throw new IllegalArgumentException("invalid_model_distribution");
+        externalModelPack="owner_import".equals(distribution);
         bytes=j.getLong("bytes");
         if(bytes<1024*1024L||bytes>15_000_000_000L)throw new IllegalArgumentException("invalid_model_size");
         sha256=j.getString("sha256").toLowerCase(Locale.ROOT);

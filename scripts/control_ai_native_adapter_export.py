@@ -12,6 +12,8 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import shutil
+import tempfile
 from scripts.control_ai_adaptation import file_hash
 
 PINNED_RUNTIME="4b77dee0524c64b8471869232e2958bd9589607d"
@@ -85,9 +87,38 @@ def export(candidate,base,runtime,out):
     out.mkdir(parents=True,exist_ok=False)
     artifact=out/"control-adapter-f16.gguf"
     env=dict(os.environ,HF_HUB_OFFLINE="1",TRANSFORMERS_OFFLINE="1",HF_HUB_DISABLE_IMPLICIT_TOKEN="1")
-    subprocess.run([sys.executable,str(runtime/"convert_lora_to_gguf.py"),
-        "--base",str(Path(base).resolve()),"--outtype","f16","--outfile",str(artifact),
-        str(Path(candidate).resolve()/"adapter")],cwd=runtime,env=env,check=True)
+    # PEFT A/B matrices are floating-point tensors even when the frozen
+    # training foundation was NF4. The upstream adapter-only converter also
+    # calls its full-model dequantizer when quantization_config is present.
+    # Preserve the admitted source metadata and remove ONLY the verified NF4
+    # storage descriptor from an isolated converter-only copy. No foundation
+    # weights are converted, modified, or represented as a matched GGUF.
+    with tempfile.TemporaryDirectory(prefix="control-lora-converter-") as directory:
+        source=Path(base).resolve(strict=True)
+        config=json.loads((source/"config.json").read_text(encoding="utf-8"))
+        quant=config.get("quantization_config")
+        converter_base=source
+        if quant is not None:
+            if (not isinstance(quant,dict) or quant.get("quant_method")!="bitsandbytes" or
+                quant.get("bnb_4bit_quant_type")!="nf4" or
+                not quant.get("load_in_4bit",quant.get("_load_in_4bit",False))):
+                raise ValueError("unsupported_adapter_training_quantization")
+            converter_base=Path(directory)
+            manifest=json.loads((Path(candidate)/"candidate.json").read_text(encoding="utf-8"))
+            for name,digest in canonical_paths(manifest["base_files_sha256"]).items():
+                if name.endswith(".safetensors"):continue
+                verified=verified_file(source,name,digest)
+                target=converter_base/name
+                target.parent.mkdir(parents=True,exist_ok=True)
+                shutil.copyfile(verified,target)
+            config.pop("quantization_config")
+            (converter_base/"config.json").write_text(json.dumps(config,sort_keys=True,indent=2)+"\n",encoding="utf-8")
+            evidence.update(converter_metadata_sha256=file_hash(converter_base/"config.json"),
+                converter_removed_storage_descriptor="bitsandbytes_nf4",source_config_preserved=True,
+                foundation_weights_converted=False)
+        subprocess.run([sys.executable,str(runtime/"convert_lora_to_gguf.py"),
+            "--base",str(converter_base),"--outtype","f16","--outfile",str(artifact),
+            str(Path(candidate).resolve()/"adapter")],cwd=runtime,env=env,check=True)
     with artifact.open("rb") as stream:
         if stream.read(4)!=b"GGUF":raise ValueError("invalid_native_adapter_header")
     if artifact.stat().st_size<=32:raise ValueError("empty_native_adapter")

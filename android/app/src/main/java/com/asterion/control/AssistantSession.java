@@ -19,8 +19,10 @@ final class AssistantSession {
     String status="",persistenceIssue="";
     private InferenceGate.Request activeRequest;
     private boolean actionBusy;
+    private InferenceGate.Request modelImportRequest;
     AssistantArtifact pendingArtifact;
-    boolean busy(){return actionBusy||conversation.running();}
+    boolean importingModel(){return modelImportRequest!=null;}
+    boolean busy(){return actionBusy||conversation.running()||importingModel();}
     private long lastNotification;
     void changed(){for(Runnable listener:listeners)listener.run();}
     void save(Context c){
@@ -123,7 +125,37 @@ final class AssistantSession {
             save(app);changed();
         });
     }
+    void importModel(Context context,java.util.List<android.net.Uri> documents,boolean adapter){
+        if(busy())return;
+        Context app=context.getApplicationContext();
+        InferenceGate.Request request=new InferenceGate.Request();
+        modelImportRequest=request;status="Importing signed model file";changed();
+        work.execute(()->{
+            String result;
+            try{
+                OnDeviceModelProfile profile=OnDeviceModelProfile.read(app);
+                long total=adapter?profile.adapterBytes:profile.bytes;
+                OnDeviceLlm.importOwnerModelArtifact(app,documents,adapter,request,received->main.post(()->{
+                    if(modelImportRequest!=request||request.isCancelled())return;
+                    status="Verifying "+(adapter?"adapter":"model")+" · "+(received*100/total)+"%";
+                    changed();
+                }));
+                result=(adapter?"Adapter":"Model")+" imported and SHA-256 verified. Other required files must also be present before inference.";
+            }catch(InterruptedException stopped){result="Model import cancelled; previous files retained.";}
+            catch(Exception|LinkageError failure){
+                result="Model import did not complete. Check the signed profile, exact file identity and available storage.";
+            }
+            final String report=result;
+            main.post(()->{
+                if(modelImportRequest!=request)return;
+                modelImportRequest=null;status=report;changed();
+            });
+        });
+    }
     void cancel(){
+        if(modelImportRequest!=null){
+            OnDeviceLlm.cancel(modelImportRequest);status="Cancelling model import";changed();return;
+        }
         if(activeRequest!=null&&conversation.running()){
             OnDeviceLlm.cancel(activeRequest);
             status="Stopping";changed();
