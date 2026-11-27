@@ -186,7 +186,7 @@ public final class MainActivity extends Activity {
       transferStatus("Reconnecting to the previously accepted transfer…");
       beginTransferPolling(savedTransfer);
     }else if(prefs.getBoolean("transfer_submission_uncertain",false)){
-      transferStatus("Previous submission was interrupted. Check Downloads or explicitly resume the same file; it will not be sent automatically.");
+      transferStatus("Previous submission was interrupted. Check Downloads; without a retained identity no safe resume is available.");
     }
     // Owner-authorized continuation is persistent and controlled by the internal
     // ledger. No diagnostic/transport toggles belong on the everyday UI.
@@ -1360,6 +1360,7 @@ public final class MainActivity extends Activity {
     rowTitle(transfer,"Private file transfer","PC → Phone · Paired LAN or existing native WSS",icon("download",DesignSystem.TEAL,24));
     gap(transfer,12);button(transfer,"Send a PC file to this phone","share",true,this::promptWifiTransfer);
     gap(transfer,9);button(transfer,"Check transfer status","refresh",false,this::checkLastTransfer);
+     gap(transfer,9);button(transfer,"Resume retained transfer","refresh",false,this::promptResumeTransfer);
     transferCancelAction=v();button(transferCancelAction,"Cancel transfer","power",false,this::cancelWifiTransfer);
     wide(transfer,transferCancelAction);transferCancelAction.setVisibility(View.GONE);
     gap(transfer,9);transferFeedback=t("No transfer active. File contents use the paired private connection, never GitHub or ADB.",12,DesignSystem.MUTED,false);
@@ -1833,6 +1834,61 @@ public final class MainActivity extends Activity {
       })
       .setNegativeButton("Cancel",null).show();
   }
+  private void promptResumeTransfer(){
+    if(transferSubmitting||activeTransferId!=null){
+      toast("Check or finish the current transfer first");return;
+    }
+    String id=prefs.getString("last_transfer_id","");
+    if(!id.matches("[a-f0-9]{32}")){
+      toast("No retained transfer identity. Check Downloads; no automatic replay.");return;
+    }
+    EditText field=input("",false,"Original authorized PC file path");
+    new AlertDialog.Builder(this)
+      .setTitle("Resume the retained transfer")
+      .setMessage("Select the original Windows file. Control will recheck its SHA-256, the original Android transfer identity and committed bytes. It will never start a second transfer from this action.")
+      .setView(field)
+      .setPositiveButton("Resume",(dialog,which)->{
+        String path=field.getText().toString().trim();
+        if(path.isEmpty()){toast("Choose the original Windows file");return;}
+        submitWifiResume(id,path);
+      })
+      .setNegativeButton("Cancel",null).show();
+  }
+  private void submitWifiResume(String id,String pcPath){
+    if(transferSubmitting||activeTransferId!=null||
+        !id.equals(prefs.getString("last_transfer_id",""))){
+      toast("Retained transfer changed; check its status");return;
+    }
+    transferSubmitting=true;
+    rememberTransfer(id);
+    transferStatus("Checking retained Android identity and source file…");
+    io.execute(()->{
+      try{
+        JSONObject out=pcTransferRequest("/api/v1/phone/transfers/"+id+"/resume","POST",
+            new JSONObject().put("pc_path",pcPath));
+        if(!id.equals(out.optString("id"))||!out.optBoolean("resuming"))
+          throw new IllegalStateException("Resume identity unconfirmed");
+        runOnUiThread(()->{
+          transferSubmitting=false;
+          if(destroyed)return;
+          transferStatus("Resume accepted · verifying the original file and offset");
+          beginTransferPolling(id);
+        });
+      }catch(Exception e){runOnUiThread(()->{
+        transferSubmitting=false;
+        if(destroyed)return;
+        boolean refused=e instanceof TransferRequestFailure&&
+            java.util.Arrays.asList(400,401,403,404,409,413,422,429).contains(((TransferRequestFailure)e).status);
+        if(refused){
+          releaseTransferMonitor();
+          transferStatus("Resume refused: "+e.getMessage()+". Original receipt retained.");
+        }else{
+          transferStatus("Resume outcome uncertain. Checking the original receipt; no replay.");
+          beginTransferPolling(id);
+        }
+      });}
+    });
+  }
   private JSONObject pcTransferRequest(String path,String method,JSONObject body)throws Exception{
     String url=prefs.getString("url","").replaceAll("/+$","");
     String token=prefs.getString("token","");
@@ -1901,7 +1957,7 @@ public final class MainActivity extends Activity {
           java.util.Arrays.asList(400,401,403,404,409,413,422,429).contains(((TransferRequestFailure)e).status);
         if(refused)prefs.edit().putBoolean("transfer_submission_uncertain",false).commit();
         if(!destroyed)transferStatus(refused?"Transfer refused: "+e.getMessage():
-          "Submission outcome unknown. No automatic resend. Check Downloads or deliberately resume the same source file.");
+          "Submission outcome unknown. No automatic resend. Check Downloads; safe resume requires a retained identity.");
       });}
     });
   }
@@ -1939,7 +1995,7 @@ public final class MainActivity extends Activity {
             transferStatus("Transfer "+state+": "+job.optString("error",""));
           }else if(state.equals("outcome_unknown")&&!job.optBoolean("worker_active",true)){
             releaseTransferMonitor();
-            transferStatus("Transfer outcome unknown. Original receipt retained. No duplicate publication requested.");
+            transferStatus("Transfer outcome unknown. Original receipt retained. Use Resume retained transfer to reselect the source, if Android still has the identity.");
           }else{
             double percent=total>0?Math.max(0,Math.min(100.0,100.0*sent/total)):0;
             transferStatus(state+" · "+sent+" / "+total+" bytes · "+
@@ -1952,7 +2008,7 @@ public final class MainActivity extends Activity {
         if(destroyed||generation!=transferPollGeneration||!id.equals(activeTransferId))return;
         if(e instanceof TransferRequestFailure&&((TransferRequestFailure)e).status==404){
           releaseTransferMonitor();
-          transferStatus("Windows no longer has this job receipt. Result unknown; check Downloads or resume the same source file.");
+          transferStatus("Windows no longer has this job receipt. Result unknown; check Downloads. No new transfer was started.");
           return;
         }
         transferStatus("Transfer status temporarily unavailable. Original receipt retained.");
