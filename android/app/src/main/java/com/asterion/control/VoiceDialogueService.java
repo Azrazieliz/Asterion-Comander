@@ -467,7 +467,7 @@ public final class VoiceDialogueService extends Service {
       return report();  // Safe retry: never speak a question twice.
     }
     if(ambientCapture)cancelAmbient();
-    if("speaking".equals(phase)||("listening".equals(phase)&&!ambientCapture)||
+    if("fallback".equals(phase)||"speaking".equals(phase)||("listening".equals(phase)&&!ambientCapture)||
        ("processing".equals(phase)&&!ambientCapture))
       throw new IllegalStateException("Another voice exchange is active");
     if("answered".equals(phase)&&!consumed)
@@ -594,8 +594,9 @@ public final class VoiceDialogueService extends Service {
       && SpeechRecognizer.isOnDeviceRecognitionAvailable(this);
     boolean standard=SpeechRecognizer.isRecognitionAvailable(this);
     if(!offline&&!standard){
-      clearDeadline();microphoneActive=false;
+      clearDeadline();closeRecognizer(true);ownerCommandMode=false;
       state("failed","Speaker completed; no Android speech recognition service available");
+      if(ambientEnabled)scheduleAmbient(30000L);
       return;
     }
     try{beginRecognition(locale,id,offline);}
@@ -604,9 +605,10 @@ public final class VoiceDialogueService extends Service {
         try{beginRecognition(locale,id,false);return;}
         catch(Exception fallback){e=fallback;}
       }
-      clearDeadline();microphoneActive=false;
+      clearDeadline();closeRecognizer(true);ownerCommandMode=false;
       state("failed","Android speech recognition could not start: "+
         e.getClass().getSimpleName());
+      if(ambientEnabled)scheduleAmbient(30000L);
     }
   }
   /** The Android system recognizer is a one-time fallback when the offline
@@ -751,7 +753,7 @@ public final class VoiceDialogueService extends Service {
        !VoiceReplyPolicy.englishLocale(locale))
       throw new IllegalArgumentException("Invalid spoken reply");
     if(ambientCapture)cancelAmbient();
-    if("listening".equals(phase)||"processing".equals(phase)||"speaking".equals(phase))
+    if("fallback".equals(phase)||"listening".equals(phase)||"processing".equals(phase)||"speaking".equals(phase))
       throw new IllegalStateException("Voice conversation is busy");
     acquireAudioFocus();
     try{keepCpuForExchange();}catch(Exception e){releaseAudioFocus();throw e;}
