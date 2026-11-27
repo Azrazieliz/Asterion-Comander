@@ -256,6 +256,7 @@ public final class AssistantActivity extends Activity {
                 .setItems(options,(dialog,index)->{
                     if(!idle())return;
                     Intent picker=new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE);
+                    picker.putExtra(Intent.EXTRA_ALLOW_MULTIPLE,true);
                     try{startActivityForResult(picker,index==0?215:216);}
                     catch(Exception unavailable){notice("Model document picker unavailable.");}
                 }).setNegativeButton("Cancel",null).show();
@@ -315,12 +316,18 @@ public final class AssistantActivity extends Activity {
     }
     @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);
         if(request==215||request==216){
-            if(result!=RESULT_OK||data==null||data.getData()==null||!idle())return;
-            android.net.Uri uri=data.getData();
+            if(result!=RESULT_OK||data==null||!idle())return;
+            java.util.ArrayList<android.net.Uri> documents=new java.util.ArrayList<>();
+            ClipData clips=data.getClipData();
+            if(clips!=null){
+                if(clips.getItemCount()>32){notice("Select at most 32 model parts.");return;}
+                for(int i=0;i<clips.getItemCount();i++)documents.add(clips.getItemAt(i).getUri());
+            }else if(data.getData()!=null)documents.add(data.getData());
+            if(documents.isEmpty())return;
             boolean adapter=request==216;
             new AlertDialog.Builder(this).setTitle(adapter?"Import verified adapter":"Import verified base model")
-                .setMessage("Copy this selected document into private model storage and verify it against the signed profile? The original file is not changed.")
-                .setPositiveButton("Import",(d,w)->{if(idle())session.importModel(this,uri,adapter);})
+                .setMessage("Import "+documents.size()+" selected document(s) and verify the assembled bytes against the signed profile? The originals are not changed.")
+                .setPositiveButton("Import",(d,w)->{if(idle())session.importModel(this,documents,adapter);})
                 .setNegativeButton("Cancel",null).show();
             return;
         }
