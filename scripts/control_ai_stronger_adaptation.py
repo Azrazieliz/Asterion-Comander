@@ -102,6 +102,11 @@ def prepare_evaluation(root,evaluation_id):
     manifest=json.loads(manifest_path.read_text(encoding="utf-8"))
     if manifest.get("weights_changed") is not True or manifest.get("adapter_only") is not True:
         raise ValueError("completed_changed_adapter_required")
+    from scripts.control_ai_native_adapter_export import SHA
+    before=manifest.get("trainable_sha256_before")
+    after=manifest.get("trainable_sha256_after")
+    if not isinstance(before,str) or not isinstance(after,str) or not SHA.fullmatch(before) or not SHA.fullmatch(after) or before==after:
+        raise ValueError("invalid_training_weight_lineage")
     if manifest.get("base_revision_declared")!=report["revision"]:
         raise ValueError("evaluation_lineage_mismatch")
     inventory=canonical_paths(manifest["artifact_sha256"])
