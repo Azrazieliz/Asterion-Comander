@@ -151,7 +151,7 @@ def test_invalid_resource_measurement_and_unavailable_host_are_not_zero():
 
 def test_phone_fresh_resource_and_native_transport_measurements_are_separate():
     gib=1024**3
-    with patch("asterion_remote.diagnostic_snapshot.phone_bridge.load",return_value={"device":"Samsung"}), \\
+    with patch("asterion_remote.diagnostic_snapshot.phone_bridge.load",return_value={"device":"Samsung"}), \
          patch("asterion_remote.diagnostic_snapshot.phone_bridge.request",side_effect=[
              PhoneReply({"ok":True,"memory_available":gib-1,"memory_total":12*gib,
                          "storage_available":80*gib,"storage_total":500*gib,
