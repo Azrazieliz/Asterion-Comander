@@ -150,6 +150,13 @@ public final class AssistantActivity extends Activity {
                         if(m.actionRecord!=null){
                             tools.addView(control("Check receipt",()->session.recheck(this,c,m)));
                         }else try{JSONObject proposal=m.state.equals("completed")?AssistantCapabilities.proposal(m.text):null;if(proposal!=null)tools.addView(control("Review action",()->reviewAction(c,m,proposal)));}catch(Exception ignored){}
+                        if(m.state.equals("completed"))try{
+                            AssistantSchedulePlan schedule=AssistantSchedulePlan.parse(m.text);
+                            if(schedule!=null)tools.addView(control("Review schedule",()->{
+                                if(idle()&&session.conversation==c&&c.messages.contains(m))
+                                    AssistantScheduleUi.review(this,schedule,m.id,id->notice("Local schedule saved. Manage it under Tools."));
+                            }));
+                        }catch(IllegalArgumentException ignored){}
                     }
                     turn.addView(tools);
                     if(m.actionRecord!=null)turn.addView(label(m.actionRecord.evidence(),12,muted,false));

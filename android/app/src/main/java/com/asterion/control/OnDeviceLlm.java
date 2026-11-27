@@ -69,6 +69,7 @@ final class OnDeviceLlm {
     private static native void nativeCancel();
     private static native void nativeResetCancel();
     static void cancel(InferenceGate.Request request){GATE.cancel(request);}
+    static boolean inferenceBusy(){return GATE.busy();}
     private static native void nativeUnload();
 
     static JSONObject status(Context context) throws Exception {
@@ -215,7 +216,7 @@ final class OnDeviceLlm {
                 +"Do not claim you are outside the app or that unverified tools are available. "
                 +"Return the final answer in the user-visible channel; do not print internal reasoning delimiters.";
             guidance+="\nActive project: "+project+". This label scopes local memory; project source access requires verified retrieval evidence. "+
-                "Reference blocks may be omitted to fit the active context. Do not assume complete retrieval.\n"+AssistantStructured.GUIDANCE;
+                "Reference blocks may be omitted to fit the active context. Do not assume complete retrieval.\n"+AssistantStructured.GUIDANCE+"\n"+AssistantSchedulePlan.GUIDANCE;
             java.util.ArrayList<byte[]> references=new java.util.ArrayList<>();
             StringBuilder actionEvidence=new StringBuilder();
             int records=0;

@@ -178,6 +178,7 @@ public final class MainActivity extends Activity {
     pages[0]=scrollHome();pages[1]=remotePage();pages[2]=scrollHealth();pages[3]=scrollDevices();pages[4]=scrollTools();
     for(View page:pages){page.setVisibility(View.GONE);stage.addView(page,new FrameLayout.LayoutParams(-1,-1));}
     buildNav();show(getIntent().getBooleanExtra("assistant_settings",false)?4:0);updateHealth();handler.postDelayed(ticker,3500);
+    if(getIntent().getBooleanExtra("open_schedules",false))handler.post(()->AssistantScheduleUi.show(this));
     String savedTransfer=prefs.getString("active_transfer_id","");
     if(savedTransfer.matches("[a-f0-9]{32}")){
       activeTransferId=savedTransfer;
@@ -1265,6 +1266,8 @@ public final class MainActivity extends Activity {
     gap(intelligence,9);
     twoActions(intelligence,"Remember","check",this::showAiRemember,
       "Review memories","settings",this::showAiMemoryReview);
+    gap(intelligence,9);
+    button(intelligence,"Scheduled tasks","activity",false,()->AssistantScheduleUi.show(this));
     wide(toolsBody,intelligence);
     LinearLayout advancedPanel=v();gap(advancedPanel,12);LinearLayout incidents=card();
     rowTitle(incidents,"Incident investigation",
@@ -3233,4 +3236,9 @@ public final class MainActivity extends Activity {
     super.onPause();
   }
   @Override protected void onDestroy(){destroyed=true;handler.removeCallbacks(ticker);io.shutdownNow();if(web!=null){web.destroy();}super.onDestroy();}
+  @Override protected void onNewIntent(Intent intent){
+    super.onNewIntent(intent);setIntent(intent);
+    if(intent.getBooleanExtra("open_schedules",false))handler.post(()->AssistantScheduleUi.show(this));
+  }
+
 }

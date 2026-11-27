@@ -133,6 +133,40 @@ final class ControlAssistantMemory {
             }finally{helper.close();}
         }
     }
+    // Local scheduled tasks use the same private memory key but independent AAD.
+    // The entire bounded task collection is sealed before any background dispatch.
+    private static final String SCHEDULE_PREFS="control_assistant_schedules_v1";
+    private static final byte[] SCHEDULE_AAD="Asterion.Control.Schedules.v1".getBytes(StandardCharsets.UTF_8);
+    static JSONArray loadSchedules(Context c)throws Exception{
+        synchronized(LOCK){
+            String sealed=c.getSharedPreferences(SCHEDULE_PREFS,Context.MODE_PRIVATE).getString("sealed",null);
+            if(sealed==null)return new JSONArray();
+            if(sealed.length()>2_000_000)throw new IllegalStateException("schedule_storage_budget");
+            byte[] bytes=android.util.Base64.decode(sealed,android.util.Base64.NO_WRAP);
+            if(bytes.length<28)throw new IllegalStateException("invalid_schedule_ciphertext");
+            Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.DECRYPT_MODE,key(),new GCMParameterSpec(128,java.util.Arrays.copyOf(bytes,12)));
+            cipher.updateAAD(SCHEDULE_AAD);
+            return new JSONArray(new String(cipher.doFinal(bytes,12,bytes.length-12),StandardCharsets.UTF_8));
+        }
+    }
+    static void saveSchedules(Context c,JSONArray rows)throws Exception{
+        synchronized(LOCK){
+            byte[] plain=rows.toString().getBytes(StandardCharsets.UTF_8);
+            if(rows.length()>32||plain.length>1_000_000)throw new IllegalStateException("schedule_storage_budget");
+            Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.ENCRYPT_MODE,key());
+            cipher.updateAAD(SCHEDULE_AAD);
+            byte[] nonce=cipher.getIV(),payload=cipher.doFinal(plain);
+            if(nonce.length!=12)throw new IllegalStateException("unexpected_schedule_nonce");
+            byte[] sealed=new byte[nonce.length+payload.length];
+            System.arraycopy(nonce,0,sealed,0,nonce.length);
+            System.arraycopy(payload,0,sealed,nonce.length,payload.length);
+            String encoded=android.util.Base64.encodeToString(sealed,android.util.Base64.NO_WRAP);
+            if(!c.getSharedPreferences(SCHEDULE_PREFS,Context.MODE_PRIVATE).edit().putString("sealed",encoded).commit())
+                throw new IllegalStateException("schedule_receipt_not_persisted");
+        }
+    }
     private static SecretKey key() throws Exception {
         KeyStore store=KeyStore.getInstance("AndroidKeyStore");
         store.load(null);

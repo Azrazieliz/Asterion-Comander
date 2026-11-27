@@ -83,6 +83,7 @@ public final class AgentService extends Service {
     cycleSupervisor.scheduleWithFixedDelay(()->{
       try{if(cycles!=null)cycles.tick();}
       catch(Exception e){android.util.Log.w("AsterionCycle","Cycle tick deferred",e);}
+      try{AssistantSchedules.tick(this);}catch(Exception e){android.util.Log.w("AsterionCycle","Local scheduled task deferred");}
     },5,4,java.util.concurrent.TimeUnit.SECONDS);
     observer.scheduleWithFixedDelay(()->{
       try{PerformanceManager.tick(this);AppObservation.sample(this);}catch(Exception ignored){}

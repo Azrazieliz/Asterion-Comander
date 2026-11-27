@@ -59,3 +59,25 @@ def test_memory_search_recovers_old_and_late_exact_passages(tmp_path):
     result=subprocess.run([runtime,'-cp',str(tmp_path),'com.asterion.control.AssistantMemorySearchTest'],
                           check=True,capture_output=True,text=True,timeout=30)
     assert 'Memory search behavior passed' in result.stdout
+
+def test_native_schedule_plan_and_no_catchup(tmp_path):
+    compiler=shutil.which('javac')
+    runtime=shutil.which('java')
+    if not compiler or not runtime:
+        pytest.skip('JDK required')
+    subprocess.run([compiler,'-encoding','UTF-8','-d',str(tmp_path),
+                    str(JAVA/'AssistantStructured.java'),str(JAVA/'AssistantSchedulePlan.java'),
+                    str(ROOT/'tests/java/com/asterion/control/AssistantSchedulePlanTest.java')],
+                   check=True,capture_output=True,text=True)
+    result=subprocess.run([runtime,'-cp',str(tmp_path),'com.asterion.control.AssistantSchedulePlanTest'],
+                          check=True,capture_output=True,text=True,timeout=30)
+    assert 'Schedule plan behavior passed' in result.stdout
+
+def test_local_schedule_reserves_before_dispatch_and_reuses_native_queue():
+    code=(JAVA/'AssistantSchedules.java').read_text(encoding='utf-8')
+    assert code.index('commit(c,a);\n            if(r.getString("kind").equals("reminder"))')<code.index('OnDeviceAiJobs.submit(c,')
+    assert 'OnDeviceAiJobs.status(c,' in code and 'OnDeviceAiJobs.cancel(c,' in code
+    assert 'if(!AgentService.running)return;' in code
+    assert 'No automatic replay' in code
+    assert 'AssistantSchedules.tick(this)' in (JAVA/'AgentService.java').read_text(encoding='utf-8')
+    assert 'SCHEDULE_AAD' in (JAVA/'ControlAssistantMemory.java').read_text(encoding='utf-8')
