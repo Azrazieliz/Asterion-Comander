@@ -51,6 +51,19 @@ final class ControlAssistantPreferences {
                 .putBoolean(SAVE_HISTORY,keepHistory).putBoolean(REUSE_HISTORY,reuseHistory).commit())
             throw new IllegalStateException("local_ai_preferences_not_saved");
     }
+    // An acceleration choice is scoped to the signed base digest. It cannot
+    // grant permissions, change weights, or survive a different model identity.
+    static int vulkanLayers(Context ctx,OnDeviceModelProfile profile){
+        if(!profile.backendDevice.isEmpty())return profile.offloadLayers;
+        return Math.max(0,Math.min(profile.maxVulkanLayers,
+            prefs(ctx).getInt("vulkan_layers_"+profile.sha256,0)));
+    }
+    static void saveVulkanLayers(Context ctx,OnDeviceModelProfile profile,int layers){
+        if(!profile.backendDevice.isEmpty()||layers<0||layers>profile.maxVulkanLayers)
+            throw new IllegalArgumentException("outside_signed_vulkan_budget");
+        if(!prefs(ctx).edit().putInt("vulkan_layers_"+profile.sha256,layers).commit())
+            throw new IllegalStateException("local_acceleration_preference_not_saved");
+    }
     static int outputTokens(Context ctx,OnDeviceModelProfile profile){
         switch(effort(ctx)){
             case "fast":return Math.min(384,profile.outputTokens);
