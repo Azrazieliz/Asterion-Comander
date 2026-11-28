@@ -17,7 +17,9 @@ final class OnDeviceVisionImage implements AutoCloseable {
         this.width=w;this.height=h;this.rgb=rgb;
         MessageDigest hash=MessageDigest.getInstance("SHA-256");
         hash.update(ByteBuffer.allocate(8).putInt(w).putInt(h).array());
-        sha256=java.util.HexFormat.of().formatHex(hash.digest(rgb));
+        StringBuilder hex=new StringBuilder(64);
+        for(byte v:hash.digest(rgb))hex.append(String.format(java.util.Locale.ROOT,"%02x",v&255));
+        sha256=hex.toString();
     }
     static OnDeviceVisionImage read(Context c,Uri uri,int maxSide,InferenceGate.Request request)throws Exception{
         if(uri==null||!"content".equals(uri.getScheme()))throw new SecurityException("document_provider_required");
