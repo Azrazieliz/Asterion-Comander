@@ -12,7 +12,7 @@ import java.util.regex.Pattern;
 final class VoiceWakeWords {
   private static final long FOLLOWUP_MS=12000L;
   private static final Pattern WAKE=Pattern.compile(
-    "(?i)^\\s*(?:(?:hey|okay|ok)\\s+)?asterion\\b[\\s,:;.!?-]*(.*)$");
+    "(?iu)^\\s*(?:(?:hey|okay|ok|salut|bonjour|hola|hallo|ciao|olá)\\s+)?(?:asterion|astérion|アステリオン|아스테리온)(?=$|[\\s,:;.!?、。！？：-])[\\s,:;.!?、。！？：-]*(.*)$");
   private VoiceWakeWords(){}
 
   static final class Decision {

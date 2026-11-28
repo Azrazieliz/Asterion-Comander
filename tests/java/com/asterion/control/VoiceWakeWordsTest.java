@@ -32,6 +32,10 @@ public final class VoiceWakeWordsTest {
     expect(null,false,0,t,"",false,false,"null");
     expect("   ",true,t-1500,t,"",false,false,"blank");
     expect("Hey asterionics",false,0,t,"",false,false,"false prefix");
+    expect("Salut Astérion, ouvre les notes",false,0,t,"ouvre les notes",false,true,"French command");
+    expect("アステリオン、こんにちは",false,0,t,"こんにちは",false,true,"Japanese command");
+    expect("아스테리온",false,0,t,"",true,true,"Korean wake");
+    expect("Astérionique",false,0,t,"",false,false,"French false prefix");
     check(VoiceWakeWords.matchesWake("ASTERION?"),"wake preview");
     check(!VoiceWakeWords.matchesWake("asterionics"),"preview false prefix");
     System.out.println("VOICE_WAKE_WORDS_PASS "+assertions+" assertions");

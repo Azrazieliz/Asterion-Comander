@@ -38,11 +38,16 @@ final class PendingVoiceStore {
     return generator.generateKey();
   }
   static synchronized void save(Context context,String message)throws Exception{
+    save(context,message,VoiceLanguageSettings.locale(context));
+  }
+  static synchronized void save(Context context,String message,String locale)throws Exception{
+    String language=VoiceReplyPolicy.canonicalLocale(locale);
     if(hasNativeClaim(context))throw new IllegalStateException("Previous submission requires review");
     if(message==null||message.isBlank()||message.length()>MAX_TEXT)
       throw new IllegalArgumentException("Invalid voice command");
     Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");
     cipher.init(Cipher.ENCRYPT_MODE,key());
+    cipher.updateAAD(("voice-language-v2:"+language).getBytes(StandardCharsets.UTF_8));
     byte[] encrypted=cipher.doFinal(message.getBytes(StandardCharsets.UTF_8));
     byte[] nonce=cipher.getIV();
     if(nonce.length!=12)throw new IllegalStateException("Unexpected AES nonce");
@@ -51,6 +56,7 @@ final class PendingVoiceStore {
     System.arraycopy(encrypted,0,combined,nonce.length,encrypted.length);
     if(!prefs(context).edit().putString("ciphertext",
         Base64.encodeToString(combined,Base64.NO_WRAP))
+      .putString("locale",language).putInt("format",2)
       .putLong("created",System.currentTimeMillis()).remove("dispatch_claimed").commit())
       throw new IllegalStateException("Could not persist pending voice command");
     Arrays.fill(combined,(byte)0);
@@ -72,11 +78,18 @@ final class PendingVoiceStore {
       byte[] ciphertext=Arrays.copyOfRange(bytes,12,bytes.length);
       Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");
       cipher.init(Cipher.DECRYPT_MODE,key(),new GCMParameterSpec(128,iv));
+      int format=p.getInt("format",1);
+      if(format==2)cipher.updateAAD(("voice-language-v2:"+restoreLocale(context)).getBytes(StandardCharsets.UTF_8));
+      else if(format!=1)throw new IllegalArgumentException("Invalid voice record format");
       String message=new String(cipher.doFinal(ciphertext),StandardCharsets.UTF_8);
       return message.length()<=MAX_TEXT?message:"";
     }catch(Exception invalid){
       clear(context);return "";
     }
+  }
+  static synchronized String restoreLocale(Context context){
+    SharedPreferences p=prefs(context);
+    return p.getInt("format",1)==2?VoiceReplyPolicy.canonicalLocale(p.getString("locale","")):"en-US";
   }
   static synchronized boolean claimForNativeDispatch(Context context){
     SharedPreferences p=prefs(context);
@@ -93,6 +106,6 @@ final class PendingVoiceStore {
     return !prefs(context).getString("ciphertext","").isEmpty();
   }
   static synchronized void clear(Context context){
-    prefs(context).edit().remove("ciphertext").remove("created").remove("dispatch_claimed").commit();
+    prefs(context).edit().remove("ciphertext").remove("created").remove("dispatch_claimed").remove("locale").remove("format").commit();
   }
 }

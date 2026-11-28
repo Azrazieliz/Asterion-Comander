@@ -282,7 +282,7 @@ public final class AgentService extends Service {
       try {
         VoiceDialogueService voice=VoiceDialogueService.active;
         if(voice==null){json(out,503,error("Enable voice session first"));return;}
-        json(out,200,voice.beginOwnerVoiceControl(body.optString("locale","en-US")));
+        json(out,200,voice.beginOwnerVoiceControl(body.optString("locale",VoiceLanguageSettings.locale(this))));
       }catch(Exception e){json(out,409,error(e.getMessage()));}
       return;
     }
@@ -290,7 +290,7 @@ public final class AgentService extends Service {
       try {
         VoiceDialogueService voice=VoiceDialogueService.active;
         if(voice==null){json(out,503,error("Enable voice session first"));return;}
-        json(out,200,voice.sayOnly(body.getString("text"),body.optString("locale","en-US")));
+        json(out,200,voice.sayOnly(body.getString("text"),body.optString("locale",VoiceLanguageSettings.locale(this))));
       }catch(Exception e){json(out,409,error(e.getMessage()));}
       return;
     }
@@ -298,7 +298,7 @@ public final class AgentService extends Service {
       try {
         VoiceDialogueService voice=VoiceDialogueService.active;
         if(voice==null){json(out,503,error("Enable voice dialogue from the phone"));return;}
-        json(out,200,voice.ask(body.getString("text"),body.optString("locale","en-US"),
+        json(out,200,voice.ask(body.getString("text"),body.optString("locale",VoiceLanguageSettings.locale(this)),
             body.optString("question_id","")));
       } catch(Exception e){json(out,400,error(e.getMessage()));}
       return;

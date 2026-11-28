@@ -17,12 +17,15 @@ final class VoiceNativeAssistant {
     private final Runnable observer=this::observe;
     boolean busy(){return callback!=null;}
     boolean submit(Context context,String text,Listener listener){
+        return submit(context,text,VoiceLanguageSettings.locale(context),listener);
+    }
+    boolean submit(Context context,String text,String locale,Listener listener){
         if(Looper.myLooper()!=Looper.getMainLooper())throw new IllegalStateException("Main thread required");
         if(busy()||session.busy())return false;
         target=session.conversation;revision=target.revision+1;callback=listener;
         session.listeners.add(observer);
         try{
-            session.send(context,text);
+            session.sendVoice(context,text,locale);
             if(target.revision!=revision){detach();return false;}
             listener.accepted();
             observe();

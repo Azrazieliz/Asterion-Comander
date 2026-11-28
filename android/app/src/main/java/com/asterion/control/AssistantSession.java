@@ -29,7 +29,9 @@ final class AssistantSession {
         try{ControlAssistantMemory.saveConversation(c,conversation);persistenceIssue="";}
         catch(Exception failure){persistenceIssue="History could not be saved. Keep this conversation open.";}
     }
-    void send(Context context,String prompt){
+    void send(Context context,String prompt){send(context,prompt,"");}
+    void sendVoice(Context context,String prompt,String locale){send(context,prompt,VoiceReplyPolicy.canonicalLocale(locale));}
+    private void send(Context context,String prompt,String responseLocale){
         if(busy())return;
         Context app=context.getApplicationContext();
         final AssistantConversation target=conversation;
@@ -58,7 +60,7 @@ final class AssistantSession {
                         if(now-lastNotification<70)return;lastNotification=now;
                         main.post(()->{if(target.update(generation,text,"running"))changed();});
                     }
-                },request,research);
+                },request,research,responseLocale);
                 main.post(()->{
                     if(activeRequest!=request)return;
                     activeRequest=null;
