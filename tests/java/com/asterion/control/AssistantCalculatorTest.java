@@ -21,6 +21,12 @@ public final class AssistantCalculatorTest {
         String fence="```";
         String request=fence+"asterion_calculation\nexpression|72/(90/60)\n"+fence;
         if(!AssistantCalculator.attachResult(request).contains("Local calculator result:** 48"))throw new AssertionError();
+        AssistantCalculator.Receipt receipt=AssistantCalculator.evaluate(request);
+        if(receipt==null||!receipt.ok()||!receipt.reference().contains("72/(90/60) = 48"))throw new AssertionError();
+        AssistantCalculator.Receipt invalid=AssistantCalculator.evaluate(fence+"asterion_calculation\nexpression|1/0\n"+fence);
+        if(invalid==null||invalid.ok())throw new AssertionError();
+        try{invalid.reference();throw new AssertionError("invalid result admitted");}catch(IllegalStateException expected){}
+        if(AssistantCalculator.evaluate("ordinary answer")!=null)throw new AssertionError();
         equal("ordinary answer",AssistantCalculator.attachResult("ordinary answer"));
         System.out.println("Native calculator behavior passed");
     }
