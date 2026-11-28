@@ -1,7 +1,7 @@
 name: Control pinned 7B native candidate build
 on:
   push:
-    branches: [ai-candidate/receipt-context-20261128]
+    branches: [ai-candidate/receipt-context-20261128, ai-candidate/native-runtime-recovery-20261128]
     paths:
       - '.github/workflows/control-ai-native-pack-build.yml'
   workflow_dispatch:
@@ -73,12 +73,27 @@ jobs:
           sha256sum runtime-build/bin/llama-completion > native-evidence/native-executable.sha256
           MODEL="$(find measured-pack/pack -name '*Q8_0.gguf' -type f)"
           ADAPTER="measured-pack/pack/Asterion-OLMo3-7B-adapter.gguf"
+          # Use the exact source tokenizer template in its no-external-tools
+          # mode, not the CLI's tool-parser auto-discovery.
+          python - <<'PY'
+          from transformers import AutoTokenizer
+          from pathlib import Path
+          import hashlib,json
+          tok=AutoTokenizer.from_pretrained("measured-pack/source",local_files_only=True,trust_remote_code=False)
+          cases=["A file has an expected digest but the destination has not been read. Can integrity be verified? Explain briefly.",
+                 "A train travels 72 kilometres in 90 minutes. What is its average speed in kilometres per hour?"]
+          out=Path("native-evidence")
+          for i,query in enumerate(cases,1):
+              prompt=tok.apply_chat_template([{"role":"system","content":"You are Asterion Control. Answer accurately and concisely."},{"role":"user","content":query}],tokenize=False,add_generation_prompt=True,tools=None)
+              assert prompt.endswith("<|im_start|>assistant\n"), "unexpected assistant boundary"
+              assert prompt.count("<|im_start|>")==3 and prompt.count("<|im_end|>")==2
+              (out/f"prompt-{i}.txt").write_text(prompt,encoding="utf-8")
+          PY
           for variant in base adapted; do
             extra=()
             if [ "$variant" = adapted ]; then extra=(--lora "$ADAPTER"); fi
             for case in 1 2; do
-              if [ "$case" = 1 ]; then PROMPT='A file has an expected digest but the destination has not been read. Can integrity be verified? Explain briefly.'; else PROMPT='A train travels 72 kilometres in 90 minutes. What is its average speed in kilometres per hour?'; fi
-              /usr/bin/time -v -o "native-evidence/${variant}-${case}.resources" runtime-build/bin/llama-completion -m "$MODEL" "${extra[@]}" --jinja --single-turn --no-display-prompt --no-warmup --temp 0 -c 1024 -n 64 -ngl 0 -t 4 -p "$PROMPT" > "native-evidence/${variant}-${case}.txt" 2> "native-evidence/${variant}-${case}.log"
+              /usr/bin/time -v -o "native-evidence/${variant}-${case}.resources" runtime-build/bin/llama-completion -m "$MODEL" "${extra[@]}" --no-conversation --no-display-prompt --no-warmup --temp 0 -c 1024 -n 64 -ngl 0 -t 4 -f "native-evidence/prompt-${case}.txt" > "native-evidence/${variant}-${case}.txt" 2> "native-evidence/${variant}-${case}.log"
               test -s "native-evidence/${variant}-${case}.txt"
             done
           done
@@ -87,7 +102,7 @@ jobs:
           from pathlib import Path
           root=Path("native-evidence")
           report={"native_generation_executed":True,"variant_count":2,"cases_per_variant":2,"native_device":"runner_cpu","production_promoted":False,"phone_verified":False,"quality_certified":False}
-          report["output_sha256"]={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in root.glob("*.txt")}
+          report["output_sha256"]={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in root.glob("*.txt") if not p.name.startswith("prompt-")}
           (root/"native-generation.json").write_text(json.dumps(report,indent=2)+"\n")
           PY
       - name: Retain small exact native build evidence only
