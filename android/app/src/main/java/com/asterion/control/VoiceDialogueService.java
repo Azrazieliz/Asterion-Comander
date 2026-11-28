@@ -75,7 +75,7 @@ public final class VoiceDialogueService extends Service {
   private static final long VOICE_WAKE_MAX_MS=150000L;
   private PowerManager.WakeLock speechWakeLock;
   private volatile boolean pendingOwnerTalk=false;
-  private volatile String pendingOwnerSpeech="";
+  private volatile String pendingOwnerSpeech="",pendingSpeechLocale="en-US";
   private final AtomicBoolean voiceRequestDispatching=new AtomicBoolean(false);
   private volatile long lastVoiceDispatchAt=0L;
   private volatile long lastChatForegroundRequestAt=0L;
@@ -186,7 +186,7 @@ public final class VoiceDialogueService extends Service {
       ambientCapture=true;
       boolean offline=!preferSystemRecognizer&&Build.VERSION.SDK_INT>=31
         &&SpeechRecognizer.isOnDeviceRecognitionAvailable(this);
-      try{beginRecognition("en-US",id,offline);}
+      try{beginRecognition(VoiceLanguageSettings.locale(this),id,offline);}
       catch(Exception e){
         ambientCapture=false;
         ambientErrors++;
@@ -210,8 +210,9 @@ public final class VoiceDialogueService extends Service {
     }
     if(!parsed.command.isEmpty()){
       ownerDispatchRetryCount=0;
+      pendingSpeechLocale=listeningLocale;
       pendingOwnerSpeech=parsed.command;
-      try{PendingVoiceStore.save(this,parsed.command);}
+      try{PendingVoiceStore.save(this,parsed.command,pendingSpeechLocale);}
       catch(Exception saveFailure){
         lastVoiceDispatch="recognized_not_persisted";
         state("awaiting_device","Voice command held in memory only");
@@ -245,19 +246,21 @@ public final class VoiceDialogueService extends Service {
   private void localVoiceTest(){
     if(active!=this)return;
     try{
-      String prompt="Asterion Control speaker test. Please answer aloud: test one two three.";
+      String locale=VoiceLanguageSettings.locale(this);
+      String prompt=VoiceReplyPolicy.testPrompt(locale);
+      if(prompt.isEmpty())throw new IllegalStateException("Use an explicit test question in the selected language.");
       String id="selftest-"+System.currentTimeMillis();
       // Even without an installed offline speech pack, TEST must exercise the
       // speaker and then report the *specific* missing microphone prerequisite.
       if((Build.VERSION.SDK_INT>=31 && SpeechRecognizer.isOnDeviceRecognitionAvailable(this))
           || SpeechRecognizer.isRecognitionAvailable(this)){
-        ask(prompt,"en-US",id);
+        ask(prompt,locale,id);
       }else{
         question=prompt;questionId=id;transcript="";consumed=true;
         speakerPlaybackStarted=false;speakerPlaybackCompleted=false;
         state("speaking","");
         scheduleDeadline(id,SPEAKER_TIMEOUT_MS);
-        speakNow(prompt,"en-US",id);
+        listeningLocale=locale;speakNow(prompt,locale,id);
       }
     }catch(Exception e){state("failed","Speaker test failed: "+e.getClass().getSimpleName()+
       (e.getMessage()==null?"":": "+e.getMessage()));}
@@ -316,6 +319,7 @@ public final class VoiceDialogueService extends Service {
     super.onCreate();
     pendingOwnerSpeech=PendingVoiceStore.restore(this);
     pendingRestored=!pendingOwnerSpeech.isEmpty();
+    if(pendingRestored)pendingSpeechLocale=PendingVoiceStore.restoreLocale(this);
     if(pendingRestored)lastVoiceDispatch="restored_pending_voice";
     else if(PendingVoiceStore.hasNativeClaim(this))lastVoiceDispatch="native_submission_uncertain_review_history";
     unlockedReceiver=new BroadcastReceiver(){
@@ -340,7 +344,7 @@ public final class VoiceDialogueService extends Service {
       if(speakerReady&&pendingOwnerTalk&&active==this){
         pendingOwnerTalk=false;
         ui.post(()->{
-          try{beginOwnerVoiceControl("en-US");}
+          try{beginOwnerVoiceControl(VoiceLanguageSettings.locale(this));}
           catch(Exception e){state("failed","Could not start voice control: "+e.getMessage());}
         });
       }
@@ -402,7 +406,7 @@ public final class VoiceDialogueService extends Service {
       if(speakerReady){
         pendingOwnerTalk=false;
         ui.post(()->{
-          try{beginOwnerVoiceControl("en-US");}
+          try{beginOwnerVoiceControl(VoiceLanguageSettings.locale(this));}
           catch(Exception e){state("failed","Voice start failed: "+e.getMessage());}
         });
       }else state("initializing","Waiting for speaker");
@@ -457,13 +461,12 @@ public final class VoiceDialogueService extends Service {
     if(!speakerReady)throw new IllegalStateException("Android speaker not ready");
     if(text==null||text.isBlank()||text.length()>700)
       throw new IllegalArgumentException("Question must contain 1-700 characters");
-    if(!VoiceReplyPolicy.englishLocale(locale))
-      throw new IllegalArgumentException("Voice supports English locales only");
+    final String languageTag=VoiceReplyPolicy.canonicalLocale(locale);
     if(requestId!=null&&!requestId.isEmpty()&&
        !requestId.matches("[A-Za-z0-9_.-]{3,100}"))
       throw new IllegalArgumentException("Invalid voice question identifier");
     if(requestId!=null&&!requestId.isEmpty()&&requestId.equals(questionId)){
-      if(!text.equals(question))throw new IllegalStateException("Question ID was already used");
+      if(!text.equals(question)||!languageTag.equals(listeningLocale))throw new IllegalStateException("Question ID was already used");
       return report();  // Safe retry: never speak a question twice.
     }
     if(ambientCapture)cancelAmbient();
@@ -483,12 +486,12 @@ public final class VoiceDialogueService extends Service {
     question=text;transcript="";consumed=false;
     speakerPlaybackStarted=false;speakerPlaybackCompleted=false;
     questionId=requestId==null||requestId.isEmpty()?UUID.randomUUID().toString():requestId;
-    listeningLocale=locale;
+    listeningLocale=languageTag;
     state("speaking","");
     final String id=questionId;
     ui.post(()->{
       scheduleDeadline(id,SPEAKER_TIMEOUT_MS);
-      speakNow(text,locale,id);
+      speakNow(text,languageTag,id);
     });
     return new JSONObject().put("ok",true).put("question_id",id).put("phase","speaking");
   }
@@ -531,6 +534,7 @@ public final class VoiceDialogueService extends Service {
       .put("pitch",naturalPitch).put("voice",chosenVoice)
       .put("voice_quality",chosenVoiceQuality)
       .put("locale",listeningLocale)
+      .put("owner_locale",VoiceLanguageSettings.locale(this))
       .put("offline_voice_preferred",true);
   }
   synchronized JSONObject configureVoiceSettings(JSONObject input)throws Exception{
@@ -620,6 +624,7 @@ public final class VoiceDialogueService extends Service {
     if(Looper.myLooper()!=Looper.getMainLooper())
       throw new IllegalStateException("Recognition must start on Android main thread");
     closeRecognizer(true);
+    listeningLocale=VoiceReplyPolicy.canonicalLocale(locale);
     recognizerBackend=offline?"on_device":"android_system";
     final SpeechRecognizer source=offline?SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
       :SpeechRecognizer.createSpeechRecognizer(this);
@@ -691,8 +696,9 @@ public final class VoiceDialogueService extends Service {
         if(command&&!transcript.isEmpty()){
           releaseAudioFocus();
           releaseCpuForExchange();
+          pendingSpeechLocale=listeningLocale;
           pendingOwnerSpeech=transcript;
-          try{PendingVoiceStore.save(VoiceDialogueService.this,transcript);}
+          try{PendingVoiceStore.save(VoiceDialogueService.this,transcript,pendingSpeechLocale);}
           catch(Exception failure){
             state("awaiting_device","Voice command not persisted; device storage unavailable");
           }
@@ -738,8 +744,22 @@ public final class VoiceDialogueService extends Service {
       throw new IllegalStateException("Previous spoken instruction is waiting for dispatch");
     ownerCommandMode=true;
     try{
-      JSONObject started=ask("What would you like me to do?",locale,
-        "owner-command-"+System.currentTimeMillis());
+      String language=VoiceReplyPolicy.canonicalLocale(locale);
+      String invitation=VoiceReplyPolicy.invitation(language);
+      JSONObject started;
+      if(invitation.isEmpty()){
+        if(ambientCapture)cancelAmbient();
+        if("speaking".equals(phase)||"listening".equals(phase)||"processing".equals(phase)||"fallback".equals(phase)||
+           ("answered".equals(phase)&&!consumed))throw new IllegalStateException("Another voice exchange is active");
+        if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)
+          throw new IllegalStateException("Android microphone consent is missing");
+        acquireAudioFocus();keepCpuForExchange();
+        speakOnly=false;question="";transcript="";consumed=false;
+        questionId="owner-command-"+System.currentTimeMillis();listeningLocale=language;
+        final String id=questionId;
+        ui.post(()->startListening(language,id));
+        started=new JSONObject().put("ok",true).put("question_id",id).put("phase","listening_requested");
+      }else started=ask(invitation,language,"owner-command-"+System.currentTimeMillis());
       lastVoiceDispatch="listening_for_owner";
       return started.put("voice_control",true);
     }catch(Exception e){ownerCommandMode=false;throw e;}
@@ -749,9 +769,9 @@ public final class VoiceDialogueService extends Service {
    */
   synchronized JSONObject sayOnly(String text,String locale)throws Exception{
     if(active!=this||!speakerReady)throw new IllegalStateException("Speaker not ready");
-    if(text==null||text.isBlank()||text.length()>700||
-       !VoiceReplyPolicy.englishLocale(locale))
+    if(text==null||text.isBlank()||text.length()>700)
       throw new IllegalArgumentException("Invalid spoken reply");
+    final String languageTag=VoiceReplyPolicy.canonicalLocale(locale);
     if(ambientCapture)cancelAmbient();
     if("fallback".equals(phase)||"listening".equals(phase)||"processing".equals(phase)||"speaking".equals(phase))
       throw new IllegalStateException("Voice conversation is busy");
@@ -760,9 +780,9 @@ public final class VoiceDialogueService extends Service {
     speakOnly=true;ownerCommandMode=false;consumed=true;
     speakerPlaybackStarted=false;speakerPlaybackCompleted=false;
     String id="spoken-reply-"+System.currentTimeMillis();
-    questionId=id;question=text;transcript="";
+    questionId=id;question=text;transcript="";listeningLocale=languageTag;
     state("speaking","");
-    ui.post(()->{scheduleDeadline(id,SPEAKER_TIMEOUT_MS);speakNow(text,locale,id);});
+    ui.post(()->{scheduleDeadline(id,SPEAKER_TIMEOUT_MS);speakNow(text,languageTag,id);});
     return new JSONObject().put("ok",true).put("phase","speaking").put("speech_id",id);
   }
   /** Called when ChatGPT becomes visible or Android reports an unlocked device.
@@ -887,9 +907,10 @@ public final class VoiceDialogueService extends Service {
       retryOwnerVoiceWhenChatReady();refreshVoiceNotification();return;
     }
     String spoken=pendingOwnerSpeech;
+    final String responseLocale=pendingSpeechLocale;
     boolean claimed=false;
     try{
-      if(!PendingVoiceStore.hasSaved(this))PendingVoiceStore.save(this,spoken);
+      if(!PendingVoiceStore.hasSaved(this))PendingVoiceStore.save(this,spoken,responseLocale);
       if(!PendingVoiceStore.claimForNativeDispatch(this)){
         lastVoiceDispatch="native_submission_uncertain_review_history";
         state("failed","Review native assistant history before retrying");
@@ -898,7 +919,7 @@ public final class VoiceDialogueService extends Service {
       claimed=true;
       nativeVoiceBusy=true;
       state("native_generating","Native assistant is preparing a response");
-      boolean submitted=nativeAssistant.submit(this,spoken,new VoiceNativeAssistant.Listener(){
+      boolean submitted=nativeAssistant.submit(this,spoken,responseLocale,new VoiceNativeAssistant.Listener(){
         public void accepted(){
           pendingOwnerSpeech="";pendingRestored=false;transcript="";consumed=true;
           ownerDispatchRetryCount=0;
@@ -910,8 +931,11 @@ public final class VoiceDialogueService extends Service {
           PendingVoiceStore.clear(VoiceDialogueService.this);
           lastVoiceDispatch="native_response_completed";
           state("ready","");
-          String spoken=VoiceReplyPolicy.speech(text,review);
-          try{sayOnly(spoken,"en-US");}
+          String spoken=VoiceReplyPolicy.speech(text,review,responseLocale);
+          try{
+            if(spoken.isBlank())throw new IllegalStateException("No localized spoken preview");
+            sayOnly(spoken,responseLocale);
+          }
           catch(Exception failure){
             state("failed","Native response saved in assistant; speech playback unavailable");
             if(ambientEnabled)scheduleAmbient(800L);
