@@ -17,7 +17,7 @@ def test_executable_split_utf8_reasoning_and_conversation_regressions(tmp_path):
                     str(JAVA/'AssistantConversation.java'),str(JAVA/'AssistantActionRecord.java'),str(JAVA/'InferenceGate.java'),
                     str(JAVA/'AssistantResearchSelection.java'),str(JAVA/'BrowserResearchText.java'),
                     str(ROOT/'tests/java/com/asterion/control/AssistantWorkspaceTest.java')],
-                   check=True,capture_output=True,text=True)
+                   check=True,text=True)
     result=subprocess.run([runtime,'-cp',str(tmp_path),'com.asterion.control.AssistantWorkspaceTest'],
                           check=True,capture_output=True,text=True,timeout=30)
     match = re.fullmatch(r"(\d+) assistant output and conversation behavior assertions passed; no model/device acceptance claimed", result.stdout.strip())
