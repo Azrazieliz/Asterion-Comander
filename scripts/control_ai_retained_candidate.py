@@ -49,7 +49,7 @@ def restore(archive,root):
     return root/"candidate"
 
 
-def stage(root,weights=False):
+def stage(root,weights=False,*,archive_sha=ARCHIVE_SHA,artifact_id=ARTIFACT_ID):
     from huggingface_hub import HfApi,hf_hub_download
     root=Path(root)
     candidate=root/"candidate"
@@ -72,7 +72,7 @@ def stage(root,weights=False):
     if weights:
         for name,digest in inventory.items():
             verified_file(base,name,digest)
-    evidence.update(archive_sha256=ARCHIVE_SHA,artifact_id=ARTIFACT_ID,base_weights_staged=weights,
+    evidence.update(archive_sha256=archive_sha,artifact_id=artifact_id,base_weights_staged=weights,
                     original_base_revision=ORIGINAL_REVISION,training_model=MODEL,production_promoted=False)
     (root/"retained-lineage.json").write_text(json.dumps(evidence,indent=2)+"\n")
     print(json.dumps(evidence),flush=True)
