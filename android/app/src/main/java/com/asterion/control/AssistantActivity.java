@@ -171,7 +171,7 @@ public final class AssistantActivity extends Activity {
                     tools.addView(control("Copy",()->((ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("Asterion",m.text))));
                     if(m.role.equals("user"))tools.addView(control("Edit",()->edit(index)));
                     else{
-                        tools.addView(control("Read",()->{if(speechReady)speech.speak(m.text,TextToSpeech.QUEUE_FLUSH,null,m.id);else notice("Speech is not ready on this device.");}));
+                        tools.addView(control("Read",()->readAnswer(m)));
                         if(i==c.messages.size()-1){
                             turn.addView(tools);tools=DesignSystem.horizontal(this);
                             tools.addView(control("Retry",this::retry));
@@ -278,12 +278,13 @@ public final class AssistantActivity extends Activity {
     }
     private void deleteConversation(){if(!idle())return;AssistantConversation original=session.conversation;new AlertDialog.Builder(this).setTitle("Delete this conversation?").setMessage("Saved memories remain under Memory controls.").setNegativeButton("Cancel",null).setPositiveButton("Delete",(d,w)->{if(!idle()||session.conversation!=original)return;ControlAssistantMemory.deleteConversation(this,session.conversation.id);session.conversation=new AssistantConversation();session.status="";render();}).show();}
     private void modelSettings(){
-        String[] modes={"Fast","Balanced","Deep","Memory and assistant settings","Installed model details","Import signed model files","GPU acceleration"};
+        String[] modes={"Fast","Balanced","Deep","Memory and assistant settings","Installed model details","Import signed model files","GPU acceleration","Voice language"};
         new AlertDialog.Builder(this).setTitle("Model and reasoning").setItems(modes,(d,index)->{
             if(index<3){ControlAssistantPreferences.save(this,new String[]{"fast","balanced","deep"}[index],ControlAssistantPreferences.guidance(this));render();}
             else if(index==3){startActivity(new Intent(this,MainActivity.class).putExtra("assistant_settings",true));}
             else if(index==5){chooseModelArtifact();}
             else if(index==6){showAcceleration();}
+            else if(index==7){VoiceLanguageSettings.show(this,()->notice("Voice language saved"));}
             else session.work.execute(()->{try{JSONObject p=OnDeviceLlm.status(this);runOnUiThread(()->new AlertDialog.Builder(this).setTitle("Installed model").setMessage(p.optString("model_name")+"\n"+(p.optBoolean("model_loaded")?"Loaded":"Not loaded")+"\nContext: "+p.optInt("model_context_tokens")+" tokens\n"+p.optString("model_source")).setPositiveButton("Close",null).show());}catch(Exception e){runOnUiThread(()->notice("Model details unavailable."));}});
         }).setNegativeButton("Close",null).show();
     }
@@ -379,7 +380,43 @@ public final class AssistantActivity extends Activity {
                 }).setNegativeButton("Cancel",null).show();
         }catch(Exception invalid){notice("Signed model profile unavailable.");}
     }
-    private void voice(){try{Intent intent=new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE,"en-US");startActivityForResult(intent,210);}catch(Exception unavailable){notice("Speech recognition is unavailable. Check Android speech services.");}}
+    private void voice(){
+        if(!idle())return;
+        try{
+            Intent intent=new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE,VoiceLanguageSettings.locale(this));
+            intent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE,true);
+            startActivityForResult(intent,210);
+        }catch(Exception unavailable){notice("Speech recognition is unavailable. Check Android speech services.");}
+    }
+    private void readAnswer(AssistantConversation.Message message){
+        if(!speechReady){notice("Speech is not ready on this device.");return;}
+        String tag=VoiceLanguageSettings.locale(this);
+        java.util.Locale language=java.util.Locale.forLanguageTag(tag);
+        int result=speech.setLanguage(language);
+        if(result==TextToSpeech.LANG_MISSING_DATA||result==TextToSpeech.LANG_NOT_SUPPORTED){
+            notice("Requested voice data is unavailable for "+tag+".");return;
+        }
+        try{
+            android.speech.tts.Voice best=null;
+            java.util.Set<android.speech.tts.Voice> voices=speech.getVoices();
+            if(voices!=null)for(android.speech.tts.Voice candidate:voices){
+                if(candidate==null||candidate.isNetworkConnectionRequired()||candidate.getLocale()==null||
+                    !candidate.getLocale().toLanguageTag().equalsIgnoreCase(tag)||
+                    (candidate.getFeatures()!=null&&candidate.getFeatures().contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED)))continue;
+                if(best==null||candidate.getQuality()>best.getQuality())best=candidate;
+            }
+            if(best!=null)speech.setVoice(best);
+            String content=message.text;
+            if(content.length()>TextToSpeech.getMaxSpeechInputLength()){
+                content=VoiceReplyPolicy.speech(content,false,tag);
+                notice("Speaking a preview; the full response remains in the conversation.");
+            }
+            if(speech.speak(content,TextToSpeech.QUEUE_FLUSH,null,message.id)!=TextToSpeech.SUCCESS)
+                notice("Speech playback could not start.");
+        }catch(RuntimeException failure){notice("Requested speech playback unavailable.");}
+    }
     private void exportArtifact(AssistantArtifact artifact){
         if(!idle())return;
         if(session.pendingArtifact!=null){notice("Finish the current file picker first.");return;}
