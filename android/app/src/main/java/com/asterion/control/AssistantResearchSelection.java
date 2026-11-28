@@ -65,13 +65,16 @@ final class AssistantResearchSelection {
                 throw new IllegalStateException("selected_research_source_changed");
             if(!text.startsWith("Browser source capture\n"))
                 throw new IllegalStateException("selected_source_not_browser_capture");
+            int headerEnd=text.indexOf("\n\n");
+            if(headerEnd<1||headerEnd>2400)throw new IllegalStateException("selected_research_source_metadata_invalid");
+            String metadata=text.substring(0,headerEnd);
             String excerpt=BrowserResearchText.excerpt(text,term);
             String label="S"+(i+1),span=excerpt.startsWith("Exact record UTF-16 [")?excerpt.substring(0,excerpt.indexOf('\n')):"No literal match";
             String identity=label+" · "+ids.get(i)+" · SHA-256 "+digests.get(i);
             ref.append(label).append(" | source_id=").append(ids.get(i)).append(" | sha256=").append(digests.get(i))
-               .append(" | excerpt=").append(quote(excerpt)).append('\n');
+               .append(" | capture_metadata=").append(quote(metadata)).append(" | excerpt=").append(quote(excerpt)).append('\n');
             receipt.append("- ").append(identity).append(" · ").append(span).append('\n');
-            preview.append(identity).append('\n').append(excerpt).append("\n\n");
+            preview.append(identity).append('\n').append(metadata).append('\n').append(excerpt).append("\n\n");
         }
         receipt.append("These are the exact local records supplied; this does not independently verify the model's interpretation or the source's claims.");
         return new Evidence(ref.toString(),receipt.toString(),preview.toString());
