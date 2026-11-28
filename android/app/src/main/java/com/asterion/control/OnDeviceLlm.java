@@ -52,9 +52,11 @@ final class OnDeviceLlm {
             JSONObject probe=new JSONObject().put("requested_layers",layers);
             if(layers>0){
                 OnDeviceModelResources resources=new OnDeviceModelResources(context);
-                // GPU and CPU share Android memory; do not subtract GPU weights
-                // from the existing conservative physical memory admission.
-                resources.contextTokens(profile,ControlAssistantPreferences.outputTokens(context,profile),modelReady);
+                // The probe is small and independent of the model's fit.
+                // Full model/context admission remains unchanged at generation.
+                if(resources.memory.lowMemory)throw new IllegalStateException("android_memory_pressure");
+                if(resources.thermalStatus>=android.os.PowerManager.THERMAL_STATUS_SEVERE)
+                    throw new IllegalStateException("android_thermal_pressure");
                 String raw=nativeVulkanProbe();
                 String[] fields=raw==null?new String[0]:raw.split("\\|",-1);
                 boolean passed=fields.length==5&&"passed".equals(fields[0]);
@@ -416,7 +418,10 @@ final class OnDeviceLlm {
                 .put("adapter_sha256",profile.adapterSha256)
                 .put("weight_precision",profile.precision)
                 .put("kv_bits",profile.kvBits)
-                .put("configured_backend",profile.backendDevice.isEmpty()?"CPU":profile.backendDevice)
+                .put("configured_backend",!profile.backendDevice.isEmpty()?profile.backendDevice:
+                    ControlAssistantPreferences.vulkanLayers(context,profile)>0?"Vulkan":"CPU")
+                .put("configured_offload_layers",ControlAssistantPreferences.vulkanLayers(context,profile))
+                .put("mapped_no_repack",profile.mappedNoRepack)
                 .put("model_already_loaded",warm)
                 .put("context_tokens",contextBudget)
                 .put("prompt_tokens",stream.promptTokens)
