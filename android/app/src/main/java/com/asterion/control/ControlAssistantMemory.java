@@ -223,7 +223,8 @@ final class ControlAssistantMemory {
             JSONArray messages=new JSONArray();
             for(AssistantConversation.Message m:conversation.messages){
                 JSONObject entry=new JSONObject().put("id",m.id).put("role",m.role).put("text",m.text).put("state",m.state)
-                    .put("omitted_context_messages",m.omittedContextMessages).put("omitted_reference_blocks",m.omittedReferenceBlocks);
+                    .put("omitted_context_messages",m.omittedContextMessages).put("omitted_reference_blocks",m.omittedReferenceBlocks)
+                    .put("visual",m.visual).put("visual_evidence",m.visualEvidence);
                 AssistantActionRecord record=m.actionRecord;
                 if(record!=null)entry.put("action_receipt",new JSONObject().put("id",record.requestId)
                     .put("package",record.appPackage).put("action",record.action)
@@ -282,6 +283,10 @@ final class ControlAssistantMemory {
                         m.getString("text"),m.getString("state")));
                     out.messages.get(out.messages.size()-1).omittedContextMessages=m.optInt("omitted_context_messages",0);
                     out.messages.get(out.messages.size()-1).omittedReferenceBlocks=m.optInt("omitted_reference_blocks",0);
+                    AssistantConversation.Message loaded=out.messages.get(out.messages.size()-1);
+                    loaded.visual=m.optBoolean("visual",false);
+                    loaded.visualEvidence=m.optString("visual_evidence","");
+                    if(loaded.visualEvidence.length()>2048)throw new IllegalStateException("invalid_visual_evidence");
                     JSONObject receipt=m.optJSONObject("action_receipt");
                     if(receipt!=null)out.messages.get(out.messages.size()-1).actionRecord=new AssistantActionRecord(
                         receipt.getString("id"),receipt.getString("package"),receipt.getString("action"),
