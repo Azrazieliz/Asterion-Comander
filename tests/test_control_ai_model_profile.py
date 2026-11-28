@@ -132,3 +132,18 @@ def test_vulkan_selection_is_real_and_signed_bounded():
     assert 'params.use_extra_bufts=false' in native
     assert 'gpu_execution_verified",false' in llm
     assert 'model_gpu_inference_verified",false' in llm
+
+
+def test_local_tool_feedback_and_pressure_guard_are_on_actual_generation_path():
+    llm=(JAVA/"OnDeviceLlm.java").read_text(encoding="utf-8")
+    guard=(JAVA/"InferenceResourceGuard.java").read_text(encoding="utf-8")
+    assert 'resourceGuard=new InferenceResourceGuard(context,GATE,request)' in llm
+    assert 'gate.abortActive(request)' in guard
+    assert 'sample.memory.lowMemory' in guard
+    assert 'THERMAL_STATUS_SEVERE' in guard
+    assert 'resourceGuard.check();' in llm
+    assert 'AssistantCalculator.evaluate(result)' in llm
+    assert 'nextSystem=systemText+"\\n"+calculation.reference()' in llm
+    assert 'nativeGenerate(nextSystem.getBytes(StandardCharsets.UTF_8)' in llm
+    assert 'tool_reasoning_passes' in llm
+    assert 'resourceGuard.close()' in llm
