@@ -35,13 +35,88 @@ final class OnDeviceLlm {
         ()->{if(LIBRARY_LOADED)nativeResetCancel();}, ()->{if(LIBRARY_LOADED)nativeCancel();});
     private OnDeviceLlm(){}
     private static native boolean nativeLoad(String privateFile);
-    private static native boolean nativeLoadProfile(String file,String adapter,String backend,int layers);
+    private static native boolean nativeLoadProfile(String file,String adapter,String backend,int layers,boolean mappedNoRepack);
     private static native void nativeConfigureContext(int threads,int kvBits);
     private static native boolean nativeReady();
+    private static native String nativeBackendReport();
+    private static native String nativeVulkanProbe();
+    private static volatile JSONObject cachedBackendReport,lastVulkanProbe;
+    static JSONObject configureVulkan(Context context,int layers) throws Exception {
+        OnDeviceModelProfile profile=OnDeviceModelProfile.read(context);
+        if(!LIBRARY_LOADED)throw new IllegalStateException("native_library_missing");
+        if(!profile.backendDevice.isEmpty()||layers<0||layers>profile.maxVulkanLayers)
+            throw new IllegalArgumentException("outside_signed_vulkan_budget");
+        InferenceGate.Request request=new InferenceGate.Request();
+        GATE.begin(request);
+        try {
+            JSONObject probe=new JSONObject().put("requested_layers",layers);
+            if(layers>0){
+                OnDeviceModelResources resources=new OnDeviceModelResources(context);
+                // The probe is small and independent of the model's fit.
+                // Full model/context admission remains unchanged at generation.
+                if(resources.memory.lowMemory)throw new IllegalStateException("android_memory_pressure");
+                if(resources.thermalStatus>=android.os.PowerManager.THERMAL_STATUS_SEVERE)
+                    throw new IllegalStateException("android_thermal_pressure");
+                String raw=nativeVulkanProbe();
+                String[] fields=raw==null?new String[0]:raw.split("\\|",-1);
+                boolean passed=fields.length==5&&"passed".equals(fields[0]);
+                probe.put("passed",passed).put("observed_at_ms",System.currentTimeMillis());
+                if(passed){
+                    probe.put("device",fields[1]).put("description",fields[2])
+                        .put("matrix_compute_and_readback_us",Long.parseLong(fields[3]))
+                        .put("max_absolute_error",Double.parseDouble(fields[4]));
+                }else probe.put("reason",fields.length>=2?fields[1]:"invalid_native_probe_result");
+                lastVulkanProbe=new JSONObject(probe.toString());
+                if(!passed)return probe.put("selection_saved",false);
+            }
+            synchronized(LOCK){
+                ControlAssistantPreferences.saveVulkanLayers(context,profile,layers);
+                if(modelReady){nativeUnload();modelReady=false;}
+                cachedBackendReport=null;
+            }
+            return probe.put("selection_saved",true)
+                .put("model_gpu_inference_verified",false);
+        }finally{GATE.end(request);}
+    }
+    private static JSONObject runtimeBackends() throws Exception{
+        if(!LIBRARY_LOADED)return new JSONObject().put("available",false).put("reason","native_library_missing");
+        if(GATE.busy()){
+            return cachedBackendReport==null?
+                new JSONObject().put("available",false).put("reason","inference_busy"):
+                new JSONObject(cachedBackendReport.toString()).put("cached_during_inference",true);
+        }
+        try{
+            String raw=nativeBackendReport();
+            if(raw==null)return new JSONObject().put("available",false).put("reason","native_runtime_busy");
+            org.json.JSONArray devices=new org.json.JSONArray();
+            JSONObject result=new JSONObject().put("available",true).put("devices",devices)
+                .put("observed_at_ms",System.currentTimeMillis()).put("gpu_execution_verified",false);
+            boolean vulkan=false;
+            for(String line:raw.split("\\n")){
+                String[] fields=line.split("\\|",-1);
+                if(fields.length==3&&fields[0].equals("loaded")){
+                    result.put("loaded_device",fields[1]).put("requested_offload_layers",Integer.parseInt(fields[2]));
+                }else if(fields.length==7&&fields[0].equals("device")){
+                    int type=Integer.parseInt(fields[4]);
+                    devices.put(new JSONObject().put("backend",fields[1]).put("device",fields[2])
+                        .put("description",fields[3]).put("device_type",type)
+                        .put("reported_free_bytes",Long.parseLong(fields[5]))
+                        .put("reported_total_bytes",Long.parseLong(fields[6])));
+                    vulkan|=fields[1].equals("Vulkan")&&(type==1||type==2);
+                }
+            }
+            result.put("vulkan_gpu_registered",vulkan);
+            cachedBackendReport=new JSONObject(result.toString());
+            return result;
+        }catch(Exception|LinkageError failure){
+            return new JSONObject().put("available",false).put("reason",failure.getClass().getSimpleName());
+        }
+    }
     private static native byte[] nativeGenerate(byte[] systemText,String[] roles,byte[][] content,
         int maxTokens,int contextTokens,NativeStream stream,byte[][] references);
     interface Stream {
         void text(String text);
+        default void tool(String name){}
         default void context(int tokens,int omittedMessages){}
         default void context(int tokens,int omittedMessages,int omittedReferences){context(tokens,omittedMessages);}
     }
@@ -89,8 +164,13 @@ final class OnDeviceLlm {
             .put("model_name",profile.file)
             .put("model_context_tokens",profile.contextTokens)
             .put("weight_precision",profile.precision)
-            .put("configured_backend",profile.backendDevice.isEmpty()?"CPU":profile.backendDevice)
-            .put("configured_offload_layers",profile.offloadLayers)
+            .put("configured_backend",!profile.backendDevice.isEmpty()?profile.backendDevice:
+                ControlAssistantPreferences.vulkanLayers(context,profile)>0?"Vulkan":"CPU")
+            .put("configured_offload_layers",ControlAssistantPreferences.vulkanLayers(context,profile))
+            .put("signed_max_vulkan_layers",profile.maxVulkanLayers)
+            .put("mapped_no_repack",profile.mappedNoRepack)
+            .put("last_vulkan_probe",lastVulkanProbe==null?JSONObject.NULL:lastVulkanProbe)
+            .put("native_backend_report",runtimeBackends())
             .put("configured_kv_bits",profile.kvBits)
             .put("configured_adapter_sha256",profile.adapterSha256)
             .put("device_resources",new OnDeviceModelResources(context).status(context))
@@ -127,7 +207,9 @@ final class OnDeviceLlm {
                 }
                 File file=stageArtifact(context,folder,profile.file,profile.bytes,profile.sha256,request,!profile.externalModelPack);
                 if(request.isCancelled())throw new InterruptedException("user_cancelled");
-                if(profile.adapterFile.isEmpty()&&profile.backendDevice.isEmpty()){
+                int layers=ControlAssistantPreferences.vulkanLayers(context,profile);
+                String backend=profile.backendDevice.isEmpty()&&layers>0?"Vulkan":profile.backendDevice;
+                if(profile.adapterFile.isEmpty()&&backend.isEmpty()&&!profile.mappedNoRepack){
                     modelReady=nativeLoad(file.getAbsolutePath());
                 }else{
                     String adapter="";
@@ -135,7 +217,7 @@ final class OnDeviceLlm {
                         adapter=stageArtifact(context,folder,profile.adapterFile,profile.adapterBytes,
                             profile.adapterSha256,request,!profile.externalModelPack).getAbsolutePath();
                     if(request.isCancelled())throw new InterruptedException("user_cancelled");
-                    modelReady=nativeLoadProfile(file.getAbsolutePath(),adapter,profile.backendDevice,profile.offloadLayers);
+                    modelReady=nativeLoadProfile(file.getAbsolutePath(),adapter,backend,layers,profile.mappedNoRepack);
                 }
                 lastFailure=modelReady?"":"native_model_load_failed";
                 return modelReady;
@@ -247,13 +329,17 @@ final class OnDeviceLlm {
         if(userPrompt==null||userPrompt.isBlank()||userPrompt.length()>profile.inputChars)
             throw new IllegalArgumentException("prompt_length_invalid");
         GATE.begin(request);
+        InferenceResourceGuard resourceGuard=null;
         try{
             if(!LIBRARY_LOADED)throw new IllegalStateException("native_library_missing");
             long requestStarted=System.nanoTime();
             boolean warm=modelReady;
             int outputBudget=ControlAssistantPreferences.outputTokens(context,profile);
             new OnDeviceModelResources(context).contextTokens(profile,outputBudget,modelReady);
-            if(!ensureLoaded(context,request))throw new IllegalStateException(lastFailure);
+            resourceGuard=new InferenceResourceGuard(context,GATE,request);
+            boolean loaded=ensureLoaded(context,request);
+            resourceGuard.check();
+            if(!loaded)throw new IllegalStateException(lastFailure);
             if(request.isCancelled())throw new InterruptedException("user_cancelled");
             String recalled;
             try{recalled=ControlAssistantMemory.relevant(context,userPrompt,project);}
@@ -324,11 +410,38 @@ final class OnDeviceLlm {
             long inferenceStarted=System.nanoTime();
             byte[] output=nativeGenerate(systemText.getBytes(StandardCharsets.UTF_8),roles,content,
                 outputBudget,contextBudget,stream,references.toArray(new byte[0][]));
+            resourceGuard.check();
             if(request.isCancelled())throw new InterruptedException("user_cancelled");
             if(output==null||output.length==0)throw new IllegalStateException("native_context_or_generation_failed");
             String result=stream.output.finish(output);
             if(result.isBlank())throw new IllegalStateException("no_visible_model_answer");
-            result=AssistantCalculator.attachResult(result);
+            AssistantCalculator.Receipt calculation=AssistantCalculator.evaluate(result);
+            int toolReasoningPasses=0,toolPieces=0;
+            boolean interpreted=false;
+            if(calculation!=null){
+                if(calculation.ok()){
+                    // Use the same signed native model and exact original user
+                    // turn. The receipt is trusted runtime evidence, never
+                    // model-authored tool output or executable source text.
+                    if(listener!=null)listener.tool("Local calculation completed · interpreting result");
+                    NativeStream followup=new NativeStream(listener);
+                    toolReasoningPasses=1;
+                    String nextSystem=systemText+"\n"+calculation.reference();
+                    byte[] interpretedBytes=nativeGenerate(nextSystem.getBytes(StandardCharsets.UTF_8),roles,content,
+                        outputBudget,contextBudget,followup,references.toArray(new byte[0][]));
+                    resourceGuard.check();
+                    if(request.isCancelled())throw new InterruptedException("user_cancelled");
+                    toolPieces=followup.pieces;
+                    if(interpretedBytes!=null&&interpretedBytes.length>0){
+                        String answer=followup.output.finish(interpretedBytes);
+                        if(!answer.isBlank()&&AssistantStructured.singleBlock(answer,AssistantCalculator.FENCE)==null){
+                            result=answer;interpreted=true;
+                        }
+                    }
+                    if(!interpreted)result+="\n\nThe arithmetic result below is verified; the follow-up interpretation was not completed.";
+                }
+                result+=calculation.render();
+            }
             long answerReady=System.nanoTime();
             if(stream.firstVisibleNanos==0)stream.firstVisibleNanos=answerReady;
             OnDeviceModelResources after=new OnDeviceModelResources(context);
@@ -337,13 +450,19 @@ final class OnDeviceLlm {
                 .put("adapter_sha256",profile.adapterSha256)
                 .put("weight_precision",profile.precision)
                 .put("kv_bits",profile.kvBits)
-                .put("configured_backend",profile.backendDevice.isEmpty()?"CPU":profile.backendDevice)
+                .put("configured_backend",!profile.backendDevice.isEmpty()?profile.backendDevice:
+                    ControlAssistantPreferences.vulkanLayers(context,profile)>0?"Vulkan":"CPU")
+                .put("configured_offload_layers",ControlAssistantPreferences.vulkanLayers(context,profile))
+                .put("mapped_no_repack",profile.mappedNoRepack)
                 .put("model_already_loaded",warm)
                 .put("context_tokens",contextBudget)
                 .put("prompt_tokens",stream.promptTokens)
                 .put("omitted_messages",stream.omittedMessages)
                 .put("omitted_reference_blocks",stream.omittedReferences)
-                .put("generated_token_pieces",stream.pieces)
+                .put("generated_token_pieces",stream.pieces+toolPieces)
+                .put("local_calculator_executed",calculation!=null&&calculation.ok())
+                .put("tool_reasoning_passes",toolReasoningPasses)
+                .put("tool_result_interpreted",interpreted)
                 .put("request_to_first_visible_ms",(stream.firstVisibleNanos-requestStarted)/1_000_000)
                 .put("request_total_ms",(answerReady-requestStarted)/1_000_000)
                 .put("request_to_first_piece_ms",(stream.firstPieceNanos-requestStarted)/1_000_000)
@@ -355,6 +474,16 @@ final class OnDeviceLlm {
                 .put("thermal_before",resources.thermalStatus)
                 .put("thermal_after",after.thermalStatus);
             return result;
-        }finally{GATE.end(request);}
+        }finally{
+            try{
+                if(resourceGuard!=null){
+                    resourceGuard.close();
+                    if(!resourceGuard.failure().isEmpty()){
+                        lastFailure=resourceGuard.failure();
+                        synchronized(LOCK){modelReady=false;nativeUnload();cachedBackendReport=null;}
+                    }
+                }
+            }finally{GATE.end(request);}
+        }
     }
 }

@@ -24,7 +24,10 @@ public final class AssistantWorkspaceTest {
         gate.begin(completed); gate.end(completed); gate.begin(next);
         gate.cancel(completed); gate.end(completed);
         truth(gate.busy()); truth(!next.isCancelled()); equal(nativeCalls[1],1);
+        truth(!gate.abortActive(completed)); equal(nativeCalls[1],1);
+        truth(gate.abortActive(next)); truth(!next.isCancelled()); equal(nativeCalls[1],2);
         gate.end(next); truth(!gate.busy()); equal(nativeCalls[0],3);
+        truth(!gate.abortActive(next)); equal(nativeCalls[1],2);
     }
     public static void main(String[] args) throws Exception {
         cancellationOwnership();

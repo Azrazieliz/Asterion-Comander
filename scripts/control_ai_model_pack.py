@@ -151,6 +151,7 @@ def build(root,runtime,training_metadata,native_adapter,precision="q8_0",quantiz
       "sha256":sha,"source":ORIGINAL_MODEL+"@"+ORIGINAL_REVISION[:12]+"; adapted candidate",
       "max_input_chars":24000,"max_new_tokens":768,"context_tokens":4096,
       "weight_precision":precision.upper(),"kv_precision_bits":16,"allow_smaller_context":True,
+      "vulkan_max_layers":original["num_hidden_layers"],"mapped_no_repack":True,
       "memory_budget":{"resident_weight_bytes":model.stat().st_size,"workspace_bytes":768<<20,"kv_bytes_per_token":kv},
       "adapter":{"file":native.name,"bytes":native.stat().st_size,"sha256":file_hash(native),"base_sha256":sha},
       "system_text":"You are Asterion Control, the local assistant. Carry out authorized tasks using verified capabilities and actual receipts. Preserve user decisions and relevant source context. Do not invent actions, access, or outcomes."}

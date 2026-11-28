@@ -5,6 +5,12 @@
 #include <mutex>
 #include <string>
 #include <vector>
+#include <cstring>
+#include <sstream>
+#include <chrono>
+#include <cmath>
+#include <memory>
+#include "ggml-alloc.h"
 #include "llama.h"
 #include "context_pack.h"
 #include "ggml-backend.h"
@@ -19,18 +25,128 @@ extern "C" JNIEXPORT void JNICALL Java_com_asterion_control_OnDeviceLlm_nativeRe
 static llama_adapter_lora *active_adapter=nullptr;
 static int context_threads=4;
 static int kv_bits=16;
-
-static bool load_profile(const char *path,const char *adapter,const char *backend,int layers){
-    std::lock_guard<std::mutex> lock(guard);
+static std::string loaded_backend="unloaded";
+static int requested_layers=0;
+static void init_runtime(){
     if(!initialized){llama_backend_init();initialized=true;}
+}
+static bool is_gpu(ggml_backend_dev_t d){
+    if(!d)return false;
+    auto type=ggml_backend_dev_type(d);
+    return type==GGML_BACKEND_DEVICE_TYPE_GPU||type==GGML_BACKEND_DEVICE_TYPE_IGPU;
+}
+static bool is_vulkan(ggml_backend_dev_t d){
+    if(!is_gpu(d))return false;
+    auto reg=ggml_backend_dev_backend_reg(d);
+    return reg&&std::strcmp(ggml_backend_reg_name(reg),"Vulkan")==0;
+}
+static ggml_backend_dev_t find_offload_device(const char *requested){
+    if(!requested||!*requested)return nullptr;
+    if(std::strcmp(requested,"Vulkan")==0){
+        for(size_t i=0;i<ggml_backend_dev_count();++i){
+            auto d=ggml_backend_dev_get(i);
+            if(is_vulkan(d))return d;
+        }
+        return nullptr;
+    }
+    auto d=ggml_backend_dev_by_name(requested);
+    return is_gpu(d)?d:nullptr;
+}
+static std::string safe_field(const char *value){
+    std::string out;
+    if(value)for(unsigned char c:std::string(value)){
+        if(c>=32&&c<=126&&c!='|'&&c!='\n')out+=static_cast<char>(c);
+        if(out.size()>=160)break;
+    }
+    return out;
+}
+// Runtime registration and memory budget are observations, not proof that
+// a particular inference graph actually ran on the GPU.
+extern "C" JNIEXPORT jstring JNICALL Java_com_asterion_control_OnDeviceLlm_nativeBackendReport(JNIEnv *env,jclass){
+    std::unique_lock<std::mutex> lock(guard,std::try_to_lock);
+    if(!lock.owns_lock())return nullptr;
+    init_runtime();
+    std::ostringstream report;
+    report<<"loaded|"<<loaded_backend<<"|"<<requested_layers<<"\n";
+    for(size_t i=0;i<ggml_backend_dev_count()&&i<32;++i){
+        auto d=ggml_backend_dev_get(i);
+        if(!d)continue;
+        auto reg=ggml_backend_dev_backend_reg(d);
+        size_t free=0,total=0;
+        ggml_backend_dev_memory(d,&free,&total);
+        report<<"device|"<<safe_field(reg?ggml_backend_reg_name(reg):"")<<"|"
+            <<safe_field(ggml_backend_dev_name(d))<<"|"<<safe_field(ggml_backend_dev_description(d))
+            <<"|"<<static_cast<int>(ggml_backend_dev_type(d))<<"|"<<free<<"|"<<total<<"\n";
+    }
+    return env->NewStringUTF(report.str().c_str());
+}
+
+// The probe dispatches an actual matrix multiplication to the registered
+// Vulkan backend and reads the result back. It does not certify LLM speed.
+extern "C" JNIEXPORT jstring JNICALL Java_com_asterion_control_OnDeviceLlm_nativeVulkanProbe(JNIEnv *env,jclass){
+    std::lock_guard<std::mutex> lock(guard);
+    try{
+        init_runtime();
+        auto device=find_offload_device("Vulkan");
+        if(!device)return env->NewStringUTF("unavailable|no_registered_vulkan_gpu");
+        auto backend=std::unique_ptr<ggml_backend,decltype(&ggml_backend_free)>(
+            ggml_backend_dev_init(device,nullptr),ggml_backend_free);
+        if(!backend)return env->NewStringUTF("failed|vulkan_initialization");
+        ggml_init_params params{};
+        params.mem_size=ggml_tensor_overhead()*8+ggml_graph_overhead()+65536;
+        params.no_alloc=true;
+        auto context=std::unique_ptr<ggml_context,decltype(&ggml_free)>(ggml_init(params),ggml_free);
+        if(!context)return env->NewStringUTF("failed|graph_allocation");
+        constexpr int N=64;
+        auto a=ggml_new_tensor_2d(context.get(),GGML_TYPE_F32,N,N);
+        auto b=ggml_new_tensor_2d(context.get(),GGML_TYPE_F32,N,N);
+        auto c=ggml_mul_mat(context.get(),a,b);
+        if(!ggml_backend_dev_supports_op(device,c))
+            return env->NewStringUTF("failed|vulkan_matmul_unsupported");
+        auto graph=ggml_new_graph(context.get());
+        ggml_build_forward_expand(graph,c);
+        auto buffer=std::unique_ptr<ggml_backend_buffer,decltype(&ggml_backend_buffer_free)>(
+            ggml_backend_alloc_ctx_tensors(context.get(),backend.get()),ggml_backend_buffer_free);
+        if(!buffer)return env->NewStringUTF("failed|vulkan_buffer_allocation");
+        std::vector<float> left(N*N,0),right(N*N),output(N*N);
+        for(int i=0;i<N;++i)left[i*N+i]=2;
+        for(int i=0;i<N*N;++i)right[i]=static_cast<float>(i%17-8);
+        ggml_backend_tensor_set(a,left.data(),0,left.size()*sizeof(float));
+        ggml_backend_tensor_set(b,right.data(),0,right.size()*sizeof(float));
+        auto start=std::chrono::steady_clock::now();
+        if(ggml_backend_graph_compute(backend.get(),graph)!=GGML_STATUS_SUCCESS)
+            return env->NewStringUTF("failed|vulkan_graph_compute");
+        ggml_backend_tensor_get(c,output.data(),0,output.size()*sizeof(float));
+        auto elapsed=std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now()-start).count();
+        float max_error=0;
+        for(size_t i=0;i<output.size();++i){
+            if(!std::isfinite(output[i]))return env->NewStringUTF("failed|nonfinite_vulkan_result");
+            max_error=std::max(max_error,std::abs(output[i]-2*right[i]));
+        }
+        if(max_error>0.0001f)return env->NewStringUTF("failed|vulkan_result_mismatch");
+        std::ostringstream result;
+        result<<"passed|"<<safe_field(ggml_backend_dev_name(device))<<"|"
+            <<safe_field(ggml_backend_dev_description(device))<<"|"<<elapsed<<"|"<<max_error;
+        return env->NewStringUTF(result.str().c_str());
+    }catch(...){return env->NewStringUTF("failed|vulkan_backend_exception");}
+}
+static bool load_profile(const char *path,const char *adapter,const char *backend,int layers,bool mapped_no_repack){
+    std::lock_guard<std::mutex> lock(guard);
+    init_runtime();
     llama_model_params params=llama_model_default_params();
     params.n_gpu_layers=layers;
+    if(mapped_no_repack){
+        params.load_mode=LLAMA_LOAD_MODE_MMAP;
+        params.use_extra_bufts=false;
+    }
     params.progress_callback=[](float,void *){return !cancel_generation.load();};
     ggml_backend_dev_t devices[2]={nullptr,nullptr};
+    params.devices=devices; // Explicit empty list for CPU-only mode.
     if(layers>0){
         if(!backend||!*backend)return false;
-        devices[0]=ggml_backend_dev_by_name(backend);
-        if(!devices[0]||ggml_backend_dev_type(devices[0])==GGML_BACKEND_DEVICE_TYPE_CPU)return false;
+        devices[0]=find_offload_device(backend);
+        if(!devices[0])return false;
         params.devices=devices;
     }
     llama_model *loaded=llama_model_load_from_file(path,params);
@@ -45,6 +161,8 @@ static bool load_profile(const char *path,const char *adapter,const char *backen
     if(model)llama_model_free(model);
     model=loaded;
     active_adapter=loaded_adapter;
+    loaded_backend=layers>0?safe_field(ggml_backend_dev_name(devices[0])):"CPU";
+    requested_layers=layers;
     model_loaded.store(true);
     return true;
 }
@@ -52,17 +170,17 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_asterion_control_OnDeviceLlm_nati
     if(!path)return JNI_FALSE;
     const char *value=env->GetStringUTFChars(path,nullptr);
     if(!value)return JNI_FALSE;
-    bool ok=load_profile(value,nullptr,nullptr,0);
+    bool ok=load_profile(value,nullptr,nullptr,0,false);
     env->ReleaseStringUTFChars(path,value);
     return ok?JNI_TRUE:JNI_FALSE;
 }
 extern "C" JNIEXPORT jboolean JNICALL Java_com_asterion_control_OnDeviceLlm_nativeLoadProfile(
-    JNIEnv *env,jclass,jstring path,jstring adapter,jstring backend,jint layers){
+    JNIEnv *env,jclass,jstring path,jstring adapter,jstring backend,jint layers,jboolean mapped_no_repack){
     if(!path||!adapter||!backend||layers<0||layers>256)return JNI_FALSE;
     const char *file=env->GetStringUTFChars(path,nullptr);
     const char *weights=file?env->GetStringUTFChars(adapter,nullptr):nullptr;
     const char *device=weights?env->GetStringUTFChars(backend,nullptr):nullptr;
-    bool ok=device&&load_profile(file,weights,device,layers);
+    bool ok=device&&load_profile(file,weights,device,layers,mapped_no_repack==JNI_TRUE);
     if(device)env->ReleaseStringUTFChars(backend,device);
     if(weights)env->ReleaseStringUTFChars(adapter,weights);
     if(file)env->ReleaseStringUTFChars(path,file);
@@ -78,6 +196,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_asterion_control_OnDeviceLlm_nati
 extern "C" JNIEXPORT void JNICALL Java_com_asterion_control_OnDeviceLlm_nativeUnload(JNIEnv *,jclass){
     std::lock_guard<std::mutex> lock(guard);
     model_loaded.store(false);
+    loaded_backend="unloaded";requested_layers=0;
     if(active_adapter){llama_adapter_lora_free(active_adapter);active_adapter=nullptr;}
     if(model){llama_model_free(model);model=nullptr;}
 }
@@ -176,6 +295,8 @@ extern "C" JNIEXPORT jbyteArray JNICALL Java_com_asterion_control_OnDeviceLlm_na
         cp.type_v=GGML_TYPE_Q8_0;
         cp.flash_attn_type=LLAMA_FLASH_ATTN_TYPE_ENABLED;
     }
+    cp.offload_kqv=requested_layers>0;
+    cp.op_offload=requested_layers>0;
     cp.abort_callback=[](void *){return cancel_generation.load();};
     llama_context *ctx=llama_init_from_model(model,cp);if(!ctx)return nullptr;
     if(active_adapter){

@@ -31,6 +31,13 @@ final class InferenceGate {
         if (active == request) abortNative.run();
     }
 
+    // Resource admission can fail during a native call. Abort only the
+    // currently owned generation; do not mark a resource failure as user Stop.
+    synchronized boolean abortActive(Request request) {
+        if(active!=request)return false;
+        abortNative.run();return true;
+    }
+
     synchronized void end(Request request) {
         if (active == request) active = null;
     }

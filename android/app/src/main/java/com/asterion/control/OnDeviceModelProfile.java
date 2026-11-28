@@ -15,7 +15,8 @@ final class OnDeviceModelProfile {
     final long bytes;
     final int inputChars,outputTokens,contextTokens;
     final String precision,backendDevice,adapterFile,adapterSha256;
-    final int offloadLayers,kvBits;
+    final int offloadLayers,kvBits,maxVulkanLayers;
+    final boolean mappedNoRepack;
     final long adapterBytes,residentBytes,workspaceBytes,kvBytesPerToken;
     final boolean allowSmallerContext,externalModelPack;
     private OnDeviceModelProfile(JSONObject j) throws Exception {
@@ -47,6 +48,10 @@ final class OnDeviceModelProfile {
         if(!backendDevice.matches("[A-Za-z0-9._-]{0,64}") || offloadLayers<0 ||
                 offloadLayers>256 || (offloadLayers==0)!=backendDevice.isEmpty())
             throw new IllegalArgumentException("invalid_backend_profile");
+        maxVulkanLayers=j.optInt("vulkan_max_layers",0);
+        if(maxVulkanLayers<0||maxVulkanLayers>256||(maxVulkanLayers>0&&!backendDevice.isEmpty()))
+            throw new IllegalArgumentException("invalid_mutable_vulkan_budget");
+        mappedNoRepack=j.optBoolean("mapped_no_repack",false);
         kvBits=j.optInt("kv_precision_bits",16);
         if(kvBits!=8&&kvBits!=16)throw new IllegalArgumentException("invalid_kv_precision");
         JSONObject memory=j.optJSONObject("memory_budget");

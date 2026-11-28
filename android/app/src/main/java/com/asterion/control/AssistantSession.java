@@ -48,6 +48,9 @@ final class AssistantSession {
                         target.messages.get(target.messages.size()-1).omittedContextMessages=omitted;
                         target.messages.get(target.messages.size()-1).omittedReferenceBlocks=dropped;
                         status="Generating on this phone"+(omitted==0?"":" · "+omitted+" earlier messages outside active context")+(dropped==0?"":" · "+dropped+" reference blocks omitted");changed();});}
+                    public void tool(String name){main.post(()->{
+                        if(activeRequest==request&&target.running()){status=name;changed();}
+                    });}
                     public void text(String text){
                         finalText[0]=text;
                         long now=android.os.SystemClock.elapsedRealtime();
@@ -66,7 +69,11 @@ final class AssistantSession {
                     if(activeRequest!=request)return;
                     activeRequest=null;
                     target.update(generation,finalText[0],request.isCancelled()?"cancelled":"failed");
-                    status=request.isCancelled()?"Stopped":"The local model could not finish. Your message is retained; you can retry.";
+                    String reason=failure.getMessage();
+                    status=request.isCancelled()?"Stopped":
+                        "android_memory_pressure".equals(reason)?"Stopped because Android reported memory pressure. Partial response retained.":
+                        "android_thermal_pressure".equals(reason)?"Stopped because Android reported severe thermal pressure. Partial response retained.":
+                        "The local model could not finish. Your message is retained; you can retry.";
                     save(app);changed();
                 });
             }

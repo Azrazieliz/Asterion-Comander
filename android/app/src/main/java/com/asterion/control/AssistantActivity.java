@@ -242,13 +242,89 @@ public final class AssistantActivity extends Activity {
     }
     private void deleteConversation(){if(!idle())return;AssistantConversation original=session.conversation;new AlertDialog.Builder(this).setTitle("Delete this conversation?").setMessage("Saved memories remain under Memory controls.").setNegativeButton("Cancel",null).setPositiveButton("Delete",(d,w)->{if(!idle()||session.conversation!=original)return;ControlAssistantMemory.deleteConversation(this,session.conversation.id);session.conversation=new AssistantConversation();session.status="";render();}).show();}
     private void modelSettings(){
-        String[] modes={"Fast","Balanced","Deep","Memory and assistant settings","Installed model details","Import signed model files"};
+        String[] modes={"Fast","Balanced","Deep","Memory and assistant settings","Installed model details","Import signed model files","GPU acceleration"};
         new AlertDialog.Builder(this).setTitle("Model and reasoning").setItems(modes,(d,index)->{
             if(index<3){ControlAssistantPreferences.save(this,new String[]{"fast","balanced","deep"}[index],ControlAssistantPreferences.guidance(this));render();}
             else if(index==3){startActivity(new Intent(this,MainActivity.class).putExtra("assistant_settings",true));}
             else if(index==5){chooseModelArtifact();}
+            else if(index==6){showAcceleration();}
             else session.work.execute(()->{try{JSONObject p=OnDeviceLlm.status(this);runOnUiThread(()->new AlertDialog.Builder(this).setTitle("Installed model").setMessage(p.optString("model_name")+"\n"+(p.optBoolean("model_loaded")?"Loaded":"Not loaded")+"\nContext: "+p.optInt("model_context_tokens")+" tokens\n"+p.optString("model_source")).setPositiveButton("Close",null).show());}catch(Exception e){runOnUiThread(()->notice("Model details unavailable."));}});
         }).setNegativeButton("Close",null).show();
+    }
+    private void showAcceleration(){
+        if(!idle())return;
+        notice("Inspecting native inference backends");
+        session.work.execute(()->{
+            try{
+                JSONObject state=OnDeviceLlm.status(this);
+                OnDeviceModelProfile profile=OnDeviceModelProfile.read(this);
+                JSONObject nativeReport=state.getJSONObject("native_backend_report");
+                org.json.JSONArray devices=nativeReport.optJSONArray("devices");
+                StringBuilder info=new StringBuilder("Current selection: "+state.optString("configured_backend")+
+                    " · "+state.optInt("configured_offload_layers")+" layers\n");
+                boolean available=nativeReport.optBoolean("vulkan_gpu_registered");
+                if(devices!=null)for(int i=0;i<devices.length();i++){
+                    JSONObject device=devices.optJSONObject(i);
+                    if(device!=null&&"Vulkan".equals(device.optString("backend")))
+                        info.append(device.optString("description")).append(" · ")
+                            .append(device.optLong("reported_free_bytes")/(1024*1024)).append(" MiB reported free\n");
+                }
+                info.append(available?"Vulkan registered; model acceleration requires measured generation.":
+                    "No Vulkan GPU registered by this native library.");
+                info.append("\nGPU shares device memory. No reduction of the signed memory estimate.");
+                runOnUiThread(()->{
+                    if(!alive||!idle())return;
+                    if(profile.maxVulkanLayers==0||!profile.backendDevice.isEmpty()){
+                        new AlertDialog.Builder(this).setTitle("GPU acceleration").setMessage(info.toString()+
+                            "\nThis signed profile does not permit a new Vulkan selection, or the backend is unavailable.")
+                            .setPositiveButton("Close",null).show();return;
+                    }
+                    java.util.ArrayList<Integer> layers=new java.util.ArrayList<>();layers.add(0);
+                    for(int n:new int[]{4,8,16,24,32,64,128,256})
+                        if(available&&n<=profile.maxVulkanLayers)layers.add(n);
+                    if(available&&!layers.contains(profile.maxVulkanLayers))layers.add(profile.maxVulkanLayers);
+                    java.util.Collections.sort(layers);
+                    String[] choices=new String[layers.size()];
+                    for(int i=0;i<layers.size();i++)choices[i]=layers.get(i)==0?"CPU only":"Vulkan · "+layers.get(i)+" layers";
+                    int selected=Math.max(0,layers.indexOf(state.optInt("configured_offload_layers")));
+                    new AlertDialog.Builder(this).setTitle("GPU acceleration").setMessage(info.toString())
+                        .setNeutralButton("Select backend",(d,w)->{
+                            if(!idle())return;
+                            new AlertDialog.Builder(this).setTitle("Signed model acceleration budget")
+                                .setSingleChoiceItems(choices,selected,(dialog,index)->{
+                                    dialog.dismiss();applyAcceleration(layers.get(index));
+                                }).setNegativeButton("Cancel",null).show();
+                        }).setPositiveButton("Close",null).show();
+                });
+            }catch(Exception|LinkageError failure){runOnUiThread(()->notice("Native acceleration information unavailable."));}
+        });
+    }
+    private void applyAcceleration(int layers){
+        if(!idle())return;
+        new AlertDialog.Builder(this).setTitle(layers==0?"Switch to CPU":"Run Vulkan compute probe")
+            .setMessage(layers==0?"Unload the current model and reload on CPU for the next answer.":
+                "Execute a small real Vulkan matrix calculation and verify the readback before selecting "+layers+
+                " layers. Model performance will still require real generation. The current model will be reloaded.")
+            .setNegativeButton("Cancel",null).setPositiveButton("Apply",(d,w)->{
+                if(!idle())return;
+                notice("Checking native backend");
+                session.work.execute(()->{
+                    try{
+                        JSONObject report=OnDeviceLlm.configureVulkan(this,layers);
+                        runOnUiThread(()->{
+                            if(!alive)return;
+                            String detail=report.optBoolean("selection_saved")?
+                                (layers==0?"CPU selected.":"Vulkan compute probe passed on "+report.optString("device")+
+                                    ". "+layers+" layers selected; actual model speed not yet verified."):
+                                "Vulkan not selected: "+report.optString("reason","probe failed");
+                            notice(detail);
+                            render();
+                        });
+                    }catch(Exception|LinkageError failure){
+                        runOnUiThread(()->notice("Acceleration was not changed: "+failure.getMessage()));
+                    }
+                });
+            }).show();
     }
     private void chooseModelArtifact(){
         if(!idle())return;

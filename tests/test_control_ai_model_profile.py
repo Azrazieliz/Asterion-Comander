@@ -52,7 +52,7 @@ def test_jni_preserves_cancellation_and_rejects_context_overflow():
     assert "static_cast<size_t>(-n)+static_cast<size_t>(limit)+32u" in code
     assert "cp.n_ctx=context_limit;" in code
     assert "cancel_generation.load" in code
-    assert "load_profile(value,nullptr,nullptr,0)" in code  # unsigned callers cannot select an accelerator
+    assert "load_profile(value,nullptr,nullptr,0,false)" in code  # unsigned callers cannot select an accelerator
 
 
 def test_jobs_keep_durable_receipt_before_work_and_use_profile_budget():
@@ -112,3 +112,38 @@ def test_workspace_uses_existing_encrypted_store_and_retains_failed_turns():
     assert 'if(oldVersion==1&&newVersion<=3){createConversations(db);oldVersion=2;}' in memory
     assert 'if(oldVersion==2&&newVersion==3){createProjectSources(db);return;}' in memory
     assert "session.conversation.fork()" in workspace
+
+
+def test_vulkan_selection_is_real_and_signed_bounded():
+    profile=(JAVA/"OnDeviceModelProfile.java").read_text(encoding="utf-8")
+    prefs=(JAVA/"ControlAssistantPreferences.java").read_text(encoding="utf-8")
+    native=NATIVE.read_text(encoding="utf-8")
+    llm=(JAVA/"OnDeviceLlm.java").read_text(encoding="utf-8")
+    assert 'vulkan_max_layers' in profile and 'invalid_mutable_vulkan_budget' in profile
+    assert 'vulkan_layers_"+profile.sha256' in prefs
+    assert 'layers>profile.maxVulkanLayers' in llm
+    assert 'nativeVulkanProbe()' in llm and 'if(!passed)return probe.put("selection_saved",false)' in llm
+    assert 'ggml_backend_dev_init(device,nullptr)' in native
+    assert 'ggml_backend_graph_compute(backend.get(),graph)' in native
+    assert 'ggml_backend_tensor_get(c,output.data()' in native
+    assert 'max_error>0.0001f' in native
+    assert 'params.devices=devices' in native
+    assert 'params.load_mode=LLAMA_LOAD_MODE_MMAP' in native
+    assert 'params.use_extra_bufts=false' in native
+    assert 'gpu_execution_verified",false' in llm
+    assert 'model_gpu_inference_verified",false' in llm
+
+
+def test_local_tool_feedback_and_pressure_guard_are_on_actual_generation_path():
+    llm=(JAVA/"OnDeviceLlm.java").read_text(encoding="utf-8")
+    guard=(JAVA/"InferenceResourceGuard.java").read_text(encoding="utf-8")
+    assert 'resourceGuard=new InferenceResourceGuard(context,GATE,request)' in llm
+    assert 'gate.abortActive(request)' in guard
+    assert 'sample.memory.lowMemory' in guard
+    assert 'THERMAL_STATUS_SEVERE' in guard
+    assert 'resourceGuard.check();' in llm
+    assert 'AssistantCalculator.evaluate(result)' in llm
+    assert 'nextSystem=systemText+"\\n"+calculation.reference()' in llm
+    assert 'nativeGenerate(nextSystem.getBytes(StandardCharsets.UTF_8)' in llm
+    assert 'tool_reasoning_passes' in llm
+    assert 'resourceGuard.close()' in llm
