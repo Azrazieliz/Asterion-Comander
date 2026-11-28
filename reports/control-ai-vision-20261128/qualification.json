@@ -1,0 +1,24 @@
+{
+  "source_commit": "2148f867b55572a732842090978bd6c8a4d55ef2",
+  "run_id": 46129221684,
+  "artifact_id": 15257306932,
+  "archive_sha256": "779f7710c439a104c78c2bb1383ab91c4b8dc567464e5722a74f50cf75a3f799",
+  "license": "apache-2.0",
+  "revision": "ccd7aae53bcb1997355c2f094959e72b3642ce17",
+  "cases": [
+    {
+      "fixture": "red-square",
+      "answer": "Red square.",
+      "peak_rss_kib": 777012
+    },
+    {
+      "fixture": "blue-circle",
+      "answer": "Blue circle.",
+      "peak_rss_kib": 777080
+    }
+  ],
+  "native_pixel_inference_verified": true,
+  "broad_visual_accuracy_certified": false,
+  "physical_phone_verified": false,
+  "production_promoted": false
+}
