@@ -281,9 +281,17 @@ public final class AssistantActivity extends Activity {
     private void attach(){
         if(!idle())return;
         new AlertDialog.Builder(this).setTitle("Attach or manage project sources")
-            .setItems(new String[]{"Attach small text to next message","Import searchable project text (up to 2 MiB)","Manage imported project sources"},(dialog,which)->{
+            .setItems(new String[]{"Attach small text to next message","Import searchable project text (up to 2 MiB)","Manage imported project sources","Import PDF text by page range"},(dialog,which)->{
                 if(!idle())return;
                 if(which==2){showProjectSources(session.conversation.project);return;}
+                if(which==3){
+                    if(android.os.Build.VERSION.SDK_INT<35){notice("PDF text extraction requires Android 15 or newer.");return;}
+                    pendingSourceProject=session.conversation.project;
+                    try{startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("application/pdf")
+                        .addCategory(Intent.CATEGORY_OPENABLE),214);}
+                    catch(Exception unavailable){pendingSourceProject=null;notice("PDF picker unavailable.");}
+                    return;
+                }
                 Intent picker=new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE);
                 picker.putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"text/*","application/json","application/xml"});
                 if(which==1)pendingSourceProject=session.conversation.project;
@@ -357,6 +365,29 @@ public final class AssistantActivity extends Activity {
                 }catch(Exception failure){outcome="Export outcome unverified. A partial file may exist at the selected destination.";}
                 String report=outcome;runOnUiThread(()->{if(alive)notice(report);});
             });return;
+        }
+        if(request==214){
+            String scope=pendingSourceProject;pendingSourceProject=null;
+            if(result!=RESULT_OK||data==null||data.getData()==null||!idle())return;
+            if(scope==null||!scope.equals(session.conversation.project)){notice("Project changed; PDF not imported.");return;}
+            android.net.Uri uri=data.getData();
+            LinearLayout fields=DesignSystem.vertical(this);fields.setPadding(dp(20),dp(8),dp(20),dp(8));
+            fields.addView(label("Extract searchable text only. Maximum 50 selected pages, 64 MiB input. Scans and diagrams are not analyzed.",14,muted,false));
+            EditText first=new EditText(this),last=new EditText(this);
+            first.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);last.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+            first.setHint("First page");last.setHint("Last page");first.setText("1");last.setText("20");
+            fields.addView(first);fields.addView(last);
+            new AlertDialog.Builder(this).setTitle("Import PDF text into "+scope).setView(fields)
+                .setPositiveButton("Extract and save",(d,w)->{
+                    if(!idle()||!scope.equals(session.conversation.project))return;
+                    try{
+                        int a=Integer.parseInt(first.getText().toString()),z=Integer.parseInt(last.getText().toString());
+                        if(a<1||z<a||z-a>=AssistantPdfExtractionService.MAX_PAGES||z>100000)
+                            throw new IllegalArgumentException("page_range");
+                        session.importPdf(this,uri,scope,a,z);
+                    }catch(IllegalArgumentException invalid){notice("Choose a valid range of 1–50 pages.");}
+                }).setNegativeButton("Cancel",null).show();
+            return;
         }
         if(request==213){
             String scope=pendingSourceProject;pendingSourceProject=null;

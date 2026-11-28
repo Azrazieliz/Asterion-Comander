@@ -128,6 +128,27 @@ final class AssistantSession {
             save(app);changed();
         });
     }
+    void importPdf(Context context,android.net.Uri uri,String project,int first,int last){
+        if(busy()||!project.equals(conversation.project))return;
+        Context app=context.getApplicationContext();
+        actionBusy=true;status="Extracting selected PDF pages locally";changed();
+        work.execute(()->{
+            String outcome;
+            try{
+                ProjectSourceText source=AssistantPdfImport.extract(app,uri,first,last);
+                ControlAssistantMemory.importProjectSource(app,project,source);
+                outcome="Encrypted PDF text available: "+source.name+
+                    ". Only extracted text is searchable; images and diagrams have not been analyzed.";
+            }catch(Exception failure){
+                String reason=failure.getMessage();
+                if("no_extractable_text".equals(reason))outcome="No extractable text on the selected pages. Image-only pages require a vision or OCR engine.";
+                else if("pdf_text_budget".equals(reason))outcome="Selected text exceeds the import budget. Choose a smaller page range.";
+                else outcome="PDF not imported. Check document size, encryption, page range and local storage.";
+            }
+            String report=outcome;
+            main.post(()->{actionBusy=false;status=report;changed();});
+        });
+    }
     void importModel(Context context,java.util.List<android.net.Uri> documents,boolean adapter){
         if(busy())return;
         Context app=context.getApplicationContext();
