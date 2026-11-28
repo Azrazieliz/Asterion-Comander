@@ -35,11 +35,47 @@ final class OnDeviceLlm {
         ()->{if(LIBRARY_LOADED)nativeResetCancel();}, ()->{if(LIBRARY_LOADED)nativeCancel();});
     private OnDeviceLlm(){}
     private static native boolean nativeLoad(String privateFile);
-    private static native boolean nativeLoadProfile(String file,String adapter,String backend,int layers);
+    private static native boolean nativeLoadProfile(String file,String adapter,String backend,int layers,boolean mappedNoRepack);
     private static native void nativeConfigureContext(int threads,int kvBits);
     private static native boolean nativeReady();
     private static native String nativeBackendReport();
-    private static volatile JSONObject cachedBackendReport;
+    private static native String nativeVulkanProbe();
+    private static volatile JSONObject cachedBackendReport,lastVulkanProbe;
+    static JSONObject configureVulkan(Context context,int layers) throws Exception {
+        OnDeviceModelProfile profile=OnDeviceModelProfile.read(context);
+        if(!LIBRARY_LOADED)throw new IllegalStateException("native_library_missing");
+        if(!profile.backendDevice.isEmpty()||layers<0||layers>profile.maxVulkanLayers)
+            throw new IllegalArgumentException("outside_signed_vulkan_budget");
+        InferenceGate.Request request=new InferenceGate.Request();
+        GATE.begin(request);
+        try {
+            JSONObject probe=new JSONObject().put("requested_layers",layers);
+            if(layers>0){
+                OnDeviceModelResources resources=new OnDeviceModelResources(context);
+                // GPU and CPU share Android memory; do not subtract GPU weights
+                // from the existing conservative physical memory admission.
+                resources.contextTokens(profile,ControlAssistantPreferences.outputTokens(context,profile),modelReady);
+                String raw=nativeVulkanProbe();
+                String[] fields=raw==null?new String[0]:raw.split("\\|",-1);
+                boolean passed=fields.length==5&&"passed".equals(fields[0]);
+                probe.put("passed",passed).put("observed_at_ms",System.currentTimeMillis());
+                if(passed){
+                    probe.put("device",fields[1]).put("description",fields[2])
+                        .put("matrix_compute_and_readback_us",Long.parseLong(fields[3]))
+                        .put("max_absolute_error",Double.parseDouble(fields[4]));
+                }else probe.put("reason",fields.length>=2?fields[1]:"invalid_native_probe_result");
+                lastVulkanProbe=new JSONObject(probe.toString());
+                if(!passed)return probe.put("selection_saved",false);
+            }
+            synchronized(LOCK){
+                ControlAssistantPreferences.saveVulkanLayers(context,profile,layers);
+                if(modelReady){nativeUnload();modelReady=false;}
+                cachedBackendReport=null;
+            }
+            return probe.put("selection_saved",true)
+                .put("model_gpu_inference_verified",false);
+        }finally{GATE.end(request);}
+    }
     private static JSONObject runtimeBackends() throws Exception{
         if(!LIBRARY_LOADED)return new JSONObject().put("available",false).put("reason","native_library_missing");
         if(GATE.busy()){
@@ -49,6 +85,7 @@ final class OnDeviceLlm {
         }
         try{
             String raw=nativeBackendReport();
+            if(raw==null)return new JSONObject().put("available",false).put("reason","native_runtime_busy");
             org.json.JSONArray devices=new org.json.JSONArray();
             JSONObject result=new JSONObject().put("available",true).put("devices",devices)
                 .put("observed_at_ms",System.currentTimeMillis()).put("gpu_execution_verified",false);
@@ -124,8 +161,12 @@ final class OnDeviceLlm {
             .put("model_name",profile.file)
             .put("model_context_tokens",profile.contextTokens)
             .put("weight_precision",profile.precision)
-            .put("configured_backend",profile.backendDevice.isEmpty()?"CPU":profile.backendDevice)
-            .put("configured_offload_layers",profile.offloadLayers)
+            .put("configured_backend",!profile.backendDevice.isEmpty()?profile.backendDevice:
+                ControlAssistantPreferences.vulkanLayers(context,profile)>0?"Vulkan":"CPU")
+            .put("configured_offload_layers",ControlAssistantPreferences.vulkanLayers(context,profile))
+            .put("signed_max_vulkan_layers",profile.maxVulkanLayers)
+            .put("mapped_no_repack",profile.mappedNoRepack)
+            .put("last_vulkan_probe",lastVulkanProbe==null?JSONObject.NULL:lastVulkanProbe)
             .put("native_backend_report",runtimeBackends())
             .put("configured_kv_bits",profile.kvBits)
             .put("configured_adapter_sha256",profile.adapterSha256)
@@ -163,7 +204,9 @@ final class OnDeviceLlm {
                 }
                 File file=stageArtifact(context,folder,profile.file,profile.bytes,profile.sha256,request,!profile.externalModelPack);
                 if(request.isCancelled())throw new InterruptedException("user_cancelled");
-                if(profile.adapterFile.isEmpty()&&profile.backendDevice.isEmpty()){
+                int layers=ControlAssistantPreferences.vulkanLayers(context,profile);
+                String backend=profile.backendDevice.isEmpty()&&layers>0?"Vulkan":profile.backendDevice;
+                if(profile.adapterFile.isEmpty()&&backend.isEmpty()&&!profile.mappedNoRepack){
                     modelReady=nativeLoad(file.getAbsolutePath());
                 }else{
                     String adapter="";
@@ -171,7 +214,7 @@ final class OnDeviceLlm {
                         adapter=stageArtifact(context,folder,profile.adapterFile,profile.adapterBytes,
                             profile.adapterSha256,request,!profile.externalModelPack).getAbsolutePath();
                     if(request.isCancelled())throw new InterruptedException("user_cancelled");
-                    modelReady=nativeLoadProfile(file.getAbsolutePath(),adapter,profile.backendDevice,profile.offloadLayers);
+                    modelReady=nativeLoadProfile(file.getAbsolutePath(),adapter,backend,layers,profile.mappedNoRepack);
                 }
                 lastFailure=modelReady?"":"native_model_load_failed";
                 return modelReady;
