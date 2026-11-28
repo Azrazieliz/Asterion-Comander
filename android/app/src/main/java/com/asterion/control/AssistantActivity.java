@@ -93,8 +93,17 @@ public final class AssistantActivity extends Activity {
         if(state!=null){draft=state.getString("draft","");composer.setText(draft);}
         speech=new TextToSpeech(this,result->{speechReady=result==TextToSpeech.SUCCESS;});
         session.listeners.add(observer);render();
-        String research=getIntent().getStringExtra("research_draft");getIntent().removeExtra("research_draft");
-        if(state==null&&research!=null){offerResearchDraft(research);return;}
+        Intent incoming=getIntent();
+        String researchTerm=incoming.getStringExtra("research_term");
+        java.util.ArrayList<String> researchIds=incoming.getStringArrayListExtra("research_ids"),
+            researchDigests=incoming.getStringArrayListExtra("research_digests");
+        incoming.removeExtra("research_term");incoming.removeExtra("research_ids");incoming.removeExtra("research_digests");
+        incoming.removeExtra("research_draft"); // Discard legacy untrusted pasted source text.
+        if(state==null&&researchTerm!=null){
+            try{offerResearchDraft(new AssistantResearchSelection(researchTerm,researchIds,researchDigests));}
+            catch(IllegalArgumentException invalid){notice("Invalid reviewed research selection.");}
+            return;
+        }
         String previous=getSharedPreferences("control",MODE_PRIVATE).getString("assistant_last_conversation","");
         if(session.conversation.messages.isEmpty()&&!previous.isEmpty()&&ControlAssistantPreferences.saveHistory(this)){
             final String emptyId=session.conversation.id;
@@ -103,8 +112,8 @@ public final class AssistantActivity extends Activity {
             }catch(Exception ignored){}});
         }
     }
-    private void offerResearchDraft(String value){
-        if(value.length()>12000||!idle()||composer.length()>0){notice("Research handoff unavailable while a draft or response is active.");return;}
+    private void offerResearchDraft(AssistantResearchSelection selection){
+        if(!idle()||composer.length()>0){notice("Research handoff unavailable while a draft or response is active.");return;}
         new AlertDialog.Builder(this).setTitle("Review browser research in new conversation")
             .setMessage("Open a new Browser Research conversation and load the comparison draft? The existing conversation is retained if encrypted history is enabled. Nothing is sent automatically.")
             .setPositiveButton("Prepare draft",(d,w)->{
@@ -112,7 +121,8 @@ public final class AssistantActivity extends Activity {
                 session.save(this);
                 if(!session.persistenceIssue.isEmpty()){notice("Existing conversation could not be saved; handoff cancelled.");return;}
                 session.conversation=new AssistantConversation();session.conversation.project=BrowserResearchText.PROJECT;
-                session.status="";composer.setText(value);session.changed();
+                session.conversation.researchSelection=selection;
+                session.status="";composer.setText(selection.prompt());session.save(this);session.changed();
             }).setNegativeButton("Cancel",null).show();
     }
     @Override protected void onSaveInstanceState(Bundle state){state.putString("draft",composer.getText().toString());super.onSaveInstanceState(state);}
@@ -128,7 +138,7 @@ public final class AssistantActivity extends Activity {
         if(!alive)return;
         AssistantConversation c=session.conversation;
         if(ControlAssistantPreferences.saveHistory(this)&&!c.messages.isEmpty())getSharedPreferences("control",MODE_PRIVATE).edit().putString("assistant_last_conversation",c.id).apply();
-        title.setText(c.title);project.setText(c.project);
+        title.setText(c.title);project.setText(c.project+(c.researchSelection==null?"":" · "+c.researchSelection.ids.size()+" sources"));
         model.setText("On device · "+ControlAssistantPreferences.effort(this));
         send.setText(c.running()||session.importingModel()?"Stop":"Send");
         send.setEnabled(!session.busy()||c.running()||session.importingModel());
@@ -140,6 +150,10 @@ public final class AssistantActivity extends Activity {
             if(c.messages.isEmpty()){
                 TextView empty=label("Asterion Control",26,text,true);empty.setPadding(0,dp(60),0,dp(8));body.addView(empty);
                 TextView local=label(ControlAssistantPreferences.saveHistory(this)?"On-device model · Encrypted history":"On-device model · History off",14,muted,false);body.addView(local);
+            }
+            if(c.researchSelection!=null){
+                TextView selectedSources=control("Review "+c.researchSelection.ids.size()+" selected captures",()->reviewSelectedResearch(c));
+                body.addView(selectedSources);
             }
             for(int i=0;i<c.messages.size();i++){
                 AssistantConversation.Message m=c.messages.get(i);final int index=i;
@@ -204,7 +218,28 @@ public final class AssistantActivity extends Activity {
     private boolean idle(){if(session.busy()){notice("Finish or stop the active response or receipt check first.");return false;}return true;}
     private void newConversation(){if(!idle())return;session.save(this);session.conversation=new AssistantConversation();session.status="";render();}
     private void rename(){if(!idle())return;input("Conversation title",session.conversation.title,value->{session.conversation.title=value;session.save(this);render();});}
-    private void changeProject(){if(!idle())return;input("Project context",session.conversation.project,value->{session.conversation.project=value;session.save(this);render();});}
+    private void reviewSelectedResearch(AssistantConversation owner){
+        if(!idle()||session.conversation!=owner||owner.researchSelection==null)return;
+        AssistantResearchSelection selection=owner.researchSelection;
+        session.work.execute(()->{
+            try{
+                AssistantResearchSelection.Evidence evidence=selection.resolve(
+                    id->ControlAssistantMemory.readProjectSource(this,BrowserResearchText.PROJECT,id),null);
+                runOnUiThread(()->{
+                    if(!alive||session.conversation!=owner||owner.researchSelection!=selection)return;
+                    new AlertDialog.Builder(this).setTitle("Selected research captures").setMessage(evidence.preview)
+                        .setPositiveButton("Close",null).show();
+                });
+            }catch(Exception failure){runOnUiThread(()->notice("One or more selected captures could not be verified."));}
+        });
+    }
+    private void changeProject(){
+        if(!idle())return;
+        input("Project context",session.conversation.project,value->{
+            if(!value.equals(session.conversation.project))session.conversation.researchSelection=null;
+            session.conversation.project=value;session.conversation.revision++;session.save(this);render();
+        });
+    }
     private interface Value{void accept(String value);}
     private void input(String title,String current,Value accept){
         EditText field=new EditText(this);field.setText(current);field.setSelectAllOnFocus(true);field.setMaxLines(6);
