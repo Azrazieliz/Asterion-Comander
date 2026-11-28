@@ -5,6 +5,8 @@
 #include <mutex>
 #include <string>
 #include <vector>
+#include <cstring>
+#include <sstream>
 #include "llama.h"
 #include "context_pack.h"
 #include "ggml-backend.h"
@@ -19,18 +21,72 @@ extern "C" JNIEXPORT void JNICALL Java_com_asterion_control_OnDeviceLlm_nativeRe
 static llama_adapter_lora *active_adapter=nullptr;
 static int context_threads=4;
 static int kv_bits=16;
+static std::string loaded_backend="unloaded";
+static int requested_layers=0;
+static void init_runtime(){
+    if(!initialized){llama_backend_init();initialized=true;}
+}
+static bool is_gpu(ggml_backend_dev_t d){
+    if(!d)return false;
+    auto type=ggml_backend_dev_type(d);
+    return type==GGML_BACKEND_DEVICE_TYPE_GPU||type==GGML_BACKEND_DEVICE_TYPE_IGPU;
+}
+static bool is_vulkan(ggml_backend_dev_t d){
+    if(!is_gpu(d))return false;
+    auto reg=ggml_backend_dev_backend_reg(d);
+    return reg&&std::strcmp(ggml_backend_reg_name(reg),"Vulkan")==0;
+}
+static ggml_backend_dev_t find_offload_device(const char *requested){
+    if(!requested||!*requested)return nullptr;
+    if(std::strcmp(requested,"Vulkan")==0){
+        for(size_t i=0;i<ggml_backend_dev_count();++i){
+            auto d=ggml_backend_dev_get(i);
+            if(is_vulkan(d))return d;
+        }
+        return nullptr;
+    }
+    auto d=ggml_backend_dev_by_name(requested);
+    return is_gpu(d)?d:nullptr;
+}
+static std::string safe_field(const char *value){
+    std::string out;
+    if(value)for(unsigned char c:std::string(value)){
+        if(c>=32&&c<=126&&c!='|'&&c!='\n')out+=static_cast<char>(c);
+        if(out.size()>=160)break;
+    }
+    return out;
+}
+// Runtime registration and memory budget are observations, not proof that
+// a particular inference graph actually ran on the GPU.
+extern "C" JNIEXPORT jstring JNICALL Java_com_asterion_control_OnDeviceLlm_nativeBackendReport(JNIEnv *env,jclass){
+    std::lock_guard<std::mutex> lock(guard);
+    init_runtime();
+    std::ostringstream report;
+    report<<"loaded|"<<loaded_backend<<"|"<<requested_layers<<"\n";
+    for(size_t i=0;i<ggml_backend_dev_count()&&i<32;++i){
+        auto d=ggml_backend_dev_get(i);
+        if(!d)continue;
+        auto reg=ggml_backend_dev_backend_reg(d);
+        size_t free=0,total=0;
+        ggml_backend_dev_memory(d,&free,&total);
+        report<<"device|"<<safe_field(reg?ggml_backend_reg_name(reg):"")<<"|"
+            <<safe_field(ggml_backend_dev_name(d))<<"|"<<safe_field(ggml_backend_dev_description(d))
+            <<"|"<<static_cast<int>(ggml_backend_dev_type(d))<<"|"<<free<<"|"<<total<<"\n";
+    }
+    return env->NewStringUTF(report.str().c_str());
+}
 
 static bool load_profile(const char *path,const char *adapter,const char *backend,int layers){
     std::lock_guard<std::mutex> lock(guard);
-    if(!initialized){llama_backend_init();initialized=true;}
+    init_runtime();
     llama_model_params params=llama_model_default_params();
     params.n_gpu_layers=layers;
     params.progress_callback=[](float,void *){return !cancel_generation.load();};
     ggml_backend_dev_t devices[2]={nullptr,nullptr};
     if(layers>0){
         if(!backend||!*backend)return false;
-        devices[0]=ggml_backend_dev_by_name(backend);
-        if(!devices[0]||ggml_backend_dev_type(devices[0])==GGML_BACKEND_DEVICE_TYPE_CPU)return false;
+        devices[0]=find_offload_device(backend);
+        if(!devices[0])return false;
         params.devices=devices;
     }
     llama_model *loaded=llama_model_load_from_file(path,params);
@@ -45,6 +101,8 @@ static bool load_profile(const char *path,const char *adapter,const char *backen
     if(model)llama_model_free(model);
     model=loaded;
     active_adapter=loaded_adapter;
+    loaded_backend=layers>0?safe_field(ggml_backend_dev_name(devices[0])):"CPU";
+    requested_layers=layers;
     model_loaded.store(true);
     return true;
 }
@@ -78,6 +136,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_asterion_control_OnDeviceLlm_nati
 extern "C" JNIEXPORT void JNICALL Java_com_asterion_control_OnDeviceLlm_nativeUnload(JNIEnv *,jclass){
     std::lock_guard<std::mutex> lock(guard);
     model_loaded.store(false);
+    loaded_backend="unloaded";requested_layers=0;
     if(active_adapter){llama_adapter_lora_free(active_adapter);active_adapter=nullptr;}
     if(model){llama_model_free(model);model=nullptr;}
 }
