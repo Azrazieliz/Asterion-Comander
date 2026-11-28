@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "distribution": "owner_import",
+  "source": "ggml-org/SmolVLM2-500M-Video-Instruct-GGUF@ccd7aae53bcb1997355c2f094959e72b3642ce17",
+  "base": {
+    "file": "SmolVLM2-500M-Video-Instruct-Q8_0.gguf",
+    "bytes": 436808704,
+    "sha256": "6f67b8036b2469fcd71728702720c6b51aebd759b78137a8120733b4d66438bc"
+  },
+  "projector": {
+    "file": "mmproj-SmolVLM2-500M-Video-Instruct-f16.gguf",
+    "bytes": 199470624,
+    "sha256": "b5dc8ebe7cbeab66a5369693960a52515d7824f13d4063ceca78431f2a6b59b0",
+    "base_sha256": "6f67b8036b2469fcd71728702720c6b51aebd759b78137a8120733b4d66438bc"
+  },
+  "context_tokens": 2048,
+  "max_new_tokens": 384,
+  "workspace_bytes": 805306368,
+  "max_image_side": 1024
+}
