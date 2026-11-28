@@ -31,6 +31,16 @@ public final class AssistantWorkspaceTest {
     }
     public static void main(String[] args) throws Exception {
         cancellationOwnership();
+        InferenceGate.Request request=new InferenceGate.Request();
+        equal(request.finishReason(),"unknown");
+        request.recordFinishReason("length_limit");equal(request.finishReason(),"length_limit");
+        AssistantConversation partial=new AssistantConversation();
+        long p=partial.begin("Provide a full explanation");
+        truth(partial.update(p,"First half of answer","truncated"));
+        partial.begin("Continue");
+        equal(partial.modelMessages().size(),3);
+        equal(partial.modelMessages().get(1).text,"First half of answer");
+        equal(partial.modelMessages().get(1).state,"truncated");
         String[] outputs={"<think>private deliberation</think>Public answer", "<analysis>hidden</analysis>Public answer", "<think>first<think>nested</think>hidden</think>Public answer", "<|channel|>analysis<|message|>private<|channel|>final<|message|>Public answer"};
         for(String raw:outputs){
             equal(AssistantOutput.visible(raw,true),"Public answer");
