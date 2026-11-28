@@ -1324,7 +1324,7 @@ public final class MainActivity extends Activity {
       try{
         VoiceDialogueService v=VoiceDialogueService.active;
         if(v==null){startVoiceQuestions();return;}
-        v.beginOwnerVoiceControl("en-US");
+        v.beginOwnerVoiceControl(VoiceLanguageSettings.locale(this));
         toast("Asterion is speaking; answer after the question");
       }catch(Exception e){toast("Voice: "+e.getMessage());}
     });
@@ -1339,6 +1339,8 @@ public final class MainActivity extends Activity {
     wide(voice,voiceStopAction);
     gap(voice,9);
     button(voice,"Voice assistant route","settings",false,this::showOwnerVoiceRoute);
+    gap(voice,9);
+    button(voice,"Voice language","settings",false,()->VoiceLanguageSettings.show(this,()->toast("Voice language saved")));
     gap(voice,9);button(voice,"Test speaker and microphone now","activity",false,this::testVoiceDialogue);
     gap(voice,8);voiceTestStatus=t("No local voice test performed in this session.",12,DesignSystem.MUTED,false);
     wide(voice,voiceTestStatus);
