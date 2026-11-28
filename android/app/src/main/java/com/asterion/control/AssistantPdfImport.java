@@ -41,10 +41,13 @@ final class AssistantPdfImport {
         if(name.isEmpty())name="Selected PDF";
         if(name.length()>100)name=name.substring(0,100);
         File temp=File.createTempFile("assistant-pdf-",".tmp",context.getCacheDir());
-        try{
+        try(ParcelFileDescriptor file=ParcelFileDescriptor.open(temp,ParcelFileDescriptor.MODE_READ_ONLY)){
             MessageDigest digest=MessageDigest.getInstance("SHA-256");long size=0;
-            try(InputStream in=context.getContentResolver().openInputStream(uri);
-                FileOutputStream out=new FileOutputStream(temp)){
+            try(FileOutputStream out=new FileOutputStream(temp);
+                InputStream in=context.getContentResolver().openInputStream(uri)){
+                // Keep only open descriptors. Even a crash after this point
+                // leaves no named plaintext PDF in the app cache.
+                if(!temp.delete())throw new IllegalStateException("pdf_temporary_unlink_failed");
                 if(in==null)throw new IllegalArgumentException("pdf_unreadable_or_encrypted");
                 byte[] buffer=new byte[65536];
                 for(int n;(n=in.read(buffer))!=-1;){
@@ -65,7 +68,7 @@ final class AssistantPdfImport {
                 }
                 return true;
             });
-            try(ParcelFileDescriptor file=ParcelFileDescriptor.open(temp,ParcelFileDescriptor.MODE_READ_ONLY)){
+            {
                 ServiceConnection connection=new ServiceConnection(){
                     @Override public void onServiceConnected(ComponentName n,IBinder binder){
                         try{
@@ -99,6 +102,6 @@ final class AssistantPdfImport {
                         (header+text).getBytes(StandardCharsets.UTF_8));
                 }finally{context.unbindService(connection);}
             }
-        }finally{if(!temp.delete()&&temp.exists())temp.deleteOnExit();}
+        }finally{if(temp.exists())temp.delete();}
     }
 }
