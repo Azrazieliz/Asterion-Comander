@@ -38,6 +38,41 @@ final class OnDeviceLlm {
     private static native boolean nativeLoadProfile(String file,String adapter,String backend,int layers);
     private static native void nativeConfigureContext(int threads,int kvBits);
     private static native boolean nativeReady();
+    private static native String nativeBackendReport();
+    private static volatile JSONObject cachedBackendReport;
+    private static JSONObject runtimeBackends() throws Exception{
+        if(!LIBRARY_LOADED)return new JSONObject().put("available",false).put("reason","native_library_missing");
+        if(GATE.busy()){
+            return cachedBackendReport==null?
+                new JSONObject().put("available",false).put("reason","inference_busy"):
+                new JSONObject(cachedBackendReport.toString()).put("cached_during_inference",true);
+        }
+        try{
+            String raw=nativeBackendReport();
+            org.json.JSONArray devices=new org.json.JSONArray();
+            JSONObject result=new JSONObject().put("available",true).put("devices",devices)
+                .put("observed_at_ms",System.currentTimeMillis()).put("gpu_execution_verified",false);
+            boolean vulkan=false;
+            for(String line:raw.split("\\n")){
+                String[] fields=line.split("\\|",-1);
+                if(fields.length==3&&fields[0].equals("loaded")){
+                    result.put("loaded_device",fields[1]).put("requested_offload_layers",Integer.parseInt(fields[2]));
+                }else if(fields.length==7&&fields[0].equals("device")){
+                    int type=Integer.parseInt(fields[4]);
+                    devices.put(new JSONObject().put("backend",fields[1]).put("device",fields[2])
+                        .put("description",fields[3]).put("device_type",type)
+                        .put("reported_free_bytes",Long.parseLong(fields[5]))
+                        .put("reported_total_bytes",Long.parseLong(fields[6])));
+                    vulkan|=fields[1].equals("Vulkan")&&(type==1||type==2);
+                }
+            }
+            result.put("vulkan_gpu_registered",vulkan);
+            cachedBackendReport=new JSONObject(result.toString());
+            return result;
+        }catch(Exception|LinkageError failure){
+            return new JSONObject().put("available",false).put("reason",failure.getClass().getSimpleName());
+        }
+    }
     private static native byte[] nativeGenerate(byte[] systemText,String[] roles,byte[][] content,
         int maxTokens,int contextTokens,NativeStream stream,byte[][] references);
     interface Stream {
@@ -91,6 +126,7 @@ final class OnDeviceLlm {
             .put("weight_precision",profile.precision)
             .put("configured_backend",profile.backendDevice.isEmpty()?"CPU":profile.backendDevice)
             .put("configured_offload_layers",profile.offloadLayers)
+            .put("native_backend_report",runtimeBackends())
             .put("configured_kv_bits",profile.kvBits)
             .put("configured_adapter_sha256",profile.adapterSha256)
             .put("device_resources",new OnDeviceModelResources(context).status(context))
