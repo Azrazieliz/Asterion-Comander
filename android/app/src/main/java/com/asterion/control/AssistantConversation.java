@@ -69,7 +69,7 @@ final class AssistantConversation {
             if(m.role.equals("user")){
                 if(i==messages.size()-2&&running()){out.add(m);break;}
                 if(i+1<messages.size()&&messages.get(i+1).role.equals("assistant")&&
-                    messages.get(i+1).state.equals("completed")){
+                    (messages.get(i+1).state.equals("completed")||messages.get(i+1).state.equals("truncated"))){
                     out.add(m);out.add(messages.get(++i));
                 }
             }
