@@ -7,7 +7,7 @@ import java.math.RoundingMode;
 /** A pure, bounded local arithmetic tool. Model text is only data, never code. */
 final class AssistantCalculator {
     static final String FENCE="asterion_calculation";
-    static final String GUIDANCE="When actual arithmetic is needed, request the local calculator by one complete fenced asterion_calculation block containing exactly expression|EXPRESSION. Use decimal numbers, parentheses, + - * / % and ^ with integer exponent from -100 to 100. Do not invent the computed value; the local tool will append its actual result.";
+    static final String GUIDANCE="When actual arithmetic is needed, request the local calculator by one complete fenced asterion_calculation block containing exactly expression|EXPRESSION. Use decimal numbers, parentheses, + - * / % and ^ with integer exponent from -100 to 100. Do not invent the computed value; the local tool will return its actual result for a bounded follow-up reasoning pass.";
     private static final MathContext MC=new MathContext(34,RoundingMode.HALF_EVEN);
     private final String input;
     private int index,depth,operations;
@@ -79,17 +79,37 @@ final class AssistantCalculator {
         if(digits==0||digits>64)throw new IllegalArgumentException("invalid_decimal");
         return bounded(new BigDecimal(input.substring(start,index),MC));
     }
-    static String attachResult(String response){
+    static final class Receipt {
+        final String expression,value,error;
+        Receipt(String expression,String value,String error){
+            this.expression=expression;this.value=value;this.error=error;
+        }
+        boolean ok(){return error.isEmpty();}
+        String reference(){
+            if(!ok())throw new IllegalStateException("calculator_result_not_verified");
+            return "Verified local calculator execution: "+expression+" = "+value+
+                ". Use this exact arithmetic result when answering the original request. "+
+                "No additional calculator execution is authorized in this reasoning pass.";
+        }
+        String render(){
+            return ok()?"\n\n**Local calculator result:** "+value+"\n":
+                "\n\nLocal calculator: "+error+".";
+        }
+    }
+    static Receipt evaluate(String response){
         String body=AssistantStructured.singleBlock(response,FENCE);
-        if(body==null)return response;
+        if(body==null)return null;
         String line=body.strip();
         if(!line.startsWith("expression|")||line.indexOf('\n')>=0||line.indexOf('\r')>=0)
-            return response+"\n\nLocal calculator: invalid expression request; no result.";
+            return new Receipt("","","invalid expression request; no result");
         String expression=line.substring("expression|".length()).strip();
-        try{
-            return response+"\n\n**Local calculator result:** "+calculate(expression)+"\n";
-        }catch(IllegalArgumentException|ArithmeticException invalid){
-            return response+"\n\nLocal calculator: expression could not be evaluated within its supported arithmetic bounds.";
+        try{return new Receipt(expression,calculate(expression),"");}
+        catch(IllegalArgumentException|ArithmeticException invalid){
+            return new Receipt("","","expression could not be evaluated within its supported arithmetic bounds");
         }
+    }
+    static String attachResult(String response){
+        Receipt receipt=evaluate(response);
+        return receipt==null?response:response+receipt.render();
     }
 }
