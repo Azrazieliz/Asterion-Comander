@@ -40,6 +40,7 @@ public final class AssistantActivity extends Activity {
     private boolean speechReady=false;
     private String draft="";
     private long drawnRevision=-1;
+    private String drawnConversation="";
     private boolean drawnRunning=false;
     private int drawnCount=-1;
     private LinearLayout liveAnswer;
@@ -144,7 +145,7 @@ public final class AssistantActivity extends Activity {
         send.setEnabled(!session.busy()||c.running()||session.importingModel());
         status.setText(!session.persistenceIssue.isEmpty()?session.persistenceIssue:session.status);
         boolean atBottom=transcript.getChildCount()==0||body.getHeight()-transcript.getScrollY()-transcript.getHeight()<dp(120);
-        boolean rebuild=drawnRevision!=c.revision||drawnCount!=c.messages.size()||drawnRunning!=c.running();
+        boolean rebuild=!drawnConversation.equals(c.id)||drawnRevision!=c.revision||drawnCount!=c.messages.size()||drawnRunning!=c.running();
         if(rebuild){
             body.removeAllViews();liveAnswer=null;liveText="";
             if(c.messages.isEmpty()){
@@ -196,11 +197,11 @@ public final class AssistantActivity extends Activity {
                     if(m.actionRecord!=null)turn.addView(label(m.actionRecord.evidence(),12,muted,false));
                     if(m.omittedContextMessages>0)turn.addView(label(m.omittedContextMessages+" earlier messages remain in history outside this response's context",12,muted,false));
                     if(m.omittedReferenceBlocks>0)turn.addView(label(m.omittedReferenceBlocks+" retrieved reference blocks did not fit this response",12,muted,false));
-                    if(!m.state.equals("completed"))turn.addView(label(m.state.equals("cancelled")?"Stopped":m.state.equals("interrupted")?"Interrupted · response incomplete":"Response incomplete",12,muted,false));
+                    if(!m.state.equals("completed"))turn.addView(label(m.state.equals("cancelled")?"Stopped":m.state.equals("interrupted")?"Interrupted · response incomplete":m.state.equals("truncated")?"Incomplete answer · Continue to extend":"Response incomplete",12,muted,false));
                 }
                 LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.topMargin=dp(14);body.addView(turn,p);
             }
-            drawnRevision=c.revision;drawnCount=c.messages.size();drawnRunning=c.running();
+            drawnConversation=c.id;drawnRevision=c.revision;drawnCount=c.messages.size();drawnRunning=c.running();
         }else if(liveAnswer!=null&&c.running()){
             String current=c.messages.get(c.messages.size()-1).text;
             if(!current.equals(liveText)){liveAnswer.removeAllViews();AssistantMarkdown.render(this,liveAnswer,current,text,muted,panel);liveText=current;}
