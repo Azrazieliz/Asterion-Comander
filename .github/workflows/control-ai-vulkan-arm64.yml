@@ -1,7 +1,7 @@
 name: Control native ARM64 Vulkan backend
 on:
   push:
-    branches: [ai-candidate/vulkan-native-20261128]
+    branches: [ai-candidate/vulkan-native-20261128, ai-candidate/applied-agent-integration-20261128]
     paths:
       - '.github/workflows/control-ai-vulkan-arm64.yml'
   workflow_dispatch:
