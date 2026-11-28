@@ -332,6 +332,11 @@ final class OnDeviceLlm {
         return generate(context,project,messages,listener,request,null);
     }
     static String generate(Context context,String project,List<AssistantConversation.Message> messages,Stream listener,InferenceGate.Request request,AssistantResearchSelection research) throws Exception {
+        return generate(context,project,messages,listener,request,research,"");
+    }
+    static String generate(Context context,String project,List<AssistantConversation.Message> messages,Stream listener,InferenceGate.Request request,AssistantResearchSelection research,String responseLocale) throws Exception {
+        if(responseLocale==null)throw new IllegalArgumentException("invalid_response_locale");
+        if(!responseLocale.isEmpty())VoiceReplyPolicy.canonicalLocale(responseLocale);
         if(research!=null&&(listener==null||!BrowserResearchText.PROJECT.equals(project)))
             throw new IllegalArgumentException("research_scope_mismatch");
         OnDeviceModelProfile profile=OnDeviceModelProfile.read(context);
@@ -359,6 +364,9 @@ final class OnDeviceLlm {
             try{recalled=ControlAssistantMemory.relevant(context,userPrompt,project);}
             catch(Exception unavailable){recalled="Local persistent memory unavailable for this turn.";}
             String guidance=ControlAssistantPreferences.promptGuidance(context);
+            guidance+="\nAnswer in the language of the current user request unless the user explicitly requests another language.";
+            if(!responseLocale.isEmpty())guidance+="\nThis is a spoken turn recognized in "+VoiceReplyPolicy.canonicalLocale(responseLocale)+
+                ". Use that language for the response unless the user requests translation or another response language.";
             guidance+="\nRuntime identity: You are the assistant embedded in the native Asterion Control Android application. "
                 +"This turn runs on this phone. Available operations are limited to the verified capability context. "
                 +"An operation requires a typed request and a separate execution receipt; answer text never executes code. "
