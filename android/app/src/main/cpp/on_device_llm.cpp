@@ -25,6 +25,7 @@ extern "C" JNIEXPORT void JNICALL Java_com_asterion_control_OnDeviceLlm_nativeRe
 static llama_adapter_lora *active_adapter=nullptr;
 static int context_threads=4;
 static int kv_bits=16;
+static int prefill_batch=512,prefill_microbatch=256;
 static std::string loaded_backend="unloaded";
 static int requested_layers=0;
 static void init_runtime(){
@@ -187,10 +188,12 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_asterion_control_OnDeviceLlm_nati
     return ok?JNI_TRUE:JNI_FALSE;
 }
 extern "C" JNIEXPORT void JNICALL Java_com_asterion_control_OnDeviceLlm_nativeConfigureContext(
-    JNIEnv *,jclass,jint threads,jint bits){
+    JNIEnv *,jclass,jint threads,jint bits,jint batch,jint microbatch){
     std::lock_guard<std::mutex> lock(guard);
     context_threads=std::clamp(static_cast<int>(threads),1,8);
     kv_bits=bits==8?8:16;
+    prefill_batch=std::clamp(static_cast<int>(batch),32,512);
+    prefill_microbatch=std::clamp(static_cast<int>(microbatch),32,prefill_batch);
 }
 extern "C" JNIEXPORT jboolean JNICALL Java_com_asterion_control_OnDeviceLlm_nativeReady(JNIEnv *,jclass){return model_loaded.load()?JNI_TRUE:JNI_FALSE;}
 extern "C" JNIEXPORT void JNICALL Java_com_asterion_control_OnDeviceLlm_nativeUnload(JNIEnv *,jclass){
@@ -280,8 +283,9 @@ extern "C" JNIEXPORT jbyteArray JNICALL Java_com_asterion_control_OnDeviceLlm_na
     int omitted=packed.first_message;
     jclass cls=env->GetObjectClass(stream);
     jmethodID started=env->GetMethodID(cls,"onStart","(ZIII)V"),token=env->GetMethodID(cls,"onToken","([B)V");
+    jmethodID finished=env->GetMethodID(cls,"onFinish","(ZI)V");
     env->DeleteLocalRef(cls);
-    if(!started||!token||env->ExceptionCheck())return nullptr;
+    if(!started||!token||!finished||env->ExceptionCheck())return nullptr;
     size_t end=prompt.find_last_not_of(" \n\r\t");
     // Only a template-opened assistant suffix implies an initial reasoning
     // channel. A literal marker in a user's earlier message is not that suffix.
@@ -289,7 +293,7 @@ extern "C" JNIEXPORT jbyteArray JNICALL Java_com_asterion_control_OnDeviceLlm_na
     env->CallVoidMethod(stream,started,static_cast<jboolean>(thinking),static_cast<jint>(tokens.size()),omitted,packed.omitted_blocks);
     if(env->ExceptionCheck())return nullptr;
     llama_context_params cp=llama_context_default_params();
-    cp.n_ctx=context_limit;cp.n_batch=512;cp.n_ubatch=256;cp.n_threads=context_threads;cp.n_threads_batch=context_threads;
+    cp.n_ctx=context_limit;cp.n_batch=prefill_batch;cp.n_ubatch=prefill_microbatch;cp.n_threads=context_threads;cp.n_threads_batch=context_threads;
     if(kv_bits==8){
         cp.type_k=GGML_TYPE_Q8_0;
         cp.type_v=GGML_TYPE_Q8_0;
@@ -311,22 +315,23 @@ extern "C" JNIEXPORT jbyteArray JNICALL Java_com_asterion_control_OnDeviceLlm_na
     llama_batch_ext *batch=llama_batch_ext_init(ctx);
     if(!batch){llama_sampler_free(sampler);llama_free(ctx);return nullptr;}
     bool ok=true;int pos=0;
-    for(int start=0;start<static_cast<int>(tokens.size());start+=256){
+    for(int start=0;start<static_cast<int>(tokens.size());start+=prefill_microbatch){
         if(cancel_generation.load()){ok=false;break;}
-        int n=std::min(256,static_cast<int>(tokens.size())-start);
+        int n=std::min(prefill_microbatch,static_cast<int>(tokens.size())-start);
         batch_tokens(batch,tokens.data()+start,n,start);
         if(llama_process(ctx,LLAMA_PROCESS_TYPE_DECODE,batch)!=0){ok=false;break;}pos+=n;
     }
     std::string answer;
+    bool reached_eog=false;int generated=0;
     for(int i=0;ok&&i<limit;i++){
         if(cancel_generation.load()){ok=false;break;}
         llama_token next=llama_sampler_sample(sampler,ctx,-1);
-        if(llama_vocab_is_eog(vocab,next))break;
+        if(llama_vocab_is_eog(vocab,next)){reached_eog=true;break;}
         std::vector<char> piece(1024);
         int n=llama_token_to_piece(vocab,next,piece.data(),piece.size(),0,true);
         if(n<0){piece.resize(-n);n=llama_token_to_piece(vocab,next,piece.data(),piece.size(),0,true);}
         if(n<0||n>65536||answer.size()+n>262144){ok=false;break;}
-        answer.append(piece.data(),n);
+        answer.append(piece.data(),n);generated++;
         jbyteArray bytes=env->NewByteArray(n);if(!bytes){ok=false;break;}
         env->SetByteArrayRegion(bytes,0,n,reinterpret_cast<jbyte *>(piece.data()));
         env->CallVoidMethod(stream,token,bytes);env->DeleteLocalRef(bytes);
@@ -336,6 +341,8 @@ extern "C" JNIEXPORT jbyteArray JNICALL Java_com_asterion_control_OnDeviceLlm_na
     }
     llama_batch_ext_free(batch);llama_sampler_free(sampler);llama_free(ctx);
     if(!ok)return nullptr;
+    env->CallVoidMethod(stream,finished,static_cast<jboolean>(reached_eog),static_cast<jint>(generated));
+    if(env->ExceptionCheck())return nullptr;
     jbyteArray bytes=env->NewByteArray(answer.size());
     if(bytes)env->SetByteArrayRegion(bytes,0,answer.size(),reinterpret_cast<const jbyte *>(answer.data()));
     return bytes;
