@@ -163,7 +163,7 @@ public final class AssistantActivity extends Activity {
                 TextView role=label(m.role.equals("user")?"You":"Asterion",12,muted,true);turn.addView(role);
                 LinearLayout answer=DesignSystem.vertical(this);turn.addView(answer);
                 if(m.state.equals("running")){liveAnswer=answer;liveText=m.text;}
-                if(m.role.equals("assistant")&&m.state.equals("completed"))
+                if(m.role.equals("assistant")&&m.state.equals("completed")&&!m.visual)
                     AssistantMarkdown.render(this,answer,m.text,text,muted,panel,selection->submitSelection(c,m,selection),this::exportArtifact);
                 else AssistantMarkdown.render(this,answer,m.text,text,muted,panel);
                 if(!m.state.equals("running")){
@@ -172,7 +172,10 @@ public final class AssistantActivity extends Activity {
                     if(m.role.equals("user"))tools.addView(control("Edit",()->edit(index)));
                     else{
                         tools.addView(control("Read",()->readAnswer(m)));
-                        if(i==c.messages.size()-1){
+                        if(m.visual){
+                            if(!m.visualEvidence.isBlank())turn.addView(label(m.visualEvidence,12,muted,false));
+                            tools.addView(control("Analyze image again",this::chooseImage));
+                        }else if(i==c.messages.size()-1){
                             turn.addView(tools);tools=DesignSystem.horizontal(this);
                             tools.addView(control("Retry",this::retry));
                             tools.addView(control("Continue",()->{if(idle())session.send(this,"Continue the previous answer from where it ended, avoiding repetition.");}));
@@ -180,12 +183,12 @@ public final class AssistantActivity extends Activity {
                         if(m.actionRecord!=null){
                             tools.addView(control("Check receipt",()->session.recheck(this,c,m)));
                              tools.addView(control("Interpret receipt",()->interpretReceipt(c,m)));
-                        }else try{JSONObject proposal=m.state.equals("completed")?AssistantCapabilities.proposal(m.text):null;if(proposal!=null)tools.addView(control("Review action",()->reviewAction(c,m,proposal)));}catch(Exception ignored){}
-                        if(m.state.equals("completed"))try{
+                        }else if(!m.visual)try{JSONObject proposal=m.state.equals("completed")?AssistantCapabilities.proposal(m.text):null;if(proposal!=null)tools.addView(control("Review action",()->reviewAction(c,m,proposal)));}catch(Exception ignored){}
+                        if(!m.visual&&m.state.equals("completed"))try{
                             String query=AssistantResearchPlan.parse(m.text);
                             if(query!=null)tools.addView(control("Review search",()->reviewResearch(c,m,query)));
                         }catch(IllegalArgumentException ignored){}
-                        if(m.state.equals("completed"))try{
+                        if(!m.visual&&m.state.equals("completed"))try{
                             AssistantSchedulePlan schedule=AssistantSchedulePlan.parse(m.text);
                             if(schedule!=null)tools.addView(control("Review schedule",()->{
                                 if(idle()&&session.conversation==c&&c.messages.contains(m))
@@ -197,7 +200,7 @@ public final class AssistantActivity extends Activity {
                     if(m.actionRecord!=null)turn.addView(label(m.actionRecord.evidence(),12,muted,false));
                     if(m.omittedContextMessages>0)turn.addView(label(m.omittedContextMessages+" earlier messages remain in history outside this response's context",12,muted,false));
                     if(m.omittedReferenceBlocks>0)turn.addView(label(m.omittedReferenceBlocks+" retrieved reference blocks did not fit this response",12,muted,false));
-                    if(!m.state.equals("completed"))turn.addView(label(m.state.equals("cancelled")?"Stopped":m.state.equals("interrupted")?"Interrupted · response incomplete":m.state.equals("truncated")?"Incomplete answer · Continue to extend":"Response incomplete",12,muted,false));
+                    if(!m.state.equals("completed"))turn.addView(label(m.state.equals("cancelled")?"Stopped":m.state.equals("interrupted")?"Interrupted · response incomplete":m.state.equals("truncated")?(m.visual?"Incomplete visual answer · reattach image":"Incomplete answer · Continue to extend"):"Response incomplete",12,muted,false));
                 }
                 LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.topMargin=dp(14);body.addView(turn,p);
             }
@@ -278,13 +281,14 @@ public final class AssistantActivity extends Activity {
     }
     private void deleteConversation(){if(!idle())return;AssistantConversation original=session.conversation;new AlertDialog.Builder(this).setTitle("Delete this conversation?").setMessage("Saved memories remain under Memory controls.").setNegativeButton("Cancel",null).setPositiveButton("Delete",(d,w)->{if(!idle()||session.conversation!=original)return;ControlAssistantMemory.deleteConversation(this,session.conversation.id);session.conversation=new AssistantConversation();session.status="";render();}).show();}
     private void modelSettings(){
-        String[] modes={"Fast","Balanced","Deep","Memory and assistant settings","Installed model details","Import signed model files","GPU acceleration","Voice language"};
+        String[] modes={"Fast","Balanced","Deep","Memory and assistant settings","Installed model details","Import signed model files","GPU acceleration","Voice language","Visual model files"};
         new AlertDialog.Builder(this).setTitle("Model and reasoning").setItems(modes,(d,index)->{
             if(index<3){ControlAssistantPreferences.save(this,new String[]{"fast","balanced","deep"}[index],ControlAssistantPreferences.guidance(this));render();}
             else if(index==3){startActivity(new Intent(this,MainActivity.class).putExtra("assistant_settings",true));}
             else if(index==5){chooseModelArtifact();}
             else if(index==6){showAcceleration();}
             else if(index==7){VoiceLanguageSettings.show(this,()->notice("Voice language saved"));}
+            else if(index==8){chooseVisionArtifact();}
             else session.work.execute(()->{try{JSONObject p=OnDeviceLlm.status(this);runOnUiThread(()->new AlertDialog.Builder(this).setTitle("Installed model").setMessage(p.optString("model_name")+"\n"+(p.optBoolean("model_loaded")?"Loaded":"Not loaded")+"\nContext: "+p.optInt("model_context_tokens")+" tokens\n"+p.optString("model_source")).setPositiveButton("Close",null).show());}catch(Exception e){runOnUiThread(()->notice("Model details unavailable."));}});
         }).setNegativeButton("Close",null).show();
     }
@@ -427,12 +431,43 @@ public final class AssistantActivity extends Activity {
             startActivityForResult(intent,212);
         }catch(Exception unavailable){session.pendingArtifact=null;notice("No document provider is available for this file.");}
     }
+    private void chooseVisionArtifact(){
+        if(!idle())return;
+        try{
+            OnDeviceVisionProfile profile=OnDeviceVisionProfile.read(this);
+            if(!OnDeviceLlm.hasNativeVision()){notice("Native visual engine unavailable in this build.");return;}
+            if(!profile.external){notice("Visual model and projector are supplied by the signed APK.");return;}
+            new AlertDialog.Builder(this).setTitle("Import signed visual model files")
+                .setItems(new String[]{"Visual model · "+profile.base.file,"Visual projector · "+profile.projector.file},(d,i)->{
+                    if(!idle())return;
+                    try{
+                        Intent picker=new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*")
+                            .addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_ALLOW_MULTIPLE,true);
+                        startActivityForResult(picker,217+i);
+                    }catch(Exception unavailable){notice("Document provider unavailable.");}
+                }).setNegativeButton("Cancel",null).show();
+        }catch(Exception missing){notice("No signed visual model profile in this release.");}
+    }
+    private void chooseImage(){
+        if(!idle())return;
+        try{
+            OnDeviceVisionProfile.read(this);
+            if(!OnDeviceLlm.hasNativeVision()){notice("Native visual engine unavailable.");return;}
+            if(session.conversation.researchSelection!=null){
+                notice("Open a new conversation for visual analysis; selected browser captures are not read by the visual model.");return;
+            }
+            pendingSourceProject=session.conversation.id;
+            startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("image/*")
+                .addCategory(Intent.CATEGORY_OPENABLE),219);
+        }catch(Exception unavailable){pendingSourceProject=null;notice("Signed visual profile or image picker unavailable.");}
+    }
     private void attach(){
         if(!idle())return;
         new AlertDialog.Builder(this).setTitle("Attach or manage project sources")
-            .setItems(new String[]{"Attach small text to next message","Import searchable project text (up to 2 MiB)","Manage imported project sources","Import PDF text by page range"},(dialog,which)->{
+            .setItems(new String[]{"Attach small text to next message","Import searchable project text (up to 2 MiB)","Manage imported project sources","Import PDF text by page range","Analyze a selected image locally"},(dialog,which)->{
                 if(!idle())return;
                 if(which==2){showProjectSources(session.conversation.project);return;}
+                if(which==4){chooseImage();return;}
                 if(which==3){
                     if(android.os.Build.VERSION.SDK_INT<35){notice("PDF text extraction requires Android 15 or newer.");return;}
                     pendingSourceProject=session.conversation.project;
@@ -477,7 +512,28 @@ public final class AssistantActivity extends Activity {
         });
     }
     @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);
-        if(request==215||request==216){
+        if(request==219){
+            String conversationId=pendingSourceProject;pendingSourceProject=null;
+            if(result!=RESULT_OK||data==null||data.getData()==null||!idle()||
+                conversationId==null||!conversationId.equals(session.conversation.id))return;
+            android.net.Uri uri=data.getData();
+            if(!"content".equals(uri.getScheme())){notice("Document provider required.");return;}
+            EditText question=new EditText(this);question.setText(composer.getText().toString().strip());
+            if(question.length()==0)question.setText("Describe the image and answer what can be determined from it.");
+            LinearLayout fields=DesignSystem.vertical(this);fields.setPadding(dp(20),dp(10),dp(20),dp(10));
+            fields.addView(label("Actual decoded image pixels will be analyzed on this phone by the signed visual model. The image is resized to its budget; no pixel copy is kept in chat history. Model observations may be wrong.",14,muted,false));
+            fields.addView(question);
+            new AlertDialog.Builder(this).setTitle("Ask about the selected image").setView(fields)
+                .setPositiveButton("Analyze locally",(d,w)->{
+                    String prompt=question.getText().toString().strip();
+                    if(!idle()||!conversationId.equals(session.conversation.id))return;
+                    if(prompt.isBlank()||prompt.getBytes(StandardCharsets.UTF_8).length>8192){notice("Enter a question up to 8192 UTF-8 bytes.");return;}
+                    if(composer.getText().toString().strip().equals(prompt))composer.setText("");
+                    session.sendImage(this,prompt,uri);
+                }).setNegativeButton("Cancel",null).show();
+            return;
+        }
+        if(request==215||request==216||request==217||request==218){
             if(result!=RESULT_OK||data==null||!idle())return;
             java.util.ArrayList<android.net.Uri> documents=new java.util.ArrayList<>();
             ClipData clips=data.getClipData();
@@ -486,10 +542,13 @@ public final class AssistantActivity extends Activity {
                 for(int i=0;i<clips.getItemCount();i++)documents.add(clips.getItemAt(i).getUri());
             }else if(data.getData()!=null)documents.add(data.getData());
             if(documents.isEmpty())return;
-            boolean adapter=request==216;
-            new AlertDialog.Builder(this).setTitle(adapter?"Import verified adapter":"Import verified base model")
+            boolean vision=request>=217,adapter=request==216||request==218;
+            new AlertDialog.Builder(this).setTitle(vision?(adapter?"Import verified visual projector":"Import verified visual model"):(adapter?"Import verified adapter":"Import verified base model"))
                 .setMessage("Import "+documents.size()+" selected document(s) and verify the assembled bytes against the signed profile? The originals are not changed.")
-                .setPositiveButton("Import",(d,w)->{if(idle())session.importModel(this,documents,adapter);})
+                .setPositiveButton("Import",(d,w)->{if(idle()){
+                    if(vision)session.importVisionModel(this,documents,adapter);
+                    else session.importModel(this,documents,adapter);
+                }})
                 .setNegativeButton("Cancel",null).show();
             return;
         }
