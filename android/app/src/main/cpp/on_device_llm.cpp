@@ -120,7 +120,8 @@ extern "C" JNIEXPORT jbyteArray JNICALL Java_com_asterion_control_OnDeviceLlm_na
     std::string prompt;std::vector<llama_token> tokens;
     std::vector<std::string> references;
     int referenceCount=env->GetArrayLength(jreferences);
-    if(referenceCount>8)return nullptr;
+    // Java may provide four receipts plus six independently bounded source blocks.
+    if(referenceCount>12)return nullptr;
     for(int i=0;i<referenceCount;i++){
         auto item=static_cast<jbyteArray>(env->GetObjectArrayElement(jreferences,i));
         std::string value;

@@ -1,0 +1,118 @@
+name: Control mobile 7B direct BF16 to Q4 candidate
+on:
+  push:
+    branches: [ai-candidate/native-runtime-recovery-20261128]
+    paths:
+      - '.github/workflows/control-ai-mobile-pack-build.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+env:
+  HF_HUB_DISABLE_IMPLICIT_TOKEN: '1'
+  HF_HUB_DISABLE_TELEMETRY: '1'
+  TOKENIZERS_PARALLELISM: 'false'
+  OMP_NUM_THREADS: '4'
+jobs:
+  native-candidate:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Reclaim only disposable runner toolchains for model conversion
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup
+          df -h .
+          free -h
+      - uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          ref: 4b77dee0524c64b8471869232e2958bd9589607d
+          path: runtime
+          persist-credentials: false
+      - name: Restore exact verified parent and successful native adapter
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl --fail --silent --show-error --location --retry 2 -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "${{ github.api_url }}/repos/${{ github.repository }}/actions/artifacts/15230982528/zip" --output retained.zip
+          curl --fail --silent --show-error --location --retry 2 -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "${{ github.api_url }}/repos/${{ github.repository }}/actions/artifacts/15238113288/zip" --output native.zip
+          echo '964e0da062daf5b74458b4366732d9ee233a25973920d34634d5f17756e91b42  retained.zip' | sha256sum -c -
+          echo 'c6c1495276404e5ba53c7e45564afc362d979bcc964ab68c709f247a82f740b0  native.zip' | sha256sum -c -
+          python -m pip install huggingface-hub==0.34.4
+          python -m scripts.control_ai_retained_candidate retained.zip retained
+          python - <<'PY'
+          from zipfile import ZipFile
+          from pathlib import Path
+          with ZipFile("native.zip") as source:
+              dest=Path("native-parent");dest.mkdir()
+              for filename in ("native-adapter.json","control-adapter-f16.gguf"):
+                  matches=[name for name in source.namelist() if name.split("/")[-1]==filename]
+                  assert len(matches)==1, filename
+                  (dest/filename).write_bytes(source.read(matches[0]))
+          PY
+      - name: Install pinned converter and compile native generation executable
+        run: |
+          python -m pip install -r runtime/requirements/requirements-convert_hf_to_gguf.txt
+          python -m pip install ./runtime/gguf-py
+          cmake -S runtime -B runtime-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DGGML_NATIVE=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_SERVER=OFF -DLLAMA_CURL=OFF -DLLAMA_OPENSSL=OFF
+          cmake --build runtime-build --target llama-completion llama-quantize -j 4
+      - name: Convert exact original BF16 foundation to Q4_K_M and bind learned adapter
+        run: |
+          python -m scripts.control_ai_model_pack build --output measured-pack --runtime runtime --training-metadata retained/base --native-adapter native-parent --precision q4_k_m --quantizer runtime-build/bin/llama-quantize
+      - name: Run real native generations from base and learned adapter on the same prompts
+        timeout-minutes: 20
+        run: |
+          mkdir -p native-evidence
+          cp measured-pack/pack/*.json native-evidence/
+          sha256sum runtime-build/bin/llama-completion > native-evidence/native-executable.sha256
+          MODEL="$(find measured-pack/pack -name '*Q4_K_M.gguf' -type f)"
+          ADAPTER="measured-pack/pack/Asterion-OLMo3-7B-adapter.gguf"
+          # Use the exact source tokenizer template in its no-external-tools
+          # mode, not the CLI's tool-parser auto-discovery.
+          python - <<'PY'
+          from transformers import AutoTokenizer
+          from pathlib import Path
+          import hashlib,json
+          tok=AutoTokenizer.from_pretrained("measured-pack/source",local_files_only=True,trust_remote_code=False)
+          cases=["A file has an expected digest but the destination has not been read. Can integrity be verified? Explain briefly.",
+                 "A train travels 72 kilometres in 90 minutes. What is its average speed in kilometres per hour?"]
+          out=Path("native-evidence")
+          for i,query in enumerate(cases,1):
+              prompt=tok.apply_chat_template([{"role":"system","content":"You are Asterion Control. Answer accurately and concisely."},{"role":"user","content":query}],tokenize=False,add_generation_prompt=True,tools=None)
+              assert prompt.endswith("<|im_start|>assistant\n"), "unexpected assistant boundary"
+              assert prompt.count("<|im_start|>")==3 and prompt.count("<|im_end|>")==2
+              (out/f"prompt-{i}.txt").write_text(prompt,encoding="utf-8")
+          PY
+          for variant in base adapted; do
+            extra=()
+            if [ "$variant" = adapted ]; then extra=(--lora "$ADAPTER"); fi
+            for case in 1 2; do
+              /usr/bin/time -v -o "native-evidence/${variant}-${case}.resources" runtime-build/bin/llama-completion -m "$MODEL" "${extra[@]}" --no-conversation --no-display-prompt --no-warmup --temp 0 -c 1024 -n 64 -ngl 0 -t 4 -f "native-evidence/prompt-${case}.txt" > "native-evidence/${variant}-${case}.txt" 2> "native-evidence/${variant}-${case}.log"
+              test -s "native-evidence/${variant}-${case}.txt"
+            done
+          done
+          python - <<'PY'
+          import json,hashlib
+          from pathlib import Path
+          root=Path("native-evidence")
+          report={"native_generation_executed":True,"variant_count":2,"cases_per_variant":2,"native_device":"runner_cpu","production_promoted":False,"phone_verified":False,"quality_certified":False}
+          report["output_sha256"]={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in root.glob("*.txt") if not p.name.startswith("prompt-")}
+          (root/"native-generation.json").write_text(json.dumps(report,indent=2)+"\n")
+          PY
+      - name: Retain small exact native build evidence only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-7b-q4-evidence
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            measured-pack/pack/*.json
+            native-evidence/
+            native-parent/native-adapter.json

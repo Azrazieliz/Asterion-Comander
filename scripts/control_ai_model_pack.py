@@ -84,7 +84,7 @@ def split_file(source,destination,expected):
         raise
     return parts
 
-def build(root,runtime,training_metadata,native_adapter,precision="q8_0"):
+def build(root,runtime,training_metadata,native_adapter,precision="q8_0",quantizer=None):
     from huggingface_hub import HfApi,snapshot_download
     root=Path(root).resolve()
     root.mkdir(parents=True,exist_ok=False)
@@ -107,7 +107,9 @@ def build(root,runtime,training_metadata,native_adapter,precision="q8_0"):
     if not weights or any(not x.size or not x.lfs or not x.lfs.sha256 for x in weights):
         raise ValueError("original_foundation_weight_inventory_missing")
     size=sum(x.size for x in weights)
-    if shutil.disk_usage(root).free<2*size+(2<<30):
+    quantized=precision=="q4_k_m"
+    if quantized and quantizer is None:raise ValueError("pinned_native_quantizer_required")
+    if shutil.disk_usage(root).free<2*size+((8 if quantized else 2)<<30):
         raise RuntimeError("native_conversion_disk_budget_not_met")
     base=Path(snapshot_download(ORIGINAL_MODEL,revision=ORIGINAL_REVISION,token=False,local_dir=root/"source",
         allow_patterns=["*.safetensors","*.json","*.model","*.jinja","*.txt","README.md","LICENSE*"]))
@@ -120,8 +122,22 @@ def build(root,runtime,training_metadata,native_adapter,precision="q8_0"):
     pack=root/"pack";pack.mkdir()
     model=pack/("Asterion-OLMo3-7B-"+precision.upper()+".gguf")
     env=dict(os.environ,HF_HUB_OFFLINE="1",TRANSFORMERS_OFFLINE="1",HF_HUB_DISABLE_IMPLICIT_TOKEN="1")
-    subprocess.run([sys.executable,str(runtime/"convert_hf_to_gguf.py"),str(base),"--outtype",precision,
-                    "--outfile",str(model)],cwd=runtime,env=env,check=True)
+    quantization_record=None
+    if quantized:
+        # Start from original BF16 tensors, never requantize the Q8 candidate.
+        intermediate=root/"original-bf16.gguf"
+        subprocess.run([sys.executable,str(runtime/"convert_hf_to_gguf.py"),str(base),"--outtype","bf16",
+                        "--outfile",str(intermediate)],cwd=runtime,env=env,check=True)
+        executable=Path(quantizer).resolve(strict=True)
+        if not executable.is_file():raise ValueError("quantizer_missing")
+        quantization_record={"source_precision":"BF16","source_sha256":file_hash(intermediate),
+                             "quantizer_sha256":file_hash(executable),"method":"Q4_K_M",
+                             "requantized":False}
+        subprocess.run([str(executable),str(intermediate),str(model),"Q4_K_M","4"],cwd=runtime,env=env,check=True)
+        intermediate.unlink()
+    else:
+        subprocess.run([sys.executable,str(runtime/"convert_hf_to_gguf.py"),str(base),"--outtype",precision,
+                        "--outfile",str(model)],cwd=runtime,env=env,check=True)
     native=pack/"Asterion-OLMo3-7B-adapter.gguf"
     shutil.copyfile(adapter,native)
     if file_hash(native)!=adapter_manifest["adapter_sha256"]:raise ValueError("native_adapter_copy_mismatch")
@@ -147,7 +163,7 @@ def build(root,runtime,training_metadata,native_adapter,precision="q8_0"):
       "candidate_profile_sha256":file_hash(pack/"control-model.candidate.json"),
       "device_verified":False,"native_generation_verified":False,"production_promoted":False,
       "weight_precision":precision,"training_base_quantization":"nf4",
-      "identical_numerics_to_training_base":False}
+      "identical_numerics_to_training_base":False,"quantization":quantization_record}
     write_json(pack/"pack-lineage.json",evidence)
     print(json.dumps(evidence,indent=2),flush=True)
 
@@ -159,9 +175,10 @@ if __name__=="__main__":
     b.add_argument("--runtime",type=Path,required=True)
     b.add_argument("--training-metadata",type=Path,required=True)
     b.add_argument("--native-adapter",type=Path,required=True)
-    b.add_argument("--precision",choices=["q8_0","f16","bf16"],default="q8_0")
+    b.add_argument("--precision",choices=["q8_0","f16","bf16","q4_k_m"],default="q8_0")
+    b.add_argument("--quantizer",type=Path)
     s=sub.add_parser("split")
     s.add_argument("source",type=Path);s.add_argument("output",type=Path);s.add_argument("--sha256",required=True)
     a=p.parse_args()
-    if a.op=="build":build(a.output,a.runtime,a.training_metadata,a.native_adapter,a.precision)
+    if a.op=="build":build(a.output,a.runtime,a.training_metadata,a.native_adapter,a.precision,a.quantizer)
     else:print(json.dumps(split_file(a.source,a.output,a.sha256),indent=2))
