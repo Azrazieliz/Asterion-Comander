@@ -36,7 +36,7 @@ final class OnDeviceLlm {
     private OnDeviceLlm(){}
     private static native boolean nativeLoad(String privateFile);
     private static native boolean nativeLoadProfile(String file,String adapter,String backend,int layers,boolean mappedNoRepack);
-    private static native void nativeConfigureContext(int threads,int kvBits);
+    private static native void nativeConfigureContext(int threads,int kvBits,int batch,int microbatch);
     private static native boolean nativeReady();
     private static native String nativeBackendReport();
     private static native String nativeVulkanProbe();
@@ -124,7 +124,8 @@ final class OnDeviceLlm {
     static final class NativeStream {
         final AssistantOutput output=new AssistantOutput();
         final Stream listener;
-        int promptTokens,omittedMessages,omittedReferences,pieces;
+        int promptTokens,omittedMessages,omittedReferences,pieces,generatedTokens;
+        String finishReason="unknown";
         long firstPieceNanos,lastPieceNanos,firstVisibleNanos;
         NativeStream(Stream listener){this.listener=listener;}
         public void onStart(boolean thinking,int tokens,int omitted,int dropped){
@@ -132,6 +133,10 @@ final class OnDeviceLlm {
             omittedMessages=omitted;omittedReferences=dropped;
             output.initialThinking(thinking);
             if(listener!=null)listener.context(tokens,omitted,dropped);
+        }
+        public void onFinish(boolean endOfGeneration,int tokens){
+            generatedTokens=tokens;
+            finishReason=endOfGeneration?"end_of_generation":"length_limit";
         }
         public void onToken(byte[] bytes){
             lastPieceNanos=System.nanoTime();
@@ -172,6 +177,8 @@ final class OnDeviceLlm {
             .put("last_vulkan_probe",lastVulkanProbe==null?JSONObject.NULL:lastVulkanProbe)
             .put("native_backend_report",runtimeBackends())
             .put("configured_kv_bits",profile.kvBits)
+            .put("prefill_batch_tokens",profile.prefillBatch)
+            .put("prefill_microbatch_tokens",profile.prefillMicrobatch)
             .put("configured_adapter_sha256",profile.adapterSha256)
             .put("device_resources",new OnDeviceModelResources(context).status(context))
             .put("max_generation_tokens",profile.outputTokens)
@@ -407,7 +414,7 @@ final class OnDeviceLlm {
             if(researchEvidence!=null)systemText+="\n"+researchEvidence.reference;
             OnDeviceModelResources resources=new OnDeviceModelResources(context);
             int contextBudget=resources.contextTokens(profile,outputBudget,true);
-            nativeConfigureContext(resources.threads(),profile.kvBits);
+            nativeConfigureContext(resources.threads(),profile.kvBits,profile.prefillBatch,profile.prefillMicrobatch);
             String[] roles=new String[messages.size()];
             byte[][] content=new byte[messages.size()][];
             for(int i=0;i<messages.size();i++){
@@ -426,8 +433,9 @@ final class OnDeviceLlm {
                 researchEvidence==null?"native_context_or_generation_failed":"selected_research_source_context_or_generation_failed");
             String result=stream.output.finish(output);
             if(result.isBlank())throw new IllegalStateException("no_visible_model_answer");
-            AssistantCalculator.Receipt calculation=AssistantCalculator.evaluate(result);
-            int toolReasoningPasses=0,toolPieces=0;
+            String finishReason=stream.finishReason;
+            AssistantCalculator.Receipt calculation="end_of_generation".equals(finishReason)?AssistantCalculator.evaluate(result):null;
+            int toolReasoningPasses=0,toolPieces=0,toolTokens=0;
             boolean interpreted=false;
             if(calculation!=null){
                 if(calculation.ok()){
@@ -442,14 +450,17 @@ final class OnDeviceLlm {
                         outputBudget,contextBudget,followup,references.toArray(new byte[0][]));
                     resourceGuard.check();
                     if(request.isCancelled())throw new InterruptedException("user_cancelled");
-                    toolPieces=followup.pieces;
+                    toolPieces=followup.pieces;toolTokens=followup.generatedTokens;
                     if(interpretedBytes!=null&&interpretedBytes.length>0){
                         String answer=followup.output.finish(interpretedBytes);
                         if(!answer.isBlank()&&AssistantStructured.singleBlock(answer,AssistantCalculator.FENCE)==null){
-                            result=answer;interpreted=true;
+                            result=answer;interpreted=true;finishReason=followup.finishReason;
                         }
                     }
-                    if(!interpreted)result+="\n\nThe arithmetic result below is verified; the follow-up interpretation was not completed.";
+                    if(!interpreted){
+                        finishReason="unknown";
+                        result+="\n\nThe arithmetic result below is verified; the follow-up interpretation was not completed.";
+                    }
                 }
                 result+=calculation.render();
             }
@@ -472,6 +483,9 @@ final class OnDeviceLlm {
                 .put("omitted_messages",stream.omittedMessages)
                 .put("omitted_reference_blocks",stream.omittedReferences)
                 .put("generated_token_pieces",stream.pieces+toolPieces)
+                .put("generated_tokens",stream.generatedTokens+toolTokens)
+                .put("finish_reason",finishReason)
+                .put("answer_complete","end_of_generation".equals(finishReason))
                 .put("selected_research_source_count",research==null?0:research.ids.size())
                 .put("local_calculator_executed",calculation!=null&&calculation.ok())
                 .put("tool_reasoning_passes",toolReasoningPasses)
@@ -486,6 +500,7 @@ final class OnDeviceLlm {
                 .put("available_bytes_after",after.memory.availMem)
                 .put("thermal_before",resources.thermalStatus)
                 .put("thermal_after",after.thermalStatus);
+            request.recordFinishReason(finishReason);
             return result;
         }finally{
             try{
