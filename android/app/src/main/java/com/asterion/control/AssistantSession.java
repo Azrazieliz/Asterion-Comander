@@ -62,8 +62,14 @@ final class AssistantSession {
                 main.post(()->{
                     if(activeRequest!=request)return;
                     activeRequest=null;
-                    target.update(generation,answer,request.isCancelled()?"cancelled":"completed");
-                    status=request.isCancelled()?"Stopped":"";save(app);changed();
+                    String reason=request.finishReason();
+                    String terminal=request.isCancelled()?"cancelled":
+                        "end_of_generation".equals(reason)?"completed":"truncated";
+                    target.update(generation,answer,terminal);
+                    status=request.isCancelled()?"Stopped":"length_limit".equals(reason)?
+                        "Output limit reached. Continue to extend the retained answer.":
+                        "unknown".equals(reason)?"Answer end was not confirmed. Continue or retry.":"";
+                    save(app);changed();
                 });
             }catch(Exception|LinkageError failure){
                 main.post(()->{
