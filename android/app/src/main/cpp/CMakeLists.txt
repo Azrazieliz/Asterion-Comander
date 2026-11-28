@@ -18,6 +18,15 @@ if(NOT DEFINED LLAMA_SOURCE_DIR OR NOT EXISTS "${LLAMA_SOURCE_DIR}/include/llama
     message(FATAL_ERROR "Pinned llama.cpp source checkout required")
 endif()
 add_subdirectory("${LLAMA_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/llama" EXCLUDE_FROM_ALL)
+# The pinned Vulkan backend finds SPIRV-Headers but does not propagate
+# its include directory to all of the backend's compilation units.
+if(GGML_VULKAN)
+    if(NOT TARGET ggml-vulkan)
+        message(FATAL_ERROR "Vulkan requested but native ggml-vulkan target missing")
+    endif()
+    find_package(SPIRV-Headers CONFIG REQUIRED)
+    target_link_libraries(ggml-vulkan PRIVATE SPIRV-Headers::SPIRV-Headers)
+endif()
 add_library(asterion_llm SHARED on_device_llm.cpp)
 target_include_directories(asterion_llm PRIVATE "${LLAMA_SOURCE_DIR}/include")
 if(ANDROID)
