@@ -5,7 +5,14 @@ final class InferenceGate {
     static final class Request {
         private volatile boolean cancelled;
         private boolean started;
+        private volatile String finishReason="unknown";
         boolean isCancelled() { return cancelled; }
+        String finishReason(){return finishReason;}
+        void recordFinishReason(String reason){
+            if(!"end_of_generation".equals(reason)&&!"length_limit".equals(reason)&&!"unknown".equals(reason))
+                throw new IllegalArgumentException("invalid_native_finish_reason");
+            finishReason=reason;
+        }
     }
 
     private Request active;

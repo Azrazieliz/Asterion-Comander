@@ -18,6 +18,7 @@ final class AssistantConversation {
     }
     final String id;
     String title="New conversation",project="General";
+    AssistantResearchSelection researchSelection;
     final List<Message> messages=new ArrayList<>();
     long revision=0;
     AssistantConversation(){this(UUID.randomUUID().toString());}
@@ -32,7 +33,7 @@ final class AssistantConversation {
     }
     AssistantConversation fork(){
         AssistantConversation copy=new AssistantConversation();
-        copy.title=title+" · revision";copy.project=project;
+        copy.title=title+" · revision";copy.project=project;copy.researchSelection=researchSelection;
         for(Message m:messages){Message cloned=new Message(m.id,m.role,m.text,m.state);
             cloned.omittedContextMessages=m.omittedContextMessages;cloned.omittedReferenceBlocks=m.omittedReferenceBlocks;cloned.actionRecord=m.actionRecord;copy.messages.add(cloned);}
         return copy;
@@ -68,7 +69,7 @@ final class AssistantConversation {
             if(m.role.equals("user")){
                 if(i==messages.size()-2&&running()){out.add(m);break;}
                 if(i+1<messages.size()&&messages.get(i+1).role.equals("assistant")&&
-                    messages.get(i+1).state.equals("completed")){
+                    (messages.get(i+1).state.equals("completed")||messages.get(i+1).state.equals("truncated"))){
                     out.add(m);out.add(messages.get(++i));
                 }
             }

@@ -107,7 +107,7 @@ def build(root,runtime,training_metadata,native_adapter,precision="q8_0",quantiz
     if not weights or any(not x.size or not x.lfs or not x.lfs.sha256 for x in weights):
         raise ValueError("original_foundation_weight_inventory_missing")
     size=sum(x.size for x in weights)
-    quantized=precision=="q4_k_m"
+    quantized=precision in {"q4_k_m","q3_k_s"}
     if quantized and quantizer is None:raise ValueError("pinned_native_quantizer_required")
     if shutil.disk_usage(root).free<2*size+((8 if quantized else 2)<<30):
         raise RuntimeError("native_conversion_disk_budget_not_met")
@@ -131,9 +131,9 @@ def build(root,runtime,training_metadata,native_adapter,precision="q8_0",quantiz
         executable=Path(quantizer).resolve(strict=True)
         if not executable.is_file():raise ValueError("quantizer_missing")
         quantization_record={"source_precision":"BF16","source_sha256":file_hash(intermediate),
-                             "quantizer_sha256":file_hash(executable),"method":"Q4_K_M",
+                             "quantizer_sha256":file_hash(executable),"method":precision.upper(),
                              "requantized":False}
-        subprocess.run([str(executable),str(intermediate),str(model),"Q4_K_M","4"],cwd=runtime,env=env,check=True)
+        subprocess.run([str(executable),str(intermediate),str(model),precision.upper(),"4"],cwd=runtime,env=env,check=True)
         intermediate.unlink()
     else:
         subprocess.run([sys.executable,str(runtime/"convert_hf_to_gguf.py"),str(base),"--outtype",precision,
@@ -150,9 +150,11 @@ def build(root,runtime,training_metadata,native_adapter,precision="q8_0",quantiz
     profile={"schema_version":1,"distribution":"owner_import","file":model.name,"bytes":model.stat().st_size,
       "sha256":sha,"source":ORIGINAL_MODEL+"@"+ORIGINAL_REVISION[:12]+"; adapted candidate",
       "max_input_chars":24000,"max_new_tokens":768,"context_tokens":4096,
-      "weight_precision":precision.upper(),"kv_precision_bits":16,"allow_smaller_context":True,
+      "weight_precision":precision.upper(),"kv_precision_bits":8 if precision=="q3_k_s" else 16,"allow_smaller_context":True,
+      "prefill_batch_tokens":128 if precision=="q3_k_s" else 512,
+      "prefill_microbatch_tokens":64 if precision=="q3_k_s" else 256,
       "vulkan_max_layers":original["num_hidden_layers"],"mapped_no_repack":True,
-      "memory_budget":{"resident_weight_bytes":model.stat().st_size,"workspace_bytes":768<<20,"kv_bytes_per_token":kv},
+      "memory_budget":{"resident_weight_bytes":model.stat().st_size,"workspace_bytes":768<<20,"kv_bytes_per_token":(kv*34+63)//64 if precision=="q3_k_s" else kv},
       "adapter":{"file":native.name,"bytes":native.stat().st_size,"sha256":file_hash(native),"base_sha256":sha},
       "system_text":"You are Asterion Control, the local assistant. Carry out authorized tasks using verified capabilities and actual receipts. Preserve user decisions and relevant source context. Do not invent actions, access, or outcomes."}
     write_json(pack/"control-model.candidate.json",profile)
@@ -176,7 +178,7 @@ if __name__=="__main__":
     b.add_argument("--runtime",type=Path,required=True)
     b.add_argument("--training-metadata",type=Path,required=True)
     b.add_argument("--native-adapter",type=Path,required=True)
-    b.add_argument("--precision",choices=["q8_0","f16","bf16","q4_k_m"],default="q8_0")
+    b.add_argument("--precision",choices=["q8_0","f16","bf16","q4_k_m","q3_k_s"],default="q8_0")
     b.add_argument("--quantizer",type=Path)
     s=sub.add_parser("split")
     s.add_argument("source",type=Path);s.add_argument("output",type=Path);s.add_argument("--sha256",required=True)

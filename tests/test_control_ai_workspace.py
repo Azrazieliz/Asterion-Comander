@@ -15,8 +15,9 @@ def test_executable_split_utf8_reasoning_and_conversation_regressions(tmp_path):
         pytest.skip('JDK required for executable Java behavior tests')
     subprocess.run([compiler,'-encoding','UTF-8','-d',str(tmp_path),str(JAVA/'AssistantOutput.java'),
                     str(JAVA/'AssistantConversation.java'),str(JAVA/'AssistantActionRecord.java'),str(JAVA/'InferenceGate.java'),
+                    str(JAVA/'AssistantResearchSelection.java'),str(JAVA/'BrowserResearchText.java'),
                     str(ROOT/'tests/java/com/asterion/control/AssistantWorkspaceTest.java')],
-                   check=True,capture_output=True,text=True)
+                   check=True,text=True)
     result=subprocess.run([runtime,'-cp',str(tmp_path),'com.asterion.control.AssistantWorkspaceTest'],
                           check=True,capture_output=True,text=True,timeout=30)
     match = re.fullmatch(r"(\d+) assistant output and conversation behavior assertions passed; no model/device acceptance claimed", result.stdout.strip())
@@ -91,7 +92,7 @@ def test_history_retrieval_is_project_scoped_source_linked_and_local_only():
     assert 'search.add(id+"/"+mid,project,"Historical "+role' in memory
     assert '!seen.add(mid)' in memory and 'active)seen.add(m.id)' in memory
     assert 'scan coverage: ' in memory and 'bounded/partial' in memory
-    assert 'if(listener!=null&&ControlAssistantPreferences.reuseHistory(context))' in llm
+    assert 'if(listener!=null&&ControlAssistantPreferences.reuseHistory(context)&&researchEvidence==null)' in llm
     assert 'return saveHistory(ctx)&&prefs(ctx).getBoolean(REUSE_HISTORY,true)' in prefs
     assert 'LIMIT ? OFFSET ?' in memory
     assert 'historyPage(offset+50)' in (JAVA/'AssistantActivity.java').read_text(encoding='utf-8')
@@ -165,7 +166,8 @@ def test_browser_research_uses_shared_encrypted_sources_and_exact_comparison(tmp
     assert 'ControlAssistantMemory.importProjectSource' in research
     assert 'ControlAssistantMemory.readProjectSource' in research
     assert 'source_digest_mismatch' in memory and 'source_overlap_invalid' in memory
-    assert 'research_draft' in research
+    assert 'putStringArrayListExtra("research_ids",ids)' in research
+    assert 'putExtra("research_draft"' not in research
 
 
 def test_capability_registry_keeps_knowledge_declarative_and_marks_missing_categories():
@@ -195,3 +197,21 @@ def test_native_calculator_runs_real_bounded_arithmetic(tmp_path):
     result=subprocess.run([runtime,"-cp",str(tmp_path),"com.asterion.control.AssistantCalculatorTest"],
         check=True,capture_output=True,text=True,timeout=10)
     assert "Native calculator behavior passed" in result.stdout
+
+
+def test_reviewed_research_sources_are_required_verified_native_references(tmp_path):
+    compiler=shutil.which("javac");runtime=shutil.which("java")
+    if not compiler or not runtime:pytest.skip("JDK required")
+    subprocess.run([compiler,"-encoding","UTF-8","-d",str(tmp_path),
+        str(JAVA/"AssistantResearchSelection.java"),str(JAVA/"BrowserResearchText.java"),
+        str(JAVA/"InferenceGate.java"),str(ROOT/"tests/java/com/asterion/control/AssistantResearchSelectionTest.java")],
+        check=True,capture_output=True,text=True)
+    result=subprocess.run([runtime,"-cp",str(tmp_path),"com.asterion.control.AssistantResearchSelectionTest"],
+        check=True,capture_output=True,text=True,timeout=10)
+    assert "Reviewed research evidence passed" in result.stdout
+    llm=(JAVA/"OnDeviceLlm.java").read_text(encoding="utf-8")
+    memory=(JAVA/"ControlAssistantMemory.java").read_text(encoding="utf-8")
+    assert 'systemText+="\\n"+researchEvidence.reference' in llm
+    assert 'result+=researchEvidence.receipt' in llm
+    assert 'researchEvidence==null' in llm
+    assert 'record.put("research_selection"' in memory

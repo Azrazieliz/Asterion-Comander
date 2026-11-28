@@ -15,7 +15,7 @@ final class OnDeviceModelProfile {
     final long bytes;
     final int inputChars,outputTokens,contextTokens;
     final String precision,backendDevice,adapterFile,adapterSha256;
-    final int offloadLayers,kvBits,maxVulkanLayers;
+    final int offloadLayers,kvBits,maxVulkanLayers,prefillBatch,prefillMicrobatch;
     final boolean mappedNoRepack;
     final long adapterBytes,residentBytes,workspaceBytes,kvBytesPerToken;
     final boolean allowSmallerContext,externalModelPack;
@@ -54,6 +54,11 @@ final class OnDeviceModelProfile {
         mappedNoRepack=j.optBoolean("mapped_no_repack",false);
         kvBits=j.optInt("kv_precision_bits",16);
         if(kvBits!=8&&kvBits!=16)throw new IllegalArgumentException("invalid_kv_precision");
+        prefillBatch=j.optInt("prefill_batch_tokens",512);
+        prefillMicrobatch=j.optInt("prefill_microbatch_tokens",256);
+        if(prefillBatch<32||prefillBatch>512||prefillBatch%32!=0||
+           prefillMicrobatch<32||prefillMicrobatch>prefillBatch||prefillMicrobatch%32!=0)
+            throw new IllegalArgumentException("invalid_prefill_budget");
         JSONObject memory=j.optJSONObject("memory_budget");
         residentBytes=boundBytes(memory,"resident_weight_bytes",bytes);
         workspaceBytes=boundBytes(memory,"workspace_bytes",512L<<20);

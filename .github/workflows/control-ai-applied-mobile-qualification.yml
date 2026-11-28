@@ -1,0 +1,119 @@
+name: Control 76-step 7B lower-memory native qualification
+on:
+  push:
+    branches: [ai-candidate/applied-agent-integration-20261128]
+    paths:
+      - '.github/workflows/control-ai-applied-mobile-qualification.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+env:
+  HF_HUB_DISABLE_IMPLICIT_TOKEN: '1'
+  HF_HUB_DISABLE_TELEMETRY: '1'
+  TOKENIZERS_PARALLELISM: 'false'
+  OMP_NUM_THREADS: '4'
+jobs:
+  native-candidate:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Reclaim only disposable runner toolchains for model conversion
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup
+          df -h .
+          free -h
+      - uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          ref: 4b77dee0524c64b8471869232e2958bd9589607d
+          path: runtime
+          persist-credentials: false
+      - name: Restore exact completed 76-step descendant and original training metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl --fail --silent --show-error --location --retry 2 -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "${{ github.api_url }}/repos/${{ github.repository }}/actions/artifacts/15246313817/zip" --output applied.zip
+          echo '927bca9757373dc8a01a4d8011cb4a165637da66d22fa61e83799d3805bf1f2d  applied.zip' | sha256sum -c -
+          python -m pip install huggingface-hub==0.34.4
+          python -m scripts.control_ai_applied_candidate applied.zip retained
+      - name: Install pinned converter and compile native generation executable
+        run: |
+          python -m pip install -r runtime/requirements/requirements-convert_hf_to_gguf.txt
+          python -m pip install ./runtime/gguf-py
+          python -m pip install -r runtime/requirements/requirements-convert_lora_to_gguf.txt
+          python -m scripts.control_ai_native_adapter_export --candidate retained/candidate --base retained/base --runtime runtime --output native-parent
+          cmake -S runtime -B runtime-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DGGML_NATIVE=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_SERVER=OFF -DLLAMA_CURL=OFF -DLLAMA_OPENSSL=OFF
+          cmake --build runtime-build --target llama-completion llama-quantize -j 4
+      - name: Convert exact original BF16 foundation to Q3_K_S and bind learned adapter
+        run: |
+          python -m scripts.control_ai_model_pack build --output measured-pack --runtime runtime --training-metadata retained/base --native-adapter native-parent --precision q3_k_s --quantizer runtime-build/bin/llama-quantize
+      - name: Measure native memory and substantive held-out generations
+        timeout-minutes: 85
+        run: |
+          mkdir -p native-evidence
+          cp measured-pack/pack/*.json native-evidence/
+          sha256sum runtime-build/bin/llama-completion > native-evidence/native-executable.sha256
+          MODEL="$(find measured-pack/pack -name '*Q3_K_S.gguf' -type f)"
+          ADAPTER="measured-pack/pack/Asterion-OLMo3-7B-adapter.gguf"
+          python - <<'PY'
+          from transformers import AutoTokenizer
+          from pathlib import Path
+          import json
+          tok=AutoTokenizer.from_pretrained("measured-pack/source",local_files_only=True,trust_remote_code=False)
+          source=Path("retained/applied/holdout.jsonl")
+          cases=[json.loads(line)["messages"] for line in source.read_text().splitlines() if line.strip()]
+          assert len(cases)==12
+          out=Path("native-evidence")
+          for i,messages in enumerate(cases,1):
+              assert messages[-1]["role"]=="assistant"
+              dialog=messages[:-1]
+              policy="Answer directly and completely. Lead with the requested result, use proportionate explanation, avoid redundant restatement. Preserve source evidence and never invent actions or verification."
+              if dialog[0]["role"]=="system":dialog=[{"role":"system","content":policy+"\n"+dialog[0]["content"]},*dialog[1:]]
+              else:dialog=[{"role":"system","content":policy},*dialog]
+              prompt=tok.apply_chat_template(dialog,tokenize=False,add_generation_prompt=True,tools=None)
+              assert prompt.endswith("<|im_start|>assistant\n"), "unexpected assistant boundary"
+              (out/f"prompt-{i}.txt").write_text(prompt,encoding="utf-8")
+              (out/f"expected-{i}.txt").write_text(messages[-1]["content"],encoding="utf-8")
+          PY
+          for variant in base adapted; do
+            extra=()
+            if [ "$variant" = adapted ]; then extra=(--lora "$ADAPTER"); fi
+            for case in $(seq 1 12); do
+              /usr/bin/time -v -o "native-evidence/${variant}-${case}.resources" runtime-build/bin/llama-completion -m "$MODEL" "${extra[@]}" --load-mode mmap --no-repack --no-conversation --no-display-prompt --no-warmup --temp 0 --no-op-offload --cache-type-k q8_0 --cache-type-v q8_0 --flash-attn on -b 128 -ub 64 -c 2048 -n 512 -ngl 0 -t 4 -f "native-evidence/prompt-${case}.txt" > "native-evidence/${variant}-${case}.txt" 2> "native-evidence/${variant}-${case}.log"
+              test -s "native-evidence/${variant}-${case}.txt"
+            done
+          done
+          python - <<'PY'
+          import json,hashlib,re
+          from pathlib import Path
+          root=Path("native-evidence")
+          report={"native_generation_executed":True,"variant_count":2,"cases_per_variant":12,"kv_bits":8,"batch":128,"microbatch":64,"context_tokens":2048,"max_new_tokens":512,"native_device":"runner_cpu","repacking":False,"load_mode":"mmap","production_promoted":False,"phone_verified":False,"quality_certified":False}
+          report["output_sha256"]={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in root.glob("*.txt") if p.name.startswith(("base-","adapted-"))}
+          report["peak_rss_kib"]={p.stem:int(re.search(r"Maximum resident set size \(kbytes\):\s*(\d+)",p.read_text()).group(1)) for p in root.glob("*.resources")}
+          report["finish_observations"]={p.name:("end_of_text_marker" if "[end of text]" in p.read_text() else "no_end_marker_observed") for p in root.glob("*.txt") if p.name.startswith(("base-","adapted-"))}
+          report["peak_rss_bytes"]=max(report["peak_rss_kib"].values())*1024
+          report["measured_phone_budget_estimate_bytes"]=4200000000
+          report["runner_rss_below_observed_phone_available_memory"]=report["peak_rss_bytes"]<4200000000
+          (root/"native-generation.json").write_text(json.dumps(report,indent=2)+"\n")
+          PY
+      - name: Retain small exact native build evidence only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: applied-7b-native-q3-evidence
+          retention-days: 30
+          if-no-files-found: warn
+          path: |
+            measured-pack/pack/*.json
+            native-evidence/
+            native-parent/
+            retained/retained-lineage.json
+            retained/candidate/candidate.json
