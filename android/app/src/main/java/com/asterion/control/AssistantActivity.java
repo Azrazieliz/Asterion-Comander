@@ -160,7 +160,7 @@ public final class AssistantActivity extends Activity {
                 AssistantConversation.Message m=c.messages.get(i);final int index=i;
                 LinearLayout turn=DesignSystem.vertical(this);turn.setPadding(dp(14),dp(12),dp(14),dp(12));
                 if(m.role.equals("user"))turn.setBackground(DesignSystem.shape(this,panel,0,16));
-                TextView role=label(m.role.equals("user")?"You":"Asterion",12,muted,true);turn.addView(role);
+                TextView role=label(m.role.equals("user")?"You":m.visual?"Asterion · visual model":"Asterion",12,muted,true);turn.addView(role);
                 LinearLayout answer=DesignSystem.vertical(this);turn.addView(answer);
                 if(m.state.equals("running")){liveAnswer=answer;liveText=m.text;}
                 if(m.role.equals("assistant")&&m.state.equals("completed")&&!m.visual)
@@ -169,7 +169,10 @@ public final class AssistantActivity extends Activity {
                 if(!m.state.equals("running")){
                     LinearLayout tools=DesignSystem.horizontal(this);
                     tools.addView(control("Copy",()->((ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("Asterion",m.text))));
-                    if(m.role.equals("user"))tools.addView(control("Edit",()->edit(index)));
+                    if(m.role.equals("user")){
+                        if(i+1<c.messages.size()&&c.messages.get(i+1).visual)tools.addView(control("New image question",this::chooseImage));
+                        else tools.addView(control("Edit",()->edit(index)));
+                    }
                     else{
                         tools.addView(control("Read",()->readAnswer(m)));
                         if(m.visual){
@@ -251,7 +254,7 @@ public final class AssistantActivity extends Activity {
         dialog.setOnShowListener(v->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(w->{String value=field.getText().toString().trim();if(value.isEmpty()||value.length()>12000){field.setError("Enter 1–12,000 characters");return;}accept.accept(value);dialog.dismiss();}));dialog.show();
     }
     private void edit(int index){if(!idle())return;input("Edit message",session.conversation.messages.get(index).text,value->{session.save(this);session.conversation=session.conversation.fork();session.conversation.editFrom(index,value);session.send(this,value);});}
-    private void retry(){if(!idle())return;try{session.save(this);session.conversation=session.conversation.fork();session.send(this,session.conversation.retry());}catch(Exception failure){notice("This conversation has no response to regenerate.");}}
+    private void retry(){if(!idle())return;if(!session.conversation.messages.isEmpty()&&session.conversation.messages.get(session.conversation.messages.size()-1).visual){chooseImage();return;}try{session.save(this);session.conversation=session.conversation.fork();session.send(this,session.conversation.retry());}catch(Exception failure){notice("This conversation has no response to regenerate.");}}
     private void history(){historyPage(0);}
     private void historyPage(int offset){
         if(!idle())return;notice("Opening encrypted history");
