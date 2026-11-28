@@ -69,16 +69,32 @@ def optimize(model, tokenizer, rows, *, context, steps, learning_rate, beta):
         selected = labels != -100
         return -functional.cross_entropy(logits[selected].float(), labels[selected], reduction="sum")
 
-    pairs = []
+    # Only the deterministic optimizer schedule needs reference scores.
+    # Cache these from the immutable SFT state BEFORE any optimizer update.
+    # In a short CPU run, computing unused pairs previously consumed most
+    # of the wall-clock budget without contributing a gradient.
+    if steps<1 or not rows:
+        raise ValueError("empty_preference_schedule")
+    rng = random.Random(42)
+    order = list(range(len(rows)))
+    scheduled = []
+    for step in range(steps):
+        if step % len(order) == 0:
+            rng.shuffle(order)
+        scheduled.append(order[step % len(order)])
+    pairs = {}
     model.eval()
     with torch.no_grad():
-        for row in rows:
+        for index in dict.fromkeys(scheduled):
+            row=rows[index]
             chosen = encode(tokenizer, row["prompt"] + [{"role": "assistant", "content": row["chosen"]}], context)
             rejected = encode(tokenizer, row["prompt"] + [{"role": "assistant", "content": row["rejected"]}], context)
             reference = float(answer_log_probability(chosen) - answer_log_probability(rejected))
             if not math.isfinite(reference):
                 raise RuntimeError("nonfinite_reference_log_ratio")
-            pairs.append((chosen, rejected, reference))
+            pairs[index]=(chosen, rejected, reference)
+            print(json.dumps({"phase":"preference_reference","pair_index":index,
+                "cached_pairs":len(pairs),"scheduled_pairs":len(set(scheduled))}),flush=True)
 
     optimizer = torch.optim.AdamW(
         (parameter for parameter in model.parameters() if parameter.requires_grad),
@@ -86,15 +102,14 @@ def optimize(model, tokenizer, rows, *, context, steps, learning_rate, beta):
     )
     # Eval mode disables dropout and leaves Autograd enabled. With sequential
     # backwards only one response graph is resident at a time.
-    rng = random.Random(42)
-    order = list(range(len(pairs)))
     total_loss = 0.0
-    for step in range(steps):
-        if step % len(order) == 0:
-            rng.shuffle(order)
-        chosen, rejected, reference = pairs[order[step % len(order)]]
+    for step,index in enumerate(scheduled):
+        chosen, rejected, reference = pairs[index]
         with torch.no_grad():
-            logit = beta * (answer_log_probability(chosen) - answer_log_probability(rejected) - reference)
+            # Step zero uses the exact frozen reference weights. No repeat
+            # forward pass is needed to know the preference logit is zero.
+            logit = torch.tensor(0.0,device=device) if step==0 else beta * (
+                answer_log_probability(chosen) - answer_log_probability(rejected) - reference)
             loss = -functional.logsigmoid(logit)
             slope = -beta * torch.sigmoid(-logit)
         if not torch.isfinite(loss):
@@ -109,5 +124,8 @@ def optimize(model, tokenizer, rows, *, context, steps, learning_rate, beta):
         )
         optimizer.step()
         total_loss += float(loss)
+        print(json.dumps({"phase":"preference_optimizer_step","step":step+1,"total_steps":steps,
+            "pair_index":index,"loss":float(loss)}),flush=True)
     return {"method": "dpo", "reference": "completed_sft_adapter", "steps": steps,
-            "beta": beta, "pair_count": len(pairs), "mean_loss": total_loss / steps}
+            "beta": beta, "pair_count": len(rows), "reference_pairs":len(pairs),
+            "scheduled_pair_indices":scheduled,"mean_loss": total_loss / steps}
