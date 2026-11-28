@@ -274,15 +274,15 @@ public final class AssistantActivity extends Activity {
                 info.append("\nGPU shares device memory. No reduction of the signed memory estimate.");
                 runOnUiThread(()->{
                     if(!alive||!idle())return;
-                    if(profile.maxVulkanLayers==0||!profile.backendDevice.isEmpty()||!available){
+                    if(profile.maxVulkanLayers==0||!profile.backendDevice.isEmpty()){
                         new AlertDialog.Builder(this).setTitle("GPU acceleration").setMessage(info.toString()+
                             "\nThis signed profile does not permit a new Vulkan selection, or the backend is unavailable.")
                             .setPositiveButton("Close",null).show();return;
                     }
                     java.util.ArrayList<Integer> layers=new java.util.ArrayList<>();layers.add(0);
                     for(int n:new int[]{4,8,16,24,32,64,128,256})
-                        if(n<=profile.maxVulkanLayers)layers.add(n);
-                    if(!layers.contains(profile.maxVulkanLayers))layers.add(profile.maxVulkanLayers);
+                        if(available&&n<=profile.maxVulkanLayers)layers.add(n);
+                    if(available&&!layers.contains(profile.maxVulkanLayers))layers.add(profile.maxVulkanLayers);
                     java.util.Collections.sort(layers);
                     String[] choices=new String[layers.size()];
                     for(int i=0;i<layers.size();i++)choices[i]=layers.get(i)==0?"CPU only":"Vulkan · "+layers.get(i)+" layers";
