@@ -215,3 +215,25 @@ def test_reviewed_research_sources_are_required_verified_native_references(tmp_p
     assert 'result+=researchEvidence.receipt' in llm
     assert 'researchEvidence==null' in llm
     assert 'record.put("research_selection"' in memory
+
+
+def test_native_image_mode_uses_actual_pixels_signed_weights_and_same_inference_gate():
+    native=(ROOT/"android/app/src/main/cpp/native_vision.cpp").read_text(encoding="utf-8")
+    cmake=(ROOT/"android/app/src/main/cpp/CMakeLists.txt").read_text(encoding="utf-8")
+    llm=(JAVA/"OnDeviceLlm.java").read_text(encoding="utf-8")
+    session=(JAVA/"AssistantSession.java").read_text(encoding="utf-8")
+    image=(JAVA/"OnDeviceVisionImage.java").read_text(encoding="utf-8")
+    profile=(JAVA/"OnDeviceVisionProfile.java").read_text(encoding="utf-8")
+    assert 'mtmd_bitmap_init(width,height,rgb.data())' in native
+    assert 'mtmd_helper_eval_chunks(visual.get(),ctx.get(),chunks.get()' in native
+    assert 'llama_sampler_sample(sampler.get(),ctx.get(),-1)' in native
+    assert 'target_link_libraries(asterion_llm PRIVATE asterion_vision_core)' in cmake
+    assert 'target_link_libraries(asterion_vision_probe PRIVATE asterion_vision_core)' in cmake
+    assert 'if(modelReady||nativeReady())nativeUnload()' in llm
+    assert 'File projection=stageArtifact(c,folder,profile.projector.file' in llm
+    assert 'nativeAnalyzeImage(model.getAbsolutePath(),projection.getAbsolutePath(),image.width,image.height' in llm
+    assert 'ImageDecoder.decodeBitmap' in image and 'bitmap.getPixels(row' in image
+    assert 'projector_identity_mismatch' in profile and 'visual_text_artifact_collision' in profile
+    assert 'response.visual=image!=null' in session
+    assert '!message.visual' in session
+    assert 'visual.evidence' in session
