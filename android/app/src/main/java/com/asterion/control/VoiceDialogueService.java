@@ -753,10 +753,12 @@ public final class VoiceDialogueService extends Service {
            ("answered".equals(phase)&&!consumed))throw new IllegalStateException("Another voice exchange is active");
         if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)
           throw new IllegalStateException("Android microphone consent is missing");
-        acquireAudioFocus();keepCpuForExchange();
+        acquireAudioFocus();
+        try{keepCpuForExchange();}catch(Exception failure){releaseAudioFocus();throw failure;}
         speakOnly=false;question="";transcript="";consumed=false;
         questionId="owner-command-"+System.currentTimeMillis();listeningLocale=language;
         final String id=questionId;
+        state("listening","");
         ui.post(()->startListening(language,id));
         started=new JSONObject().put("ok",true).put("question_id",id).put("phase","listening_requested");
       }else started=ask(invitation,language,"owner-command-"+System.currentTimeMillis());
@@ -866,6 +868,7 @@ public final class VoiceDialogueService extends Service {
     }
     String message="ASTERION CONTROL — OWNER VOICE REQUEST\n"+
       "Spoken instruction: "+spoken+"\n"+
+      "Recognized language: "+pendingSpeechLocale+". Use that locale for speaker playback unless the owner requested another language.\n"+
       "Execute the authorized request using Asterion Control. "+
       "Use the speaker endpoint for a spoken reply, and ask a "+
       "microphone question only if a response is required.";
