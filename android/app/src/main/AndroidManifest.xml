@@ -37,6 +37,8 @@
       </activity>
       <activity android:name=".AssistantActivity" android:exported="false" android:windowSoftInputMode="adjustResize"/>
       <activity android:name=".BrowserResearchActivity" android:exported="false"/>
+      <service android:name=".AssistantPdfExtractionService" android:exported="false"
+          android:process=":assistant_pdf" android:isolatedProcess="true"/>
       <!-- Isolate website cookies/storage from the authenticated Control dashboard. -->
       <activity android:name=".BrowserActivity" android:exported="false"
           android:process=":asterion_browser" android:screenOrientation="unspecified"/>
