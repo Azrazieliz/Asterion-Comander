@@ -21,6 +21,20 @@ public final class VoiceReplyPolicyTest {
       assert s.contains("Review the proposed action")==review;
     }
     assert VoiceReplyPolicy.speech(null,false).contains("available");
-    System.out.println("VoiceReplyPolicy: 19 assertions passed");
+    assert VoiceReplyPolicy.canonicalLocale("fr-fr").equals("fr-FR");
+    assert VoiceReplyPolicy.canonicalLocale("ja-JP").equals("ja-JP");
+    assert VoiceReplyPolicy.canonicalLocale("zh-Hant-TW").equals("zh-Hant-TW");
+    assert VoiceReplyPolicy.invitation("fr-FR").contains("souhaitez");
+    assert VoiceReplyPolicy.invitation("ja-JP").contains("何");
+    assert VoiceReplyPolicy.testPrompt("ja-JP").contains("一、二、三");
+    assert VoiceReplyPolicy.speech("Bonjour",true,"fr-FR").contains("Vérifiez");
+    assert VoiceReplyPolicy.speech("日本語",true,"ja-JP").contains("確認");
+    assert VoiceReplyPolicy.speech("abc".repeat(300),true,"fr-FR").length()<=700;
+    assert VoiceReplyPolicy.speech("😀".repeat(450),true,"ja-JP").length()<=700;
+    assert VoiceReplyPolicy.invitation("nl-NL").isEmpty();
+    for(String invalid:new String[]{"","und","en-US-extra","fr_FR","en\\nUS","<en>"})
+      try{VoiceReplyPolicy.canonicalLocale(invalid);throw new AssertionError("Invalid locale admitted");}
+      catch(IllegalArgumentException expected){}
+    System.out.println("VoiceReplyPolicy multilingual behavior passed");
   }
 }
