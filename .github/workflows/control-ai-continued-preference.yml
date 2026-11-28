@@ -1,0 +1,61 @@
+name: Control completed SFT preference continuation
+on:
+  push:
+    branches: [ai-candidate/continued-7b-qualification-20261128]
+    paths:
+      - '.github/workflows/control-ai-continued-preference.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: control-continued-preference
+  cancel-in-progress: false
+env:
+  HF_HUB_DISABLE_IMPLICIT_TOKEN: '1'
+  HF_HUB_DISABLE_TELEMETRY: '1'
+  TOKENIZERS_PARALLELISM: 'false'
+  OMP_NUM_THREADS: '4'
+  PYTHONUNBUFFERED: '1'
+jobs:
+  preference-fit:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Fetch exact completed 24-step SFT archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl --fail --silent --show-error --location --retry 2 -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "${{ github.api_url }}/repos/${{ github.repository }}/actions/artifacts/15240659652/zip" --output continued.zip
+          echo '6cc57eaa2f42ff0bcdebb375d98e3ddb726c0299ccbbb06ce8bad6aad412c408  continued.zip' | sha256sum -c -
+      - name: Install measured CPU NF4 stack and admit exact descendant
+        run: |
+          python -m pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install transformers==4.57.1 peft==0.17.1 accelerate==1.10.1 bitsandbytes==0.48.2 huggingface-hub==0.34.4 psutil
+          python -m scripts.control_ai_continued_candidate continued.zip retained --weights
+      - name: Continue two actual DPO updates from completed SFT adapter
+        timeout-minutes: 100
+        run: |
+          BUDGET="$(python -c 'import psutil;print((psutil.virtual_memory().available-(1024<<20))//(1<<20))')"
+          python -m scripts.control_ai_adaptation train --base retained/base --revision 5d19c438a3f72bd74a2b1e1f7aa90e24d359c690 --train retained/applied/train.jsonl --holdout retained/applied/holdout.jsonl --output preferred --start-candidate retained/candidate --device cpu --precision nf4 --memory-budget-mib "$BUDGET" --context 384 --rank 8 --accumulate 1 --target-modules q_proj,v_proj --threads 4 --max-steps 1 --preference-only --preferences retained/applied/preferences.jsonl --preference-steps 2 --preference-learning-rate 0.00002
+      - name: Preserve actual resulting candidate separately from SFT parent
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: resumed-7b-dpo
+          retention-days: 30
+          if-no-files-found: warn
+          path: |
+            preferred/adapter/
+            preferred/candidate.json
+            preferred/training-plan.json
+            preferred/sft-adapter/
+            retained/retained-lineage.json
+            retained/applied/
