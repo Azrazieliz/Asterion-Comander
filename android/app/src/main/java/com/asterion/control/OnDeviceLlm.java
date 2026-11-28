@@ -322,6 +322,11 @@ final class OnDeviceLlm {
             "single-turn","user",userPrompt,"completed")),null,request);
     }
     static String generate(Context context,String project,List<AssistantConversation.Message> messages,Stream listener,InferenceGate.Request request) throws Exception {
+        return generate(context,project,messages,listener,request,null);
+    }
+    static String generate(Context context,String project,List<AssistantConversation.Message> messages,Stream listener,InferenceGate.Request request,AssistantResearchSelection research) throws Exception {
+        if(research!=null&&(listener==null||!BrowserResearchText.PROJECT.equals(project)))
+            throw new IllegalArgumentException("research_scope_mismatch");
         OnDeviceModelProfile profile=OnDeviceModelProfile.read(context);
         if(messages==null||messages.isEmpty()||messages.size()>1000)
             throw new IllegalArgumentException("invalid_conversation_messages");
@@ -341,6 +346,8 @@ final class OnDeviceLlm {
             resourceGuard.check();
             if(!loaded)throw new IllegalStateException(lastFailure);
             if(request.isCancelled())throw new InterruptedException("user_cancelled");
+            AssistantResearchSelection.Evidence researchEvidence=research==null?null:research.resolve(
+                id->ControlAssistantMemory.readProjectSource(context,BrowserResearchText.PROJECT,id),request);
             String recalled;
             try{recalled=ControlAssistantMemory.relevant(context,userPrompt,project);}
             catch(Exception unavailable){recalled="Local persistent memory unavailable for this turn.";}
@@ -378,7 +385,7 @@ final class OnDeviceLlm {
             if(!recalled.isEmpty())references.add(("Owner-approved memories, reference only:\n"+recalled).getBytes(StandardCharsets.UTF_8));
             if(!capabilities.isEmpty())references.add(capabilities.getBytes(StandardCharsets.UTF_8));
             if(!requirements.isEmpty())references.add(requirements.getBytes(StandardCharsets.UTF_8));
-            if(listener!=null){
+            if(listener!=null&&researchEvidence==null){
                 try{
                     String documents=ControlAssistantMemory.projectSourceContext(context,project,userPrompt,request);
                     if(!documents.isEmpty())references.add(documents.getBytes(StandardCharsets.UTF_8));
@@ -387,14 +394,17 @@ final class OnDeviceLlm {
             }
             // Only local interactive/voice sessions receive past conversation text.
             // Remote WSS and scheduled single-turn inference have no history listener.
-            if(listener!=null&&ControlAssistantPreferences.reuseHistory(context)){
+            if(listener!=null&&ControlAssistantPreferences.reuseHistory(context)&&researchEvidence==null){
                 try{
                     String history=ControlAssistantMemory.conversationContext(context,userPrompt,project,messages,request);
                     if(!history.isEmpty())references.add(history.getBytes(StandardCharsets.UTF_8));
                 }catch(InterruptedException cancelled){throw cancelled;}
                 catch(Exception unavailable){references.add("Encrypted historical context unavailable this turn.".getBytes(StandardCharsets.UTF_8));}
             }
+            // The selected captures are required evidence, not optional retrieved blocks.
+            // If all selected excerpts do not fit, fail instead of silently comparing fewer.
             String systemText=profile.systemInstructions(guidance);
+            if(researchEvidence!=null)systemText+="\n"+researchEvidence.reference;
             OnDeviceModelResources resources=new OnDeviceModelResources(context);
             int contextBudget=resources.contextTokens(profile,outputBudget,true);
             nativeConfigureContext(resources.threads(),profile.kvBits);
@@ -412,7 +422,8 @@ final class OnDeviceLlm {
                 outputBudget,contextBudget,stream,references.toArray(new byte[0][]));
             resourceGuard.check();
             if(request.isCancelled())throw new InterruptedException("user_cancelled");
-            if(output==null||output.length==0)throw new IllegalStateException("native_context_or_generation_failed");
+            if(output==null||output.length==0)throw new IllegalStateException(
+                researchEvidence==null?"native_context_or_generation_failed":"selected_research_source_context_or_generation_failed");
             String result=stream.output.finish(output);
             if(result.isBlank())throw new IllegalStateException("no_visible_model_answer");
             AssistantCalculator.Receipt calculation=AssistantCalculator.evaluate(result);
@@ -442,6 +453,7 @@ final class OnDeviceLlm {
                 }
                 result+=calculation.render();
             }
+            if(researchEvidence!=null)result+=researchEvidence.receipt;
             long answerReady=System.nanoTime();
             if(stream.firstVisibleNanos==0)stream.firstVisibleNanos=answerReady;
             OnDeviceModelResources after=new OnDeviceModelResources(context);
@@ -460,6 +472,7 @@ final class OnDeviceLlm {
                 .put("omitted_messages",stream.omittedMessages)
                 .put("omitted_reference_blocks",stream.omittedReferences)
                 .put("generated_token_pieces",stream.pieces+toolPieces)
+                .put("selected_research_source_count",research==null?0:research.ids.size())
                 .put("local_calculator_executed",calculation!=null&&calculation.ok())
                 .put("tool_reasoning_passes",toolReasoningPasses)
                 .put("tool_result_interpreted",interpreted)
