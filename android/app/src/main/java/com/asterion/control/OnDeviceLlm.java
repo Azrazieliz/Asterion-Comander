@@ -116,6 +116,7 @@ final class OnDeviceLlm {
         int maxTokens,int contextTokens,NativeStream stream,byte[][] references);
     interface Stream {
         void text(String text);
+        default void tool(String name){}
         default void context(int tokens,int omittedMessages){}
         default void context(int tokens,int omittedMessages,int omittedReferences){context(tokens,omittedMessages);}
     }
@@ -414,7 +415,33 @@ final class OnDeviceLlm {
             if(output==null||output.length==0)throw new IllegalStateException("native_context_or_generation_failed");
             String result=stream.output.finish(output);
             if(result.isBlank())throw new IllegalStateException("no_visible_model_answer");
-            result=AssistantCalculator.attachResult(result);
+            AssistantCalculator.Receipt calculation=AssistantCalculator.evaluate(result);
+            int toolReasoningPasses=0,toolPieces=0;
+            boolean interpreted=false;
+            if(calculation!=null){
+                if(calculation.ok()){
+                    // Use the same signed native model and exact original user
+                    // turn. The receipt is trusted runtime evidence, never
+                    // model-authored tool output or executable source text.
+                    if(listener!=null)listener.tool("Local calculation completed · interpreting result");
+                    NativeStream followup=new NativeStream(listener);
+                    toolReasoningPasses=1;
+                    String nextSystem=systemText+"\n"+calculation.reference();
+                    byte[] interpretedBytes=nativeGenerate(nextSystem.getBytes(StandardCharsets.UTF_8),roles,content,
+                        outputBudget,contextBudget,followup,references.toArray(new byte[0][]));
+                    resourceGuard.check();
+                    if(request.isCancelled())throw new InterruptedException("user_cancelled");
+                    toolPieces=followup.pieces;
+                    if(interpretedBytes!=null&&interpretedBytes.length>0){
+                        String answer=followup.output.finish(interpretedBytes);
+                        if(!answer.isBlank()&&AssistantStructured.singleBlock(answer,AssistantCalculator.FENCE)==null){
+                            result=answer;interpreted=true;
+                        }
+                    }
+                    if(!interpreted)result+="\n\nThe arithmetic result below is verified; the follow-up interpretation was not completed.";
+                }
+                result+=calculation.render();
+            }
             long answerReady=System.nanoTime();
             if(stream.firstVisibleNanos==0)stream.firstVisibleNanos=answerReady;
             OnDeviceModelResources after=new OnDeviceModelResources(context);
@@ -432,7 +459,10 @@ final class OnDeviceLlm {
                 .put("prompt_tokens",stream.promptTokens)
                 .put("omitted_messages",stream.omittedMessages)
                 .put("omitted_reference_blocks",stream.omittedReferences)
-                .put("generated_token_pieces",stream.pieces)
+                .put("generated_token_pieces",stream.pieces+toolPieces)
+                .put("local_calculator_executed",calculation!=null&&calculation.ok())
+                .put("tool_reasoning_passes",toolReasoningPasses)
+                .put("tool_result_interpreted",interpreted)
                 .put("request_to_first_visible_ms",(stream.firstVisibleNanos-requestStarted)/1_000_000)
                 .put("request_total_ms",(answerReady-requestStarted)/1_000_000)
                 .put("request_to_first_piece_ms",(stream.firstPieceNanos-requestStarted)/1_000_000)
