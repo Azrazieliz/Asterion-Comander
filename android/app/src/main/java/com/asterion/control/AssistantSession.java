@@ -37,6 +37,7 @@ final class AssistantSession {
         InferenceGate.Request request=new InferenceGate.Request();
         activeRequest=request;
         String project=target.project;
+        AssistantResearchSelection research=target.researchSelection;
         java.util.List<AssistantConversation.Message> messages=target.modelMessages();
         status="Preparing local model";save(app);changed();
         work.execute(()->{
@@ -57,7 +58,7 @@ final class AssistantSession {
                         if(now-lastNotification<70)return;lastNotification=now;
                         main.post(()->{if(target.update(generation,text,"running"))changed();});
                     }
-                },request);
+                },request,research);
                 main.post(()->{
                     if(activeRequest!=request)return;
                     activeRequest=null;
@@ -73,6 +74,7 @@ final class AssistantSession {
                     status=request.isCancelled()?"Stopped":
                         "android_memory_pressure".equals(reason)?"Stopped because Android reported memory pressure. Partial response retained.":
                         "android_thermal_pressure".equals(reason)?"Stopped because Android reported severe thermal pressure. Partial response retained.":
+                        reason!=null&&reason.startsWith("selected_research_source")?"A selected research capture is missing or changed. Reopen the research board to review the selection.":
                         "The local model could not finish. Your message is retained; you can retry.";
                     save(app);changed();
                 });
