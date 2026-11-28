@@ -66,7 +66,9 @@ final class OnDeviceAiJobs {
             .put("finished_at_ms",job.finishedAt)
             .put("retry_safe",false);
         if("completed".equals(job.state))
-            obj.put("text",job.result).put("characters",job.result.length());
+            obj.put("text",job.result).put("characters",job.result.length())
+                .put("finish_reason",job.request.finishReason())
+                .put("answer_complete","end_of_generation".equals(job.request.finishReason()));
         if("failed".equals(job.state))obj.put("error_type",job.error);
         return obj;
     }
@@ -74,7 +76,8 @@ final class OnDeviceAiJobs {
         JSONObject receipt=new JSONObject().put("request_id",job.id)
             .put("prompt_sha256",job.sha).put("state",job.state)
             .put("requested_at_ms",job.requestedAt)
-            .put("finished_at_ms",job.finishedAt);
+            .put("finished_at_ms",job.finishedAt)
+            .put("finish_reason",job.request.finishReason());
         if(!store(ctx).edit().putString(job.id,receipt.toString()).commit())
             throw new IllegalStateException("Durable native inference receipt write failed");
     }
@@ -88,6 +91,8 @@ final class OnDeviceAiJobs {
         return new JSONObject().put("request_id",id)
             .put("state",effective).put("engine","on_device_llama_cpp")
             .put("durable",true).put("result_in_memory",false)
+            .put("finish_reason",receipt.optString("finish_reason","unknown"))
+            .put("answer_complete","completed".equals(effective)&&"end_of_generation".equals(receipt.optString("finish_reason")))
             .put("reason","completed".equals(effective)?"result_not_retained_after_process_restart":
                 "previous_process_outcome_unavailable")
             .put("retry_safe",false);
