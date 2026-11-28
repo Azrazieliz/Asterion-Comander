@@ -29,23 +29,29 @@ final class AssistantSession {
         try{ControlAssistantMemory.saveConversation(c,conversation);persistenceIssue="";}
         catch(Exception failure){persistenceIssue="History could not be saved. Keep this conversation open.";}
     }
-    void send(Context context,String prompt){send(context,prompt,"");}
-    void sendVoice(Context context,String prompt,String locale){send(context,prompt,VoiceReplyPolicy.canonicalLocale(locale));}
-    private void send(Context context,String prompt,String responseLocale){
+    void send(Context context,String prompt){send(context,prompt,"",null);}
+    void sendVoice(Context context,String prompt,String locale){send(context,prompt,VoiceReplyPolicy.canonicalLocale(locale),null);}
+    void sendImage(Context context,String prompt,android.net.Uri uri){
+        if(uri==null||!"content".equals(uri.getScheme()))throw new IllegalArgumentException("document_provider_required");
+        send(context,prompt,"",uri);
+    }
+    private void send(Context context,String prompt,String responseLocale,android.net.Uri image){
         if(busy())return;
         Context app=context.getApplicationContext();
         final AssistantConversation target=conversation;
         long generation=target.begin(prompt);
+        AssistantConversation.Message response=target.messages.get(target.messages.size()-1);
+        response.visual=image!=null;
         InferenceGate.Request request=new InferenceGate.Request();
         activeRequest=request;
         String project=target.project;
         AssistantResearchSelection research=target.researchSelection;
         java.util.List<AssistantConversation.Message> messages=target.modelMessages();
-        status="Preparing local model";save(app);changed();
+        status=image==null?"Preparing local model":"Preparing local visual model";save(app);changed();
         work.execute(()->{
             String[] finalText={""};
             try{
-                String answer=OnDeviceLlm.generate(app,project,messages,new OnDeviceLlm.Stream(){
+                OnDeviceLlm.Stream listener=new OnDeviceLlm.Stream(){
                     public void context(int tokens,int omitted,int dropped){main.post(()->{
                         if(activeRequest!=request || !target.running() || target.revision!=generation)return;
                         target.messages.get(target.messages.size()-1).omittedContextMessages=omitted;
@@ -60,15 +66,19 @@ final class AssistantSession {
                         if(now-lastNotification<70)return;lastNotification=now;
                         main.post(()->{if(target.update(generation,text,"running"))changed();});
                     }
-                },request,research,responseLocale);
+                };
+                OnDeviceLlm.VisualAnswer visual=image==null?null:OnDeviceLlm.generateImage(app,image,prompt,listener,request);
+                String answer=image==null?OnDeviceLlm.generate(app,project,messages,listener,request,research,responseLocale):visual.text;
                 main.post(()->{
                     if(activeRequest!=request)return;
                     activeRequest=null;
                     String reason=request.finishReason();
                     String terminal=request.isCancelled()?"cancelled":
                         "end_of_generation".equals(reason)?"completed":"truncated";
+                    if(visual!=null)response.visualEvidence=visual.evidence;
                     target.update(generation,answer,terminal);
-                    status=request.isCancelled()?"Stopped":"length_limit".equals(reason)?
+                    status=request.isCancelled()?"Stopped":image!=null&&!"completed".equals(terminal)?
+                        "Visual answer incomplete. Reattach the image to analyze it again.":"length_limit".equals(reason)?
                         "Output limit reached. Continue to extend the retained answer.":
                         "unknown".equals(reason)?"Answer end was not confirmed. Continue or retry.":"";
                     save(app);changed();
@@ -82,6 +92,7 @@ final class AssistantSession {
                     status=request.isCancelled()?"Stopped":
                         "android_memory_pressure".equals(reason)?"Stopped because Android reported memory pressure. Partial response retained.":
                         "android_thermal_pressure".equals(reason)?"Stopped because Android reported severe thermal pressure. Partial response retained.":
+                        image!=null?"Image analysis did not complete. Check signed visual files, image size and available memory; reattach the image to retry.":
                         reason!=null&&reason.startsWith("selected_research_source")?"A selected research capture is missing or changed. Reopen the research board to review the selection.":
                         "The local model could not finish. Your message is retained; you can retry.";
                     save(app);changed();
@@ -90,7 +101,7 @@ final class AssistantSession {
         });
     }
     private boolean canOperate(AssistantConversation owner,AssistantConversation.Message message){
-        return !busy()&&conversation==owner&&owner.messages.contains(message)&&message.role.equals("assistant")&&message.state.equals("completed");
+        return !busy()&&conversation==owner&&owner.messages.contains(message)&&message.role.equals("assistant")&&message.state.equals("completed")&&!message.visual;
     }
     void authorize(Context context,AssistantConversation owner,AssistantConversation.Message message,JSONObject proposal){
         if(!canOperate(owner,message)||message.actionRecord!=null)return;
@@ -166,7 +177,9 @@ final class AssistantSession {
             main.post(()->{actionBusy=false;status=report;changed();});
         });
     }
-    void importModel(Context context,java.util.List<android.net.Uri> documents,boolean adapter){
+    void importModel(Context context,java.util.List<android.net.Uri> documents,boolean adapter){importModel(context,documents,adapter,false);}
+    void importVisionModel(Context context,java.util.List<android.net.Uri> documents,boolean projector){importModel(context,documents,projector,true);}
+    private void importModel(Context context,java.util.List<android.net.Uri> documents,boolean adapter,boolean vision){
         if(busy())return;
         Context app=context.getApplicationContext();
         InferenceGate.Request request=new InferenceGate.Request();
@@ -174,14 +187,22 @@ final class AssistantSession {
         work.execute(()->{
             String result;
             try{
-                OnDeviceModelProfile profile=OnDeviceModelProfile.read(app);
-                long total=adapter?profile.adapterBytes:profile.bytes;
-                OnDeviceLlm.importOwnerModelArtifact(app,documents,adapter,request,received->main.post(()->{
+                long total;
+                if(vision){
+                    OnDeviceVisionProfile profile=OnDeviceVisionProfile.read(app);
+                    total=(adapter?profile.projector:profile.base).bytes;
+                }else{
+                    OnDeviceModelProfile profile=OnDeviceModelProfile.read(app);
+                    total=adapter?profile.adapterBytes:profile.bytes;
+                }
+                java.util.function.LongConsumer progress=received->main.post(()->{
                     if(modelImportRequest!=request||request.isCancelled())return;
-                    status="Verifying "+(adapter?"adapter":"model")+" · "+(received*100/total)+"%";
+                    status="Verifying "+(vision?(adapter?"projector":"visual model"):(adapter?"adapter":"model"))+" · "+(received*100/total)+"%";
                     changed();
-                }));
-                result=(adapter?"Adapter":"Model")+" imported and SHA-256 verified. Other required files must also be present before inference.";
+                });
+                if(vision)OnDeviceLlm.importVisionArtifact(app,documents,adapter,request,progress);
+                else OnDeviceLlm.importOwnerModelArtifact(app,documents,adapter,request,progress);
+                result=(vision?(adapter?"Visual projector":"Visual model"):(adapter?"Adapter":"Model"))+" imported and SHA-256 verified. Other required files must also be present before inference.";
             }catch(InterruptedException stopped){result="Model import cancelled; previous files retained.";}
             catch(Exception|LinkageError failure){
                 result="Model import did not complete. Check the signed profile, exact file identity and available storage.";

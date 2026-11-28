@@ -14,6 +14,9 @@
 #include "llama.h"
 #include "context_pack.h"
 #include "ggml-backend.h"
+#ifdef ASTERION_VISION
+#include "native_vision.h"
+#endif
 
 static std::mutex guard;
 static llama_model *model=nullptr;
@@ -346,4 +349,60 @@ extern "C" JNIEXPORT jbyteArray JNICALL Java_com_asterion_control_OnDeviceLlm_na
     jbyteArray bytes=env->NewByteArray(answer.size());
     if(bytes)env->SetByteArrayRegion(bytes,0,answer.size(),reinterpret_cast<const jbyte *>(answer.data()));
     return bytes;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL Java_com_asterion_control_OnDeviceLlm_nativeVisionAvailable(JNIEnv *,jclass){
+#ifdef ASTERION_VISION
+    return JNI_TRUE;
+#else
+    return JNI_FALSE;
+#endif
+}
+extern "C" JNIEXPORT jbyteArray JNICALL Java_com_asterion_control_OnDeviceLlm_nativeAnalyzeImage(
+    JNIEnv *env,jclass,jstring jmodel,jstring jprojector,jint width,jint height,jbyteArray jrgb,
+    jbyteArray jquestion,jint context,jint limit,jint threads,jobject stream){
+#ifdef ASTERION_VISION
+    if(!jmodel||!jprojector||!jrgb||!jquestion||!stream||
+        width<1||height<1||width>1024||height>1024||env->GetArrayLength(jrgb)!=width*height*3)return nullptr;
+    std::lock_guard<std::mutex> lock(guard);
+    if(model||cancel_generation.load())return nullptr;
+    init_runtime();
+    const char *m=env->GetStringUTFChars(jmodel,nullptr);
+    if(!m)return nullptr;
+    std::string path(m);env->ReleaseStringUTFChars(jmodel,m);
+    const char *p=env->GetStringUTFChars(jprojector,nullptr);
+    if(!p)return nullptr;
+    std::string projection(p);env->ReleaseStringUTFChars(jprojector,p);
+    std::string question;if(!read_utf8(env,jquestion,question))return nullptr;
+    std::vector<uint8_t> rgb(width*height*3);
+    env->GetByteArrayRegion(jrgb,0,rgb.size(),reinterpret_cast<jbyte*>(rgb.data()));
+    jclass cls=env->GetObjectClass(stream);
+    jmethodID started=env->GetMethodID(cls,"onStart","(ZIII)V"),token=env->GetMethodID(cls,"onToken","([B)V"),
+        finished=env->GetMethodID(cls,"onFinish","(ZI)V");
+    env->DeleteLocalRef(cls);
+    if(!started||!token||!finished||env->ExceptionCheck())return nullptr;
+    VisionResult result;std::string error;
+    try{
+        bool ok=run_native_vision(path,projection,width,height,rgb,question,context,limit,threads,
+            [](){return cancel_generation.load();},
+            [&](int tokens){
+                env->CallVoidMethod(stream,started,JNI_FALSE,static_cast<jint>(tokens),0,0);
+                return !env->ExceptionCheck();
+            },
+            [&](const char *bytes,int n){
+                jbyteArray data=env->NewByteArray(n);if(!data)return false;
+                env->SetByteArrayRegion(data,0,n,reinterpret_cast<const jbyte*>(bytes));
+                env->CallVoidMethod(stream,token,data);env->DeleteLocalRef(data);
+                return !env->ExceptionCheck();
+            },result,error);
+        if(!ok||cancel_generation.load())return nullptr;
+        env->CallVoidMethod(stream,finished,static_cast<jboolean>(result.end_of_generation),static_cast<jint>(result.generated_tokens));
+        if(env->ExceptionCheck())return nullptr;
+        jbyteArray answer=env->NewByteArray(result.text.size());
+        if(answer)env->SetByteArrayRegion(answer,0,result.text.size(),reinterpret_cast<const jbyte*>(result.text.data()));
+        return answer;
+    }catch(...){return nullptr;}
+#else
+    return nullptr;
+#endif
 }

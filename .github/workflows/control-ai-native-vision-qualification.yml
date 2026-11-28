@@ -1,0 +1,108 @@
+name: Control native vision pixel qualification
+on:
+  push:
+    branches: [ai-candidate/native-vision-20261128]
+    paths: ['.github/workflows/control-ai-native-vision-qualification.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  HF_HUB_DISABLE_IMPLICIT_TOKEN: '1'
+  HF_HUB_DISABLE_TELEMETRY: '1'
+jobs:
+  visual-inference:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          ref: 4b77dee0524c64b8471869232e2958bd9589607d
+          path: runtime
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Pin licensed visual model inventory and verify exact actual weights
+        run: |
+          python -m pip install huggingface-hub==0.34.4
+          mkdir -p evidence
+          python - <<'PY'
+          from huggingface_hub import HfApi,hf_hub_download
+          from pathlib import Path
+          import hashlib,json
+          repo="ggml-org/SmolVLM2-500M-Video-Instruct-GGUF"
+          api=HfApi(token=False)
+          revision=api.model_info(repo).sha
+          assert len(revision)==40
+          info=api.model_info(repo,revision=revision,files_metadata=True)
+          assert info.sha==revision and (info.card_data or {}).get("license")=="apache-2.0"
+          models=[x for x in info.siblings if x.rfilename.lower().endswith("q8_0.gguf") and "mmproj" not in x.rfilename.lower()]
+          projectors=[x for x in info.siblings if "mmproj" in x.rfilename.lower() and x.rfilename.lower().endswith("f16.gguf")]
+          if len(projectors)==0:
+              projectors=[x for x in info.siblings if "mmproj" in x.rfilename.lower() and x.rfilename.lower().endswith(".gguf")]
+          assert len(models)==1 and len(projectors)==1, [x.rfilename for x in info.siblings]
+          def fetch(entry):
+              assert entry.size and entry.lfs and entry.lfs.sha256 and "/" not in entry.rfilename
+              p=Path(hf_hub_download(repo,entry.rfilename,revision=revision,token=False,local_dir="vision"))
+              with p.open("rb") as f:actual=hashlib.file_digest(f,"sha256").hexdigest()
+              assert actual==entry.lfs.sha256 and p.stat().st_size==entry.size
+              return {"file":p.name,"bytes":p.stat().st_size,"sha256":actual}
+          base,projection=fetch(models[0]),fetch(projectors[0])
+          projection["base_sha256"]=base["sha256"]
+          profile={"schema_version":1,"distribution":"owner_import","source":repo+"@"+revision,
+              "base":base,"projector":projection,"context_tokens":2048,"max_new_tokens":384,
+              "workspace_bytes":768<<20,"max_image_side":1024}
+          Path("evidence/control-vision.candidate.json").write_text(json.dumps(profile,indent=2)+"\n")
+          Path("evidence/vision-lineage.json").write_text(json.dumps({"repository":repo,"revision":revision,"license":"apache-2.0","profile":profile,"production_promoted":False},indent=2)+"\n")
+          # Original synthetic image fixtures; test the same question against distinct pixels.
+          for name,color,shape in (("red-square",(220,20,20),"square"),("blue-circle",(20,60,220),"circle")):
+              rgb=bytearray()
+              for y in range(384):
+                  for x in range(384):
+                      inside=(92<=x<292 and 92<=y<292) if shape=="square" else (x-192)**2+(y-192)**2<=100**2
+                      rgb.extend(color if inside else (255,255,255))
+              Path("evidence/"+name+".rgb").write_bytes(rgb)
+          PY
+      - name: Compile the same native vision core used by Android
+        run: |
+          cmake -S android/app/src/main/cpp -B host-vision -G Ninja -DCMAKE_BUILD_TYPE=Release -DLLAMA_SOURCE_DIR="$PWD/runtime" -DGGML_VULKAN=OFF -DASTERION_BUILD_VISION_PROBE=ON
+          cmake --build host-vision --target asterion_vision_probe asterion_llm -j 4
+      - name: Execute actual image embeddings and answer each image independently
+        timeout-minutes: 15
+        run: |
+          MODEL="$(python -c 'import json;print(json.load(open("evidence/control-vision.candidate.json"))["base"]["file"])')"
+          PROJ="$(python -c 'import json;print(json.load(open("evidence/control-vision.candidate.json"))["projector"]["file"])')"
+          for fixture in red-square blue-circle; do
+            /usr/bin/time -v -o "evidence/$fixture.resources" host-vision/asterion_vision_probe "vision/$MODEL" "vision/$PROJ" 384 384 "evidence/$fixture.rgb" 'What is the color and shape of the object in this image? Answer in one short sentence.' > "evidence/$fixture.txt" 2> "evidence/$fixture.log"
+            test -s "evidence/$fixture.txt"
+          done
+          python - <<'PY'
+          from pathlib import Path
+          import json,re,hashlib
+          p=Path("evidence")
+          rows=[]
+          for name,color,shape in (("red-square","red","square"),("blue-circle","blue","circle")):
+              raw=(p/(name+".txt")).read_text()
+              rows.append({"fixture":name,"decoded_rgb_sha256":hashlib.sha256((p/(name+".rgb")).read_bytes()).hexdigest(),"answer":raw,"expected_color":color,"expected_shape":shape,"matches_both":color in raw.lower() and shape in raw.lower(),"peak_rss_kib":int(re.search(r"Maximum resident set size \(kbytes\):\s*(\d+)",(p/(name+".resources")).read_text()).group(1))})
+          report={"native_pixel_inference_executed":True,"cases":rows,"distinct_outputs":rows[0]["answer"]!=rows[1]["answer"],"production_promoted":False,"physical_phone_verified":False,"broad_visual_accuracy_certified":False}
+          (p/"vision-evaluation.json").write_text(json.dumps(report,indent=2)+"\n")
+          print(json.dumps(report,indent=2))
+          assert report["distinct_outputs"] and all(x["matches_both"] for x in rows)
+          PY
+      - name: Retain exact visual evidence, not multi-gigabyte weights or APK
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: control-native-vision-evidence
+          retention-days: 30
+          path: evidence/
+          if-no-files-found: warn
