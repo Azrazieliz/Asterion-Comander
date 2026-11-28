@@ -230,8 +230,14 @@ final class ControlAssistantMemory {
                     .put("submission",record.submission).put("observation",record.observation).put("data",record.data));
                 messages.put(entry);
             }
-            byte[] plain=new JSONObject().put("title",conversation.title).put("project",conversation.project)
-                .put("messages",messages).toString().getBytes(StandardCharsets.UTF_8);
+            JSONObject record=new JSONObject().put("title",conversation.title).put("project",conversation.project)
+                .put("messages",messages);
+            if(conversation.researchSelection!=null&&BrowserResearchText.PROJECT.equals(conversation.project)){
+                AssistantResearchSelection selection=conversation.researchSelection;
+                record.put("research_selection",new JSONObject().put("term",selection.term)
+                    .put("ids",new JSONArray(selection.ids)).put("digests",new JSONArray(selection.digests)));
+            }
+            byte[] plain=record.toString().getBytes(StandardCharsets.UTF_8);
             if(plain.length>1_000_000)throw new IllegalStateException("conversation_storage_budget_exceeded");
             Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(Cipher.ENCRYPT_MODE,key());
@@ -258,6 +264,17 @@ final class ControlAssistantMemory {
                 JSONObject saved=new JSONObject(new String(cipher.doFinal(cursor.getBlob(1)),StandardCharsets.UTF_8));
                 AssistantConversation out=new AssistantConversation(id);
                 out.title=saved.getString("title");out.project=saved.getString("project");
+                JSONObject selection=saved.optJSONObject("research_selection");
+                if(selection!=null&&BrowserResearchText.PROJECT.equals(out.project)){
+                    ArrayList<String> ids=new ArrayList<>(),digests=new ArrayList<>();
+                    JSONArray sourceIds=selection.getJSONArray("ids"),sourceDigests=selection.getJSONArray("digests");
+                    if(sourceIds.length()>4||sourceDigests.length()!=sourceIds.length())
+                        throw new IllegalStateException("stored_research_selection_invalid");
+                    for(int i=0;i<sourceIds.length();i++){
+                        ids.add(sourceIds.getString(i));digests.add(sourceDigests.getString(i));
+                    }
+                    out.researchSelection=new AssistantResearchSelection(selection.getString("term"),ids,digests);
+                }
                 JSONArray messages=saved.getJSONArray("messages");
                 for(int i=0;i<messages.length();i++){
                     JSONObject m=messages.getJSONObject(i);
