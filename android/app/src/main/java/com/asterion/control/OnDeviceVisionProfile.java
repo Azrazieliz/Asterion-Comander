@@ -40,7 +40,12 @@ final class OnDeviceVisionProfile {
         try(InputStream in=c.getAssets().open("models/control-vision.json")){
             byte[] raw=in.readNBytes(16385);
             if(raw.length==0||raw.length>16384)throw new IllegalArgumentException("invalid_vision_manifest");
-            return new OnDeviceVisionProfile(new JSONObject(new String(raw,StandardCharsets.UTF_8)));
+            OnDeviceVisionProfile visual=new OnDeviceVisionProfile(new JSONObject(new String(raw,StandardCharsets.UTF_8)));
+            OnDeviceModelProfile text=OnDeviceModelProfile.read(c);
+            if(visual.base.file.equals(text.file)||visual.projector.file.equals(text.file)||
+               visual.base.file.equals(text.adapterFile)||visual.projector.file.equals(text.adapterFile))
+                throw new IllegalArgumentException("visual_text_artifact_collision");
+            return visual;
         }
     }
 }
