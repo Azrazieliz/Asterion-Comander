@@ -328,13 +328,17 @@ final class OnDeviceLlm {
         if(userPrompt==null||userPrompt.isBlank()||userPrompt.length()>profile.inputChars)
             throw new IllegalArgumentException("prompt_length_invalid");
         GATE.begin(request);
+        InferenceResourceGuard resourceGuard=null;
         try{
             if(!LIBRARY_LOADED)throw new IllegalStateException("native_library_missing");
             long requestStarted=System.nanoTime();
             boolean warm=modelReady;
             int outputBudget=ControlAssistantPreferences.outputTokens(context,profile);
             new OnDeviceModelResources(context).contextTokens(profile,outputBudget,modelReady);
-            if(!ensureLoaded(context,request))throw new IllegalStateException(lastFailure);
+            resourceGuard=new InferenceResourceGuard(context,GATE,request);
+            boolean loaded=ensureLoaded(context,request);
+            resourceGuard.check();
+            if(!loaded)throw new IllegalStateException(lastFailure);
             if(request.isCancelled())throw new InterruptedException("user_cancelled");
             String recalled;
             try{recalled=ControlAssistantMemory.relevant(context,userPrompt,project);}
@@ -405,6 +409,7 @@ final class OnDeviceLlm {
             long inferenceStarted=System.nanoTime();
             byte[] output=nativeGenerate(systemText.getBytes(StandardCharsets.UTF_8),roles,content,
                 outputBudget,contextBudget,stream,references.toArray(new byte[0][]));
+            resourceGuard.check();
             if(request.isCancelled())throw new InterruptedException("user_cancelled");
             if(output==null||output.length==0)throw new IllegalStateException("native_context_or_generation_failed");
             String result=stream.output.finish(output);
@@ -439,6 +444,16 @@ final class OnDeviceLlm {
                 .put("thermal_before",resources.thermalStatus)
                 .put("thermal_after",after.thermalStatus);
             return result;
-        }finally{GATE.end(request);}
+        }finally{
+            try{
+                if(resourceGuard!=null){
+                    resourceGuard.close();
+                    if(!resourceGuard.failure().isEmpty()){
+                        lastFailure=resourceGuard.failure();
+                        synchronized(LOCK){modelReady=false;nativeUnload();cachedBackendReport=null;}
+                    }
+                }
+            }finally{GATE.end(request);}
+        }
     }
 }
