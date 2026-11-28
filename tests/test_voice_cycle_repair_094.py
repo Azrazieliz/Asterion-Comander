@@ -14,7 +14,7 @@ def test_speaker_test_uses_offline_then_system_recognizer():
     assert 'beginRecognition(locale,id,false)' in voice
     assert 'recognizer_backend' in voice
     assert 'speakerPlaybackCompleted=true' in voice
-    assert 'speakNow(prompt,"en-US",id)' in voice
+    assert 'speakNow(prompt,locale,id)' in voice
 
 def test_android_cycle_runner_is_disabled():
     main=read("MainActivity.java")
@@ -41,3 +41,17 @@ def test_native_mcp_reports_real_package_version():
     mcp=read("AndroidMcp.java")
     assert 'getPackageInfo(owner.getPackageName(),0).versionName' in mcp
     assert '.put("version","0.9.2")' not in mcp
+
+
+def test_multilingual_speech_uses_same_engine_and_preserves_encrypted_pending_locale():
+    voice=read("VoiceDialogueService.java")
+    assert 'beginRecognition(VoiceLanguageSettings.locale(this),id,offline)' in voice
+    assert 'VoiceReplyPolicy.canonicalLocale(locale)' in voice
+    assert 'PendingVoiceStore.save(this,parsed.command,pendingSpeechLocale)' in voice
+    assert 'pendingSpeechLocale=PendingVoiceStore.restoreLocale(this)' in voice
+    assert 'sayOnly(spoken,responseLocale)' in voice
+    assert 'nativeAssistant.submit(this,spoken,responseLocale' in voice
+    assert 'cipher.updateAAD(("voice-language-v2:"+language)' in read("PendingVoiceStore.java")
+    assert 'session.sendVoice(context,text,locale)' in read("VoiceNativeAssistant.java")
+    assert 'This is a spoken turn recognized in ' in read("OnDeviceLlm.java")
+    assert 'RecognizerIntent.EXTRA_LANGUAGE,VoiceLanguageSettings.locale(this)' in read("AssistantActivity.java")
