@@ -227,7 +227,7 @@ final class ControlAssistantMemory {
                 AssistantActionRecord record=m.actionRecord;
                 if(record!=null)entry.put("action_receipt",new JSONObject().put("id",record.requestId)
                     .put("package",record.appPackage).put("action",record.action)
-                    .put("submission",record.submission).put("observation",record.observation));
+                    .put("submission",record.submission).put("observation",record.observation).put("data",record.data));
                 messages.put(entry);
             }
             byte[] plain=new JSONObject().put("title",conversation.title).put("project",conversation.project)
@@ -268,7 +268,7 @@ final class ControlAssistantMemory {
                     JSONObject receipt=m.optJSONObject("action_receipt");
                     if(receipt!=null)out.messages.get(out.messages.size()-1).actionRecord=new AssistantActionRecord(
                         receipt.getString("id"),receipt.getString("package"),receipt.getString("action"),
-                        receipt.getString("submission"),receipt.getString("observation"));
+                        receipt.getString("submission"),receipt.getString("observation"),receipt.optString("data",""));
                 }
                 out.recover();return out;
             }finally{helper.close();}

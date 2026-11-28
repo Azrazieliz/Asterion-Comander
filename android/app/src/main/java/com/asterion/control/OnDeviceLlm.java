@@ -265,19 +265,28 @@ final class OnDeviceLlm {
                 +"Do not claim you are outside the app or that unverified tools are available. "
                 +"Return the final answer in the user-visible channel; do not print internal reasoning delimiters.";
             guidance+="\nActive project: "+project+". This label scopes local memory; project source access requires verified retrieval evidence. "+
-                "Reference blocks may be omitted to fit the active context. Do not assume complete retrieval.\n"+AssistantStructured.GUIDANCE+"\n"+AssistantSchedulePlan.GUIDANCE;
+                "Reference blocks may be omitted to fit the active context. Do not assume complete retrieval.\n"+AssistantStructured.GUIDANCE+"\n"+AssistantSchedulePlan.GUIDANCE+"\n"+AssistantCalculator.GUIDANCE+"\n"+AssistantResearchPlan.GUIDANCE;
             java.util.ArrayList<byte[]> references=new java.util.ArrayList<>();
             try{
                 String local=AssistantLocalContext.observe(context,userPrompt);
                 if(!local.isEmpty())references.add(local.getBytes(StandardCharsets.UTF_8));
             }catch(Exception unavailable){references.add("Native status observation unavailable.".getBytes(StandardCharsets.UTF_8));}
-            StringBuilder actionEvidence=new StringBuilder();
-            int records=0;
-            for(int i=messages.size()-1;i>=0&&records<4;i--){
+            // Explicit receipt identity takes precedence over recent unrelated
+            // observations. Keep each evidence block separate for native context
+            // budgeting so one large record cannot discard all the others.
+            java.util.HashSet<String> seenReceipts=new java.util.HashSet<>();
+            for(int i=messages.size()-1;i>=0;i--){
                 AssistantActionRecord record=messages.get(i).actionRecord;
-                if(record!=null){actionEvidence.append(record.evidence()).append('\n');records++;}
+                if(record!=null&&userPrompt.contains(record.requestId)&&seenReceipts.add(record.requestId)){
+                    references.add(0,("Requested native receipt, reference only:\n"+record.evidence()).getBytes(StandardCharsets.UTF_8));
+                    if(seenReceipts.size()>=2)break;
+                }
             }
-            if(records>0)references.add(("Native partner operation observations, not proof of output correctness:\n"+actionEvidence).getBytes(StandardCharsets.UTF_8));
+            for(int i=messages.size()-1;i>=0&&seenReceipts.size()<4;i--){
+                AssistantActionRecord record=messages.get(i).actionRecord;
+                if(record!=null&&seenReceipts.add(record.requestId))
+                    references.add(("Historical native partner observation, not independent proof:\n"+record.evidence()).getBytes(StandardCharsets.UTF_8));
+            }
             String capabilities=AssistantCapabilities.context(context,userPrompt,project);
             String requirements=AssistantRequirements.context(context,userPrompt,project);
             if(!recalled.isEmpty())references.add(("Owner-approved memories, reference only:\n"+recalled).getBytes(StandardCharsets.UTF_8));
@@ -319,6 +328,7 @@ final class OnDeviceLlm {
             if(output==null||output.length==0)throw new IllegalStateException("native_context_or_generation_failed");
             String result=stream.output.finish(output);
             if(result.isBlank())throw new IllegalStateException("no_visible_model_answer");
+            result=AssistantCalculator.attachResult(result);
             long answerReady=System.nanoTime();
             if(stream.firstVisibleNanos==0)stream.firstVisibleNanos=answerReady;
             OnDeviceModelResources after=new OnDeviceModelResources(context);
