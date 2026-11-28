@@ -4,6 +4,7 @@ on:
     branches:
       - work/control-non-ai-native-voice-20261126
       - 'work/control-non-ai-voice-lifecycle-*'
+      - ai-candidate/multilingual-native-voice-20261128
     paths:
       - 'android/app/src/main/java/com/asterion/control/*Voice*.java'
       - 'android/app/src/main/java/com/asterion/control/MainActivity.java'
